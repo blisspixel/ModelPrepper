@@ -58,6 +58,20 @@ fn db(error: rusqlite::Error) -> Error {
 
 /// Absolute paths are relative to the configuration file, never the caller's cwd.
 pub fn locate(config: &Config, config_file: &Path) -> Result<Config> {
+    // Verbatim Windows PathBuf joins normalize dots, so inspect input first.
+    for path in std::iter::once(&config.catalog_path).chain(config.volumes.iter().map(|v| &v.path))
+    {
+        if path
+            .to_string_lossy()
+            .split(['/', '\\'])
+            .any(|part| matches!(part, "." | ".."))
+        {
+            return Err(Error::new(
+                "unsafe_vault_path",
+                "vault paths cannot contain dot segments",
+            ));
+        }
+    }
     let config_file = fs::canonicalize(config_file).map_err(io)?;
     let base = config_file
         .parent()

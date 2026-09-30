@@ -19,6 +19,8 @@ cargo run --locked --release -- status --config config.local.toml
 
 The generator refuses to overwrite its output. Catalog and volume paths resolve relative to the config file, even from another working directory. Absolute paths are supported.
 
+On macOS, some system paths such as /var and /tmp are symlink aliases. Relative paths resolve against the canonical config location. For explicit absolute paths, use the real filesystem location; ownership checks reject symlink ancestors.
+
 Use a local catalog filesystem and separate storage directories. First initialization adopts empty directories; existing collection import is a future explicit operation. The identity marker connects each storage directory to this vault.
 
 Storage/transfer limits are configuration, not preallocated space. Init stays offline even with configured watches. Status reports free bytes for a matching mounted volume; future job accounting is not implemented yet.

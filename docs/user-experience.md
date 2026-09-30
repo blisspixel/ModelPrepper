@@ -58,7 +58,7 @@ Keep evidence that outlives the originating service and the application.
 - Reconstruct inventory from manifests after catalog loss. Invalid, conflicting, and unknown-version manifests must be visible rather than silently accepted.
 - Treat cold storage as normal: record a disk's contents while it is unplugged, request the correct disk by identity, and never write to an empty mount path as a substitute.
 - Offer replica health and failure-domain information. Two folders on one physical disk are not equivalent to two independent storage devices.
-- Consider BagIt-compatible exports and content-addressed references after native manifests stabilize. Adopt interoperable standards where they improve independent inspection; do not add a required archival framework to the runtime.
+- Consider [BagIt-compatible exports](https://www.rfc-editor.org/rfc/rfc8493) and content-addressed references after native manifests stabilize. Adopt interoperable standards where they improve independent inspection; do not add a required archival framework to the runtime.
 
 Acceptance: another person can inspect a bundle with ordinary filesystem tools, verify its checksums, identify omissions, and reconstruct a collection with the hub unreachable and the original catalog removed.
 

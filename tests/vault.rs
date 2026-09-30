@@ -9,7 +9,9 @@ use tempfile::TempDir;
 
 fn configured() -> (TempDir, Config) {
     let dir = TempDir::new().unwrap();
-    let config = Config::default_for(dir.path().join("catalog"), dir.path().join("models"));
+    // macOS temporary paths can contain the OS-owned /var symlink.
+    let root = fs::canonicalize(dir.path()).unwrap();
+    let config = Config::default_for(root.join("catalog"), root.join("models"));
     (dir, config)
 }
 
@@ -56,6 +58,18 @@ fn config_relative_paths_are_resolved_against_the_config_file() {
     );
     assert_eq!(initialize(&located).unwrap().state, "ready");
     assert!(locate(&config, &dir.path().join("missing.toml")).is_err());
+    let mut dotted = config.clone();
+    dotted.volumes[0].path = "../models".into();
+    assert_eq!(
+        locate(&dotted, &file).unwrap_err().code,
+        "unsafe_vault_path"
+    );
+    dotted = config.clone();
+    dotted.catalog_path = "./catalog".into();
+    assert_eq!(
+        locate(&dotted, &file).unwrap_err().code,
+        "unsafe_vault_path"
+    );
     assert_eq!(initialize(&config).unwrap_err().code, "unsafe_vault_path");
 }
 
@@ -70,9 +84,11 @@ fn empty_setup_never_adopts_user_data_or_overlapping_paths() {
         initialize(&invalid).unwrap_err().code,
         "overlapping_vault_paths"
     );
-    invalid.volumes[0].path = config.volumes[0].path.join("../models");
+    invalid.volumes[0].path =
+        std::path::PathBuf::from(format!("{}/../models", config.volumes[0].path.display()));
     assert_eq!(initialize(&invalid).unwrap_err().code, "unsafe_vault_path");
-    invalid.volumes[0].path = config.volumes[0].path.join("./models");
+    invalid.volumes[0].path =
+        std::path::PathBuf::from(format!("{}/./models", config.volumes[0].path.display()));
     assert_eq!(initialize(&invalid).unwrap_err().code, "unsafe_vault_path");
     fs::create_dir(&config.volumes[0].path).unwrap();
     let valuable = config.volumes[0].path.join("keep.txt");
@@ -144,7 +160,7 @@ fn preflights_all_volumes_before_writing_any_markers_on_recovery() {
     let (dir, mut config) = configured();
     config.volumes.push(Volume {
         label: "backup".into(),
-        path: dir.path().join("backup"),
+        path: fs::canonicalize(dir.path()).unwrap().join("backup"),
     });
     initialize(&config).unwrap();
     edit(&config, "UPDATE vault SET state='initializing'");
@@ -180,7 +196,7 @@ fn unsupported_or_corrupt_catalogs_and_configuration_drift_fail_closed() {
     let (dir, config) = configured();
     initialize(&config).unwrap();
     let mut changed = config.clone();
-    changed.volumes[0].path = dir.path().join("other");
+    changed.volumes[0].path = fs::canonicalize(dir.path()).unwrap().join("other");
     assert_eq!(
         status(&changed).unwrap_err().code,
         "volume_configuration_changed"
@@ -188,7 +204,7 @@ fn unsupported_or_corrupt_catalogs_and_configuration_drift_fail_closed() {
     changed = config.clone();
     changed.volumes.push(Volume {
         label: "extra".into(),
-        path: dir.path().join("extra"),
+        path: fs::canonicalize(dir.path()).unwrap().join("extra"),
     });
     assert_eq!(
         status(&changed).unwrap_err().code,

@@ -1,1 +1,1 @@
-{"schema_version":1,"state":"ready","vault_id":"1244f53c-f1da-492e-969a-d0f0f6f27bb7","volumes":[{"available_bytes":13960773632,"label":"primary","path":"\\\\?\\C:\\GitHub\\ModelPrepper\\target\\docs-capture\\models","state":"mounted","volume_id":"343aba44-42a2-4096-aeca-7f5bbdb72f0f"}]}
+{"schema_version":1,"state":"ready","vault_id":"1244f53c-f1da-492e-969a-d0f0f6f27bb7","volumes":[{"available_bytes":13429923840,"label":"primary","path":"\\\\?\\C:\\GitHub\\ModelPrepper\\target\\docs-capture\\models","state":"mounted","volume_id":"343aba44-42a2-4096-aeca-7f5bbdb72f0f"}]}
