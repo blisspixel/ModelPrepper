@@ -32,7 +32,7 @@ The [user experience plan](user-experience.md) defines first-time, power-user, a
 
 Deliver versioned config, plan, manifest, job-state, reason-code, and CLI-output specifications. Agree on default rights and file profiles. Define supported architectures/layouts.
 
-Set up the Rust workspace, pinned toolchain, lockfile, format/lint/test workflows, and at least 80% measured coverage gates. Current documentation lint/link CI is the preliminary foundation, not runtime CI.
+Maintain the Rust workspace, pinned toolchain, lockfile, format/lint/test checks, and at least 80% measured line and branch coverage gates. The single CI workflow checks native Rust and documentation on Windows, macOS, and Linux, with separate coverage and dependency checks feeding one aggregate result.
 
 Acceptance:
 
@@ -171,14 +171,5 @@ Each adapter must establish immutable identity, rights evidence, complete file i
 Cross-revision deduplication, delta reconstruction, object storage, peer distribution, signatures for shared collections, and retention automation require separate decisions and acceptance tests.
 
 Never sacrifice self-contained folders, recoverability, or user control to optimize throughput.
-
-## Immediate implementation order
-
-1. Finalize representative plan/manifest fixtures and supported model layouts.
-2. Initialize the Rust quality foundation.
-3. Complete the native transfer spike.
-4. Deliver the explicit-watch-to-seal path.
-5. Break that path deliberately and prove recovery.
-6. Add replicas and native scheduling before discovery.
 
 Dependencies, risks, and acceptance evidence are kept beside each milestone. A failed gate delays that milestone rather than being renamed success.
