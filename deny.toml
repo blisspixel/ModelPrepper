@@ -1,0 +1,26 @@
+[advisories]
+unmaintained = "workspace"
+
+[licenses]
+confidence-threshold = 0.9
+allow = ["MIT", "Apache-2.0", "BSD-3-Clause", "ISC", "Unicode-3.0", "CDLA-Permissive-2.0"]
+
+[bans]
+multiple-versions = "deny"
+wildcards = "deny"
+# Ring and UUID use different maintained getrandom APIs. Neither is replaced
+# merely to deduplicate a small OS randomness adapter.
+skip = [{ name = "getrandom", version = "0.2" }]
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+
+[graph]
+targets = [
+    { triple = "x86_64-pc-windows-msvc" },
+    { triple = "x86_64-unknown-linux-gnu" },
+    { triple = "aarch64-unknown-linux-gnu" },
+    { triple = "x86_64-apple-darwin" },
+    { triple = "aarch64-apple-darwin" },
+]

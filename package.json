@@ -1,0 +1,17 @@
+{
+  "name": "modelprepper-docs",
+  "private": true,
+  "scripts": {
+    "lint": "markdownlint-cli2 README.md CONTRIBUTING.md intent.md docs/**/*.md",
+    "check:captures": "node scripts/check-cli-captures.mjs",
+    "check:links": "node scripts/check-doc-links.mjs",
+    "test": "node --experimental-test-coverage --test-coverage-include=scripts/doc-links.mjs --test-coverage-lines=80 --test-coverage-branches=80 --test tests/*.test.mjs",
+    "check": "npm run lint && npm run check:links && npm run check:captures && npm test"
+  },
+  "devDependencies": {
+    "markdownlint-cli2": "0.23.3"
+  },
+  "engines": {
+    "node": ">=22.19"
+  }
+}

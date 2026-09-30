@@ -1,0 +1,68 @@
+{
+  "schema_version": 1,
+  "source": {
+    "endpoint": "https://huggingface.co",
+    "repo_type": "model",
+    "repo_id": "example/model",
+    "requested_revision": "main",
+    "resolved_revision": "0123456789abcdef0123456789abcdef01234567",
+    "gated": false,
+    "private": false
+  },
+  "complete": true,
+  "layout": "transformers-safetensors-v1",
+  "license": {
+    "license_id": "mit",
+    "status": "unreviewed",
+    "paths": ["LICENSE"]
+  },
+  "files": [
+    {
+      "path": "model.safetensors",
+      "size_bytes": 4096,
+      "upstream_hash": {
+        "algorithm": "sha256",
+        "value": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+      },
+      "role": "weight",
+      "required": true
+    },
+    {
+      "path": "config.json",
+      "size_bytes": 128,
+      "upstream_hash": {
+        "algorithm": "git_sha1",
+        "value": "0123456789abcdef0123456789abcdef01234567"
+      },
+      "role": "config",
+      "required": true
+    },
+    {
+      "path": "tokenizer.json",
+      "size_bytes": 256,
+      "upstream_hash": {
+        "algorithm": "git_sha1",
+        "value": "0123456789abcdef0123456789abcdef01234567"
+      },
+      "role": "tokenizer",
+      "required": true
+    },
+    {
+      "path": "LICENSE",
+      "size_bytes": 1024,
+      "upstream_hash": {
+        "algorithm": "git_sha1",
+        "value": "0123456789abcdef0123456789abcdef01234567"
+      },
+      "role": "license",
+      "required": true
+    },
+    {
+      "path": "modeling.py",
+      "size_bytes": 512,
+      "upstream_hash": null,
+      "role": "other",
+      "required": false
+    }
+  ]
+}

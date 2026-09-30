@@ -1,0 +1,97 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native:
+    name: Native (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup toolchain install 1.96.0 --profile minimal --component clippy,rustfmt
+      - run: cargo fmt --check
+      - run: cargo clippy --locked --all-targets -- -D warnings
+      - run: cargo test --locked
+      - run: cargo build --locked --release
+      - run: cargo run --locked --release -- config check --config examples/config.toml
+      - run: cargo run --locked --release -- resolve --help
+      - run: cargo run --locked --release -- init --help
+      - run: cargo run --locked --release -- status --help
+      - run: cargo run --locked --release -- plan --config examples/config.toml --inventory tests/fixtures/inventory.json --available-bytes 500000000000
+
+  docs:
+    name: Documentation (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm run check
+
+  coverage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: rustup toolchain install nightly-2026-07-26 --profile minimal --component llvm-tools-preview
+      - run: cargo install cargo-llvm-cov --version 0.9.1 --locked
+      - run: cargo +nightly-2026-07-26 llvm-cov --locked --branch --json --output-path target/coverage.json --ignore-filename-regex 'tests[\\/]' --fail-under-lines 80
+      - run: node scripts/check-rust-coverage.mjs target/coverage.json
+
+  dependencies:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup toolchain install 1.96.0 --profile minimal
+      - run: cargo install cargo-audit --version 0.22.2 --locked
+      - run: cargo install cargo-deny --version 0.19.8 --locked
+      - run: cargo audit
+      - run: cargo deny check
+
+  ci:
+    name: Main checks
+    if: always()
+    needs: [native, docs, coverage, dependencies]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require every check to pass
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          python - <<'PY'
+          import json, os
+          results = json.loads(os.environ['RESULTS'])
+          failed = {name: result['result'] for name, result in results.items() if result['result'] != 'success'}
+          if failed:
+              raise SystemExit(f'Checks did not pass: {failed}')
+          print('All required checks passed.')
+          PY

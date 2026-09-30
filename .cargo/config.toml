@@ -1,0 +1,3 @@
+[target.'cfg(all(target_os = "windows", target_env = "msvc"))']
+# Do not require a separately installed Visual C++ runtime on end-user machines.
+rustflags = ["-C", "target-feature=+crt-static"]

@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "captured_at": "2026-09-30T23:25:33.294125+00:00",
+  "platform": "Windows",
+  "version": "modelprepper 0.1.0",
+  "source_digest": "d2d2a8b7f1d97841f94d2d463aa7a2ad624e03d854cfa808f882ed839c27e4d4",
+  "captures": [
+    {
+      "command": "modelprepper --help",
+      "output": "cli-help.txt",
+      "image": "cli-help.png",
+      "output_sha256": "ea3a2c93fc869694ff37822355574c0928999c3a1e58da4b17bca91fe556cc26",
+      "image_sha256": "ce90909480c3ea9ed5c6b916558c3beea3cb3912a103d6d3be7cf6fcbc5661fd"
+    },
+    {
+      "command": "modelprepper status --config target/docs-capture/config.toml",
+      "output": "cli-status.txt",
+      "image": "cli-status.png",
+      "output_sha256": "5dd6bc0fc5e9c60d2c04f2a1057ec69f21fd9371f0291d80eb4f836e9c62adc4",
+      "image_sha256": "5a90f2ea3d4398e6fa6c0a38adee11861f363a8443caa4661fc06b2160e80cd9"
+    }
+  ]
+}
