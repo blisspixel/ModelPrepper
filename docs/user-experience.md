@@ -2,6 +2,8 @@
 
 This is a delivery plan, not a list of shipped features. Current behavior is in [implementation-status.md](implementation-status.md). Milestones and release gates are in [roadmap.md](roadmap.md).
 
+The [archival policy contract](archive-policy.md) develops the NAS-owner workflow: prefer publisher originals, choose categories and variants, inspect evaluation evidence, and maintain a bounded collection without losing earlier copies.
+
 ## Four people, one dependable engine
 
 | Person | What they need | Successful outcome |

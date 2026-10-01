@@ -24,11 +24,23 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
       - run: rustup toolchain install 1.96.0 --profile minimal --component clippy,rustfmt
       - run: cargo fmt --check
       - run: cargo clippy --locked --all-targets -- -D warnings
       - run: cargo test --locked
       - run: cargo build --locked --release
+      - name: Exercise native installer and packaging offline
+        shell: bash
+        run: |
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            python scripts/test-installers.py --binary target/release/modelprepper.exe
+          else
+            sh -n install.sh
+            python3 scripts/test-installers.py --binary target/release/modelprepper
+          fi
       - run: cargo run --locked --release -- config check --config examples/config.toml
       - run: cargo run --locked --release -- resolve --help
       - run: cargo run --locked --release -- init --help
@@ -51,6 +63,16 @@ jobs:
           cache: npm
       - run: npm ci --ignore-scripts
       - run: npm run check
+      - uses: actions/setup-python@v5
+        if: runner.os == 'Linux'
+        with:
+          python-version: '3.13'
+      - name: Lint installer development tools
+        if: runner.os == 'Linux'
+        run: |
+          python -m pip install ruff==0.15.16
+          ruff check scripts/package-native-release.py scripts/test-installers.py
+          ruff format --check scripts/package-native-release.py scripts/test-installers.py
 
   coverage:
     runs-on: ubuntu-latest

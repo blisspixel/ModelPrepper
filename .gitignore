@@ -8,3 +8,5 @@ models/
 *.sqlite3-wal
 *.sqlite3-shm
 config.local.toml
+__pycache__/
+*.pyc

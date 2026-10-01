@@ -2,7 +2,7 @@
 
 ## Current repository
 
-This repository contains the Rust vault foundation, public-source inspection, offline preview planning, and design documents. Tests cover catalog ownership, disk substitution, initialization recovery, pinned metadata, rights evidence, shard closure, HTTP failures, byte integrity, and CLI behavior. Downloads, persisted approvals, sealed manifests, and readiness tests are not implemented.
+This repository contains the Rust vault foundation, public-source inspection, persisted source reviews/rejection, offline preview planning, installer scripts, and design documents. Tests cover ownership/migration, disk substitution, initialization recovery, source-review persistence/pagination, pinned metadata, rights evidence, shard closure, HTTP failures, byte integrity, CLI behavior, and offline installer failures/upgrades. Downloads, granted approvals, sealed manifests, and readiness tests are not implemented.
 
 Development Node tooling is not a dependency of the planned native product.
 

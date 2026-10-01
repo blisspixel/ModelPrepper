@@ -58,6 +58,135 @@ fn bytes(file: &mut File) -> Vec<u8> {
 }
 
 #[test]
+fn crash_tail_recovery_survives_reopen_and_resumes_exact_bytes() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("partial");
+    let model = expected(b"abcdef");
+    let checkpoint = {
+        let mut file = File::options()
+            .create_new(true)
+            .read(true)
+            .write(true)
+            .open(&path)
+            .unwrap();
+        let committed = run(
+            response(206, "Content-Range: bytes 0-2/6\r\n", b"abc"),
+            &model,
+            &mut file,
+            None,
+            3,
+        )
+        .unwrap();
+        // Simulate synced payload with no subsequent checkpoint journal commit.
+        file.write_all(b"defuncommitted").unwrap();
+        file.sync_all().unwrap();
+        committed.checkpoint
+    };
+    let mut file = File::options().read(true).write(true).open(&path).unwrap();
+    assert_eq!(
+        recover_stage(&source(), &model, &mut file, &checkpoint).unwrap(),
+        14
+    );
+    assert_eq!(bytes(&mut file), b"abc");
+    assert_eq!(
+        recover_stage(&source(), &model, &mut file, &checkpoint).unwrap(),
+        0
+    );
+    let finished = run(
+        response(206, "Content-Range: bytes 3-5/6\r\n", b"def"),
+        &model,
+        &mut file,
+        Some(&checkpoint),
+        3,
+    )
+    .unwrap();
+    assert_eq!(finished.verified_sha256, Some(digest(b"abcdef")));
+    assert_eq!(bytes(&mut file), b"abcdef");
+}
+
+#[test]
+fn recovery_never_truncates_when_committed_evidence_is_invalid() {
+    let model = expected(b"abcdef");
+    let (_, identity) = file_identity(&source(), &model).unwrap();
+    let valid = Checkpoint {
+        schema_version: 1,
+        identity,
+        bytes: 3,
+        prefix_sha256: digest(b"abc"),
+    };
+    for case in 0..7 {
+        let mut file = tempfile::tempfile().unwrap();
+        file.write_all(b"abcTAIL").unwrap();
+        let mut checkpoint = valid.clone();
+        let mut source = source();
+        match case {
+            0 => checkpoint.schema_version = 2,
+            1 => checkpoint.identity = "wrong".into(),
+            2 => checkpoint.bytes = 7,
+            3 => {
+                file.set_len(2).unwrap();
+            }
+            4 => checkpoint.prefix_sha256 = digest(b"bad"),
+            5 => source.resolved_revision = "b".repeat(40),
+            _ => {
+                file.seek(SeekFrom::Start(0)).unwrap();
+                file.write_all(b"bad").unwrap();
+            }
+        }
+        let before = bytes(&mut file);
+        assert_eq!(
+            recover_stage(&source, &model, &mut file, &checkpoint)
+                .unwrap_err()
+                .code,
+            "invalid_checkpoint"
+        );
+        assert_eq!(bytes(&mut file), before);
+    }
+}
+
+#[test]
+fn recovery_supports_a_committed_empty_prefix_without_trusting_the_tail() {
+    let mut file = tempfile::tempfile().unwrap();
+    file.write_all(b"uncommitted").unwrap();
+    let model = expected(b"abcdef");
+    let (_, identity) = file_identity(&source(), &model).unwrap();
+    let checkpoint = Checkpoint {
+        schema_version: 1,
+        identity,
+        bytes: 0,
+        prefix_sha256: digest(b""),
+    };
+    assert_eq!(
+        recover_stage(&source(), &model, &mut file, &checkpoint).unwrap(),
+        11
+    );
+    assert!(bytes(&mut file).is_empty());
+}
+
+#[test]
+fn recovery_reports_read_only_truncation_failure_and_keeps_payload() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("partial");
+    std::fs::write(&path, b"abcTAIL").unwrap();
+    let mut file = File::open(&path).unwrap();
+    let model = expected(b"abcdef");
+    let (_, identity) = file_identity(&source(), &model).unwrap();
+    let checkpoint = Checkpoint {
+        schema_version: 1,
+        identity,
+        bytes: 3,
+        prefix_sha256: digest(b"abc"),
+    };
+    assert_eq!(
+        recover_stage(&source(), &model, &mut file, &checkpoint)
+            .unwrap_err()
+            .code,
+        "staging_io_failed"
+    );
+    assert_eq!(bytes(&mut file), b"abcTAIL");
+}
+
+#[test]
 fn resumes_identity_bound_segments_and_verifies_the_whole_file() {
     let mut file = tempfile::tempfile().unwrap();
     let model = expected(b"abcdef");

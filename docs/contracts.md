@@ -80,7 +80,7 @@ Successful commands emit a single JSON object on stdout. Structured application 
 
 Clap argument errors exit 2. Help and version are ordinary text. Successful offline preview exits 0 even when blockers are present: it completed a preview rather than a transfer.
 
-Local metadata reads are capped at 2 MiB and require UTF-8, with optional leading BOM. Parser errors avoid echoing a full TOML source excerpt. Only resolve makes publisher requests today.
+Local metadata reads are capped at 2 MiB and require UTF-8, with optional leading BOM. Parser errors avoid echoing a full TOML source excerpt. Only resolve and propose make publisher requests today. Proposal listing, inspection, and rejection remain offline.
 
 config init creates only a config file using exclusive creation. It does not initialize a vault and never overwrites an existing output. Failure during writing is reported; if storage failure leaves a partial config, the user inspects it before retrying.
 
@@ -100,7 +100,7 @@ Resolution returns mode=resolved_inventory and transfer_authorized=false. Output
 
 ## Implemented vault foundation
 
-init --config creates a catalog directory, catalog.sqlite3, writer.lock, and a .modelprepper-volume.json identity on each configured empty volume. Catalog schema 1 records a vault UUID, initialization state, and each volume's UUID, label, and absolute path. SQLite uses WAL, synchronous=FULL, and foreign keys. The catalog must be on a local filesystem. Explicit Windows UNC catalog paths are rejected before filesystem access; mapped drives and Unix mount types are not classified yet, so the operator must choose a local catalog directory.
+init --config creates a catalog directory, catalog.sqlite3, writer.lock, and a .modelprepper-volume.json identity on each configured empty volume. Catalog schema 2 records vault ownership, initialization, volume UUIDs/labels/absolute paths, and durable source reviews. Schema 1 upgrades transactionally without changing identities. SQLite uses WAL, synchronous=FULL, and foreign keys. The catalog must be local. Windows UNC catalog paths are rejected before filesystem access; mapped drives and Unix mount types are not classified yet, so the operator must choose local storage.
 
 Catalog and volumes cannot overlap. Dot segments, symlink ancestors, reparse points, and unrelated files during adoption are rejected. Ownership checks also cover SQLite sidecars. A kernel-held exclusive file lock covers the database operation; a contending writer receives writer_busy. These checks assume other programs do not maliciously replace directories during the operation; handle-relative filesystem operations remain a later hardening gate.
 
@@ -111,6 +111,8 @@ Once initialization reaches ready, init never recreates a missing volume or adop
 status is offline, acquires the writer lock, opens only an existing catalog, and checks identities before measuring free bytes. It can update SQLite journal bookkeeping, so it is not a read-only media command. Changing a configured disk path or label fails with volume_configuration_changed. Relocating a volume requires a future explicit operation.
 
 ## Future manifest contract
+
+The [source review contract](source-reviews.md) describes propose, proposals list/show, and decide. Reviews bind original evidence in a distinct identity domain; transfer approval remains unavailable. Rejected reviews are retained. A source review is not the future executable transfer plan or a manifest.
 
 The durable manifest in [preservation.md](preservation.md) will contain schema version, bundle identity, source identity, original rights evidence, file hashes/sizes, selected profile, excluded dependencies, seal timestamp, and operation identity.
 

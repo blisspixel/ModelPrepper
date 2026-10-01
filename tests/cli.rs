@@ -21,6 +21,9 @@ fn native_cli_reports_version_help_and_argument_failures() {
         vec!["resolve", "--help"],
         vec!["init", "--help"],
         vec!["status", "--help"],
+        vec!["propose", "--help"],
+        vec!["proposals", "--help"],
+        vec!["decide", "--help"],
     ] {
         let output = binary(&args);
         assert!(output.status.success());
@@ -39,6 +42,84 @@ fn native_cli_reports_version_help_and_argument_failures() {
             "x",
             "--available-bytes",
             "-1",
+        ],
+    ] {
+        assert!(!binary(&args).status.success());
+    }
+}
+
+#[test]
+fn saved_review_commands_are_offline_bounded_and_report_missing_exact_ids() {
+    let dir = TempDir::new().unwrap();
+    let config = dir.path().join("config.toml");
+    fs::write(
+        &config,
+        toml::to_string(&modelprepper::Config::default_for(
+            "catalog".into(),
+            "models".into(),
+        ))
+        .unwrap(),
+    )
+    .unwrap();
+    assert!(
+        binary(&["init", "--config", config.to_str().unwrap()])
+            .status
+            .success()
+    );
+    let list = binary(&[
+        "proposals",
+        "--config",
+        config.to_str().unwrap(),
+        "list",
+        "--limit",
+        "1",
+    ]);
+    assert!(list.status.success(), "{list:?}");
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&list.stdout).unwrap()["proposals"],
+        serde_json::json!([])
+    );
+    for args in [
+        vec![
+            "proposals",
+            "--config",
+            config.to_str().unwrap(),
+            "list",
+            "--limit",
+            "0",
+        ],
+        vec![
+            "proposals",
+            "--config",
+            config.to_str().unwrap(),
+            "show",
+            "--plan",
+            "bad",
+        ],
+        vec![
+            "decide",
+            "--config",
+            config.to_str().unwrap(),
+            "--plan",
+            "bad",
+            "--decision",
+            "reject",
+        ],
+        vec![
+            "decide",
+            "--config",
+            config.to_str().unwrap(),
+            "--plan",
+            "bad",
+            "--decision",
+            "approve",
+        ],
+        vec![
+            "propose",
+            "--config",
+            config.to_str().unwrap(),
+            "--repo",
+            "bad",
         ],
     ] {
         assert!(!binary(&args).status.success());

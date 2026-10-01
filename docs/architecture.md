@@ -40,6 +40,8 @@ Avoid generic plugin execution in the core. Initial source adapters are compiled
 
 ## Source adapter contract
 
+The [source catalog](model-sources.md) identifies research candidates and qualification gaps. Canonical artifact identity and original evidence remain separate from retrieval locations; hash-verified mirror recovery must not change the archived revision or promote unknown provenance.
+
 Resolve a normalized source reference and requested revision to an immutable identity. Return a complete paginated inventory, sizes, available authoritative hashes with named algorithms, captured metadata, license evidence, and access status.
 
 Reject unknown or incomplete inventory as unsuitable for automatic transfer. Record retrieval time, source endpoint, requested reference, and resolved commit. Cache source responses separately from archived payload.

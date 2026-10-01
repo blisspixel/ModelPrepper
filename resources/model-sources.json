@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "reviewed_at": "2026-09-30",
+  "purpose": "data-only research catalog; not a runtime network allowlist",
+  "sources": [
+    { "id": "huggingface", "roles": ["host", "discovery"], "modelprepper_status": "inspection_only", "references": ["https://huggingface.co/docs/huggingface_hub/guides/download"] },
+    { "id": "modelscope", "roles": ["host", "discovery"], "modelprepper_status": "research_candidate", "references": ["https://github.com/modelscope/modelscope_hub"] },
+    { "id": "nvidia-ngc", "roles": ["host", "discovery"], "modelprepper_status": "research_candidate", "references": ["https://docs.nvidia.com/ngc/latest/ngc-catalog-user-guide.html"] },
+    { "id": "kaggle-models", "roles": ["host", "discovery"], "modelprepper_status": "research_candidate", "references": ["https://www.kaggle.com/docs/models"] },
+    { "id": "civitai", "roles": ["host", "discovery"], "modelprepper_status": "research_candidate", "references": ["https://github.com/civitai/civitai/wiki/REST-API-Reference"] },
+    { "id": "publisher-direct", "roles": ["publisher", "host"], "modelprepper_status": "research_candidate", "references": ["https://dev.meta.ai/llama/docs/getting-the-models/meta"] },
+    { "id": "github-releases", "roles": ["host"], "modelprepper_status": "research_candidate", "references": ["https://docs.github.com/en/rest/releases/assets"] },
+    { "id": "ollama", "roles": ["host", "local_import", "discovery"], "modelprepper_status": "research_candidate", "references": ["https://docs.ollama.com/api/tags", "https://github.com/ollama/ollama/blob/main/docs/api.md"] },
+    { "id": "zenodo", "roles": ["host", "discovery"], "modelprepper_status": "research_candidate", "references": ["https://developers.zenodo.org/"] },
+    { "id": "internet-archive", "roles": ["recovery", "discovery"], "modelprepper_status": "research_candidate", "references": ["https://archive.org/developers/"] },
+    { "id": "pirateface", "roles": ["recovery", "discovery"], "modelprepper_status": "research_candidate", "references": ["https://pirateface.co/how-it-works", "https://pirateface.co/"] }
+  ]
+}

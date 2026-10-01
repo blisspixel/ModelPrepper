@@ -10,7 +10,7 @@ Local custody, portable data, and user control are central. The project rejects 
 
 ## Project status
 
-**Experimental prototype.** Vault setup, disk identities, offline status, public-source inspection, and local inventory previews work today. The streaming transfer library is an experiment. Approved downloads, budget accounting, sealed bundles, replicas, and unattended maintenance are still being built. No current CLI command preserves a model end to end.
+**Experimental prototype.** Vault setup, disk identities, offline status, public-source inspection, durable source reviews, and local inventory previews work today. The streaming transfer library is an experiment. Approved downloads, budget accounting, sealed bundles, replicas, and unattended maintenance are still being built. No current CLI command preserves a model end to end.
 
 | Available now | Behavior |
 | --- | --- |
@@ -18,6 +18,7 @@ Local custody, portable data, and user control are central. The project rejects 
 | init | Initialize bundled SQLite and adopt empty storage directories with stable disk identities. |
 | status | Inspect catalog, disk identities, and actual free space without publisher access. |
 | resolve | Pin a public commit and verify license, configuration, tokenizer configuration, and index evidence. |
+| propose / proposals / decide | Save exact source reviews, browse offline, and record rejection. Approval remains blocked. |
 | plan | Preview untrusted local inventory with selected files, costs, exclusions, and blockers. |
 
 See [implementation status](docs/implementation-status.md) for observed evidence and limitations, and the [roadmap](docs/roadmap.md) for delivery gates.
@@ -31,6 +32,8 @@ Build from source with the pinned Rust toolchain:
     cargo build --locked --release
 
 Rust is required to build. The resulting executable needs no Rust, Python, Node, Docker, database installation, inference server, or GPU to run. Platform qualification is tracked in CI and the release plan; production binary releases are not available yet.
+
+PowerShell and shell installers are prepared for verified native releases and offline archives. See [installation](docs/installation.md) for the planned one-command path and release limits.
 
 Create a configuration and initialize an empty vault:
 
@@ -76,15 +79,17 @@ These are product requirements. [Current status](docs/implementation-status.md) 
 | Start here | Engineering and operation |
 | --- | --- |
 | [Getting started](docs/getting-started.md) | [Contracts and reason codes](docs/contracts.md) |
+| [Native installation](docs/installation.md) | [Durable source reviews](docs/source-reviews.md) |
 | [Current status](docs/implementation-status.md) | [Architecture](docs/architecture.md) |
 | [Product plan](docs/product.md) | [Storage and recovery](docs/storage.md) |
 | [User experience and quality of life](docs/user-experience.md) | [Preservation and offline readiness](docs/preservation.md) |
+| [Personal archival policies](docs/archive-policy.md) | [Dependency-aware selection](docs/worries.md) |
 | [Roadmap](docs/roadmap.md) | [Native transfer investigation](docs/transfer-spike.md) |
 | [Project principles](intent.md) | [Dependencies and platform policy](docs/stack.md) |
 | [Responsibilities and limits](docs/notice.md) | [Quality and CI gates](docs/quality.md) |
 | [Contributing](CONTRIBUTING.md) | [Repository and release gates](docs/release.md) |
 
-Additional design details: [interfaces](docs/interfaces.md), [watch/discovery priorities](docs/worries.md), and [related projects](docs/related-projects.md).
+Additional design details: [model sources and mirrors](docs/model-sources.md), [interfaces](docs/interfaces.md), [watch/discovery priorities](docs/worries.md), and [related projects](docs/related-projects.md).
 
 ## License and disclaimer
 

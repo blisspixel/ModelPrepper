@@ -45,6 +45,8 @@ This inventory is synthetic. Every local preview contains local_inventory_untrus
 
 ## Common outcomes
 
+To retain pinned source evidence and record rejection, use the [source review workflow](source-reviews.md). For category portfolios, original precision, and NAS budget planning, read [archival policies](archive-policy.md). Native release installers and their publication limits are in [installation](installation.md).
+
 | Result | What to do |
 | --- | --- |
 | directory_not_empty | Choose an empty directory. Collection import is a future operation. |
@@ -55,6 +57,9 @@ This inventory is synthetic. Every local preview contains local_inventory_untrus
 | access_restricted | Choose an authorized public source supported by this prototype. |
 | unreviewed or conflicting license | Inspect the original evidence. A tag alone cannot clear it. |
 | invalid_range or invalid_checkpoint | The library experiment rejected inconsistent bytes/identity. No CLI download workflow uses it yet. |
+| transfer_backend_unqualified | A saved source review cannot be approved yet; durable transfer/accounting gates remain open. |
+| stale_policy | Propose a new review using the current configuration. |
+| decision_conflict | Inspect the saved final decision; it cannot be changed or reset silently. |
 
 Commands emit JSON; application errors emit JSON on stderr and exit 1. Argument errors exit 2. Help/version are text. A preview can succeed while reporting blockers.
 

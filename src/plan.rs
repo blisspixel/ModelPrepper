@@ -3,10 +3,10 @@ use crate::{
     inventory::{EvidenceStatus, Role, Source, SourceFile},
     validation::normalize_repo,
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Blocker {
     LocalInventoryUntrusted,
@@ -21,6 +21,7 @@ pub enum Blocker {
     RevisionTooLarge,
     TransferBudgetExceeded,
     InsufficientSpace,
+    TransferBackendUnqualified,
 }
 
 #[derive(Debug, Serialize)]

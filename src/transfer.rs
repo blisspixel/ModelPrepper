@@ -75,15 +75,7 @@ fn prefix(file: &mut File, length: u64) -> Result<String> {
     Ok(format!("{:x}", hash.finalize()))
 }
 
-fn stage_with(
-    http: &Http,
-    base: &str,
-    source: &Source,
-    expected: &SourceFile,
-    file: &mut File,
-    checkpoint: Option<&Checkpoint>,
-    max_new_bytes: u64,
-) -> Result<Segment> {
+fn file_identity(source: &Source, expected: &SourceFile) -> Result<(String, String)> {
     if source.endpoint != "https://huggingface.co"
         || source.repo_type != "model"
         || source.gated
@@ -109,16 +101,71 @@ fn stage_with(
             40
         },
     )?;
+    let identity = digest(
+        &serde_json::to_vec(&("modelprepper.transfer-file.v1", source, expected))
+            .map_err(|e| Error::new("invalid_inventory", e.to_string()))?,
+    );
+    Ok((repo, identity))
+}
+
+/// Reconcile a caller-owned partial file with its last durably committed
+/// checkpoint after interruption. Verify the committed prefix before truncating
+/// any uncommitted tail, then sync the truncation. Returns discarded bytes.
+///
+/// Caller must hold exclusive ownership and obtain the checkpoint from its
+/// durable journal. This performs no networking, approval, or final verification.
+/// A checkpoint is an integrity baseline, not authentication of a local journal.
+pub fn recover_stage(
+    source: &Source,
+    expected: &SourceFile,
+    file: &mut File,
+    checkpoint: &Checkpoint,
+) -> Result<u64> {
+    let (_, identity) = file_identity(source, expected)?;
+    let length = file.metadata().map_err(disk)?.len();
+    if checkpoint.schema_version != 1
+        || checkpoint.identity != identity
+        || checkpoint.bytes > expected.size_bytes
+        || checkpoint.bytes > length
+    {
+        return Err(Error::new(
+            "invalid_checkpoint",
+            "checkpoint identity or committed length is invalid",
+        ));
+    }
+    if prefix(file, checkpoint.bytes)? != checkpoint.prefix_sha256 {
+        return Err(Error::new(
+            "invalid_checkpoint",
+            "committed staging prefix changed",
+        ));
+    }
+    let discarded = length - checkpoint.bytes;
+    // Sync even on an idempotent retry: a prior truncation may have completed
+    // before its sync failed, leaving the in-memory file length already correct.
+    if discarded > 0 {
+        file.set_len(checkpoint.bytes).map_err(disk)?;
+    }
+    file.sync_all().map_err(disk)?;
+    file.seek(SeekFrom::Start(checkpoint.bytes)).map_err(disk)?;
+    Ok(discarded)
+}
+
+fn stage_with(
+    http: &Http,
+    base: &str,
+    source: &Source,
+    expected: &SourceFile,
+    file: &mut File,
+    checkpoint: Option<&Checkpoint>,
+    max_new_bytes: u64,
+) -> Result<Segment> {
+    let (repo, identity) = file_identity(source, expected)?;
     if max_new_bytes == 0 {
         return Err(Error::new(
             "invalid_limit",
             "segment allowance must be positive",
         ));
     }
-    let identity = digest(
-        &serde_json::to_vec(&("modelprepper.transfer-file.v1", source, expected))
-            .map_err(|e| Error::new("invalid_inventory", e.to_string()))?,
-    );
     let offset = file.metadata().map_err(disk)?.len();
     if offset > expected.size_bytes {
         return Err(Error::new(

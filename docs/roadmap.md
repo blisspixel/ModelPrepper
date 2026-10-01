@@ -2,12 +2,12 @@
 
 Implementation follows evidence and dependencies, not calendar promises. Native Rust on Linux, macOS, and Windows is a requirement.
 
-Current progress: M0 has strict contracts, canonical previews, and lint/test/coverage gates. M1 has pinned public-source inspection and a streaming segment experiment with checkpoint/range/rollback fault tests. M2 has bundled SQLite, kernel writer ownership, stable volume identities, recoverable committed initialization, and offline status. No milestone is fully qualified: persisted approvals, integrated payload jobs, manifests, full crash recovery, and complete platform drills remain outstanding. See [implementation-status.md](implementation-status.md), [contracts.md](contracts.md), and [transfer-spike.md](transfer-spike.md).
+Current progress: M0 has strict contracts, canonical previews, and lint/test/coverage gates. M1 has pinned public-source inspection and a streaming segment experiment with checkpoint/range/rollback fault tests and verified uncommitted-tail recovery. M2 has bundled SQLite, transactional schema migration, writer ownership, stable volume identities, recoverable committed initialization, offline status, durable source reviews, and final rejection records. Installer scripts have offline fixtures. No milestone is fully qualified: granted approvals, integrated payload jobs, manifests, full crash recovery, and complete platform drills remain outstanding. See [implementation-status.md](implementation-status.md), [contracts.md](contracts.md), and [transfer-spike.md](transfer-spike.md).
 
 ## Immediate execution order
 
 1. Prove bounded staged byte transfer with local fixtures: Range correctness, retries, corrupted partials, interruption, URL refresh, and exact final hashes. Record actual workspace and bandwidth bounds before approval code depends on them.
-2. Add catalog migrations and persisted immutable source plans. Bind policy, license evidence, selected/excluded identities, costs, and volume UUID to a separate trusted plan domain. Add watch and decision commands; stale decisions cannot authorize changed plans.
+2. Extend persisted source reviews into qualified immutable transfer plans with measured bounds. Add watch commands and grant approvals only when rights, identity, accounting, and destination gates are enforceable; stale decisions cannot authorize changed plans.
 3. Implement reservations and one approved revision's durable publication. Exercise every transaction/file boundary, then add manifest reconstruction and verified replication.
 4. Extend from one reliable revision to bounded scheduled watches. Add operating-system distribution and actual filesystem/offline recovery drills before calling the product a beta.
 
@@ -150,6 +150,8 @@ Acceptance:
 
 Deliver inspectable collection data, previewed imports, paginated discovery, deterministic worry ranking, and lineage-aware duplicate handling.
 
+Implement the [archival policy contract](archive-policy.md): original-required/preferred/selected-derivative modes, category coverage and byte budgets, attributed evaluation snapshots, stable portfolio selection, and capacity deferral. Unsupported modalities stay visible until their adapters establish complete dependencies. Source or ranking changes never silently replace or prune existing copies.
+
 Acceptance: discovery cannot bypass the planner, rights gate, approval bounds, or dependency requirements. Explicitly selected variants remain preservable.
 
 An optional local ranker comes only after deterministic selection is useful. No mandatory server or model dependency is introduced.
@@ -161,6 +163,8 @@ Add stdio MCP through the stable application layer. Queued work persists indepen
 A local web UI is optional and consumes the same operations. Remote HTTP control requires a separate authentication, origin, TLS, and deployment design; changing a bind address is insufficient.
 
 ## M10: Broader preservation
+
+Use the [model source catalog](model-sources.md) and its data-only registry to prioritize second-hub, official-release, NGC/Kaggle, modality-specific, and mirror-recovery investigations. Candidate entries do not enable network access or imply qualified adapters.
 
 Evaluate another model source, selected datasets, software releases, and platform-specific runtime kits independently.
 

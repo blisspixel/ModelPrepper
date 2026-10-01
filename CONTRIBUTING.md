@@ -6,16 +6,23 @@ ModelPrepper is an MIT-licensed Rust preservation utility under active developme
 
 Install Rust using the pinned rust-toolchain.toml. Node 22.19 or newer is used only for documentation checks.
 
+Native installer fixture tests and packaging use Python's standard library. Install Ruff 0.15.16 for those scripts' lint/format checks. Screenshot rendering separately uses optional Pillow. None is a product runtime dependency.
+
 ```text
 cargo fmt --check
 cargo clippy --locked --all-targets -- -D warnings
 cargo test --locked
 cargo build --locked --release
+python scripts/test-installers.py --binary target/release/modelprepper.exe
+ruff check scripts/package-native-release.py scripts/test-installers.py
+ruff format --check scripts/package-native-release.py scripts/test-installers.py
 npm ci --ignore-scripts
 npm run check
 ```
 
 Coverage and dependency checks are documented in [quality.md](docs/quality.md). Owned Rust code must measure at least 80% line and branch coverage. Fault tests matter beyond the percentage. Ordinary tests require no credentials or real model weights.
+
+Use target/release/modelprepper for installer tests on Linux/macOS. Test installers use temporary workspace directories, offline archives, and no PATH updates.
 
 ## Change expectations
 

@@ -2,6 +2,8 @@
 
 Reviewed September 30, 2026. Observations come from primary documentation, not executed benchmarks or source-code audits.
 
+The [model source catalog](model-sources.md) separately covers hosting services, original publisher downloads, mirrors, peer recovery, and proposed adapter priorities.
+
 ## Nearby tools
 
 | Project | Documented overlap | Lesson |

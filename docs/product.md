@@ -10,6 +10,8 @@ The first release delivers this without an assistant, GPU, hosted project accoun
 
 Detailed workflows, quality-of-life priorities, and persona acceptance drills are in [user-experience.md](user-experience.md). They cover first-time users, power users, archivists, and advocates of independent AI custody through one shared preservation engine.
 
+The [personal archival policy](archive-policy.md) defines publisher-original priority, task/category filters, attributed ranking evidence, bounded NAS portfolios, revision retention, and optional agents without archive authority.
+
 | Person | Job | Evidence of success |
 | --- | --- | --- |
 | Desktop user | Preserve a few useful models. | First plan and verified copy without editing JSON. |

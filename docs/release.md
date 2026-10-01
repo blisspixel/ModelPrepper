@@ -12,6 +12,8 @@ The project name is ModelPrepper. Its code and documentation use the [MIT licens
 
 ## Release gate
 
+The [installer/archive contract](installation.md) defines asset names, checksums, version pinning, offline installation, and fixture checks. Scripts and packaging tools do not imply published or qualified binaries.
+
 Before publishing downloadable release artifacts, qualify the supported OS/architecture combinations, native dependencies, filesystem behavior, workspace bounds, crash recovery, manifest reconstruction, replicas, and offline-load drills described in [quality.md](quality.md).
 
 Publish artifact checksums and the source commit. Preserve applicable third-party dependency notices. Signing/provenance should be documented before claiming authenticated releases; a checksum alone is not a signature.

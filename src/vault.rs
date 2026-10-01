@@ -12,6 +12,9 @@ use uuid::Uuid;
 const MARKER: &str = ".modelprepper-volume.json";
 const PENDING: &str = ".modelprepper-volume.pending";
 
+mod review;
+pub use review::{Decision, Proposal, ProposalPage, decide, proposals, propose, show_proposal};
+
 #[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 struct Identity {
@@ -228,7 +231,7 @@ fn open_catalog(config: &Config, create: bool) -> Result<Catalog> {
     let version: u32 = connection
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .map_err(db)?;
-    if (!new && version != 1) || (new && version != 0) {
+    if (!new && !matches!(version, 1 | 2)) || (new && version != 0) {
         return Err(Error::new(
             "unsupported_catalog_schema",
             "catalog schema is not supported",
@@ -262,6 +265,20 @@ fn open_catalog(config: &Config, create: bool) -> Result<Catalog> {
                 .map_err(db)?;
         }
         connection.execute_batch("COMMIT;").map_err(db)?;
+    }
+    if version < 2 {
+        connection.execute_batch("BEGIN IMMEDIATE;
+            CREATE TABLE proposals (
+                id TEXT PRIMARY KEY CHECK(length(id)=64),
+                document TEXT NOT NULL,
+                observed_available_bytes TEXT NOT NULL,
+                decision TEXT NOT NULL DEFAULT 'pending' CHECK(decision IN ('pending','approved','rejected')),
+                created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+                decided_at INTEGER,
+                CHECK((decision='pending' AND decided_at IS NULL) OR (decision!='pending' AND decided_at IS NOT NULL))
+            );
+            PRAGMA user_version=2;
+            COMMIT;").map_err(db)?;
     }
     Ok(Catalog {
         db: connection,

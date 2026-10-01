@@ -1,6 +1,6 @@
 # Native transfer investigation
 
-Status: package inspection and a bounded blocking HTTP/source adapter, September 30, 2026. M1 is not complete. Live metadata inspection passed on Windows; no live weight transfer, resume drill, peak-space measurement, or full platform runtime qualification has been performed.
+Status: package inspection and a bounded blocking HTTP/source adapter, October 1, 2026. M1 is not complete. Live metadata inspection passed on Windows; no live weight transfer, live resume drill, peak-space measurement, or full platform runtime qualification has been performed.
 
 ## Candidate inspected
 
@@ -30,7 +30,7 @@ The adapter proves moving-ref resolution followed by pinned metadata and hash-ve
 
 The new transfer library experiment streams bounded segments into a caller-owned staging file using a 64 KiB application buffer. Its checkpoint binds the source/file identity, exact prefix length, and prefix SHA-256. Existing bytes are checked before any resumed request. Range responses must match the requested start/end and full pinned size; ignored Range during resumption is rejected before appending. Truncated, excessive, or wrong-hash bodies roll back the current segment. A complete file is verified against its upstream hash, including Git object-header semantics.
 
-Fixture tests prove those invariants, full-body 200 acceptance only for a fresh complete request, and no-request handling of already complete/empty files. This is not the durable transfer engine: the caller still owns exclusive access, checkpoint journaling, approvals, budgets, cancellation, and publication. A crash between file sync and checkpoint persistence remains a future reconciliation case. Prefix sweeps on each restart are correct but require a persistent incremental session before repeated segments can be efficient on large models. TLS/HTTP/socket buffers and network overrun are not yet measured; the 64 KiB application buffer is not a total-memory claim. No CLI payload command is exposed.
+Fixture tests prove those invariants, full-body 200 acceptance only for a fresh complete request, and no-request handling of already complete/empty files. This is not the durable transfer engine: the caller still owns exclusive access, checkpoint journaling, approvals, budgets, cancellation, and publication. Explicit [staged recovery](staged-recovery.md) now verifies the committed prefix before discarding and syncing an unjournaled tail. Reopen, idempotency, corruption, and read-only fixtures cover this operation. Integrated process-termination and power-loss reconciliation remain open. Prefix sweeps on each restart are correct but require a persistent incremental session before repeated segments can be efficient on large models. TLS/HTTP/socket buffers and network overrun are not yet measured; the 64 KiB application buffer is not a total-memory claim. No CLI payload command is exposed.
 
 The live SmolLM2 inspection resolved commit 12fd25f77366fa6b3b4b768ec3050bf629380bac. Its config matched the Git blob identity. The repository had an Apache-2.0 tag but no recognized license file, so evidence remained unreviewed. No weights were downloaded. This verifies source inspection only.
 

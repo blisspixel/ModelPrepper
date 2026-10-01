@@ -26,7 +26,8 @@ pub struct Resolution {
     pub evidence: Vec<CapturedEvidence>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct CapturedEvidence {
     pub path: String,
     pub sha256: String,

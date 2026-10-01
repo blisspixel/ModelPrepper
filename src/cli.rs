@@ -1,5 +1,5 @@
 use crate::{Config, Error, Inventory, Result, build_plan};
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 use serde_json::{Value, json};
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Write};
@@ -19,6 +19,31 @@ pub struct Cli {
 
 #[derive(Debug, Subcommand)]
 pub enum Command {
+    /// Inspect a public source and persist its exact evidence and destination.
+    Propose {
+        #[arg(long)]
+        config: PathBuf,
+        #[arg(long)]
+        repo: String,
+        #[arg(long, default_value = "main")]
+        revision: String,
+    },
+    /// Browse saved source reviews offline.
+    Proposals {
+        #[arg(long)]
+        config: PathBuf,
+        #[command(subcommand)]
+        command: ProposalCommand,
+    },
+    /// Record a final review decision. Transfer approval is not available yet.
+    Decide {
+        #[arg(long)]
+        config: PathBuf,
+        #[arg(long)]
+        plan: String,
+        #[arg(long, value_enum)]
+        decision: DecisionChoice,
+    },
     /// Initialize the local catalog and adopt empty storage directories.
     Init {
         #[arg(long)]
@@ -54,6 +79,30 @@ pub enum Command {
 }
 
 #[derive(Debug, Subcommand)]
+pub enum ProposalCommand {
+    List {
+        #[arg(long)]
+        after: Option<String>,
+        #[arg(long, default_value_t = 20, value_parser = clap::value_parser!(u32).range(1..=100))]
+        limit: u32,
+    },
+    Show {
+        #[arg(long)]
+        plan: String,
+    },
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+pub enum DecisionChoice {
+    Approve,
+    Reject,
+}
+
+fn located_config(path: &Path) -> Result<Config> {
+    crate::vault::locate(&Config::parse(&read_text(path)?)?, path)
+}
+
+#[derive(Debug, Subcommand)]
 pub enum ConfigCommand {
     Init {
         #[arg(long)]
@@ -71,6 +120,44 @@ pub enum ConfigCommand {
 
 pub fn execute(cli: Cli) -> Result<Value> {
     match cli.command {
+        Command::Propose {
+            config,
+            repo,
+            revision,
+        } => serde_json::to_value(crate::vault::propose(
+            &located_config(&config)?,
+            &repo,
+            &revision,
+        )?)
+        .map_err(|e| Error::new("output_failed", e.to_string())),
+        Command::Proposals { config, command } => {
+            let config = located_config(&config)?;
+            match command {
+                ProposalCommand::List { after, limit } => {
+                    serde_json::to_value(crate::vault::proposals(&config, after.as_deref(), limit)?)
+                }
+                ProposalCommand::Show { plan } => {
+                    serde_json::to_value(crate::vault::show_proposal(&config, &plan)?)
+                }
+            }
+            .map_err(|e| Error::new("output_failed", e.to_string()))
+        }
+        Command::Decide {
+            config,
+            plan,
+            decision,
+        } => {
+            let decision = match decision {
+                DecisionChoice::Approve => crate::vault::Decision::Approved,
+                DecisionChoice::Reject => crate::vault::Decision::Rejected,
+            };
+            serde_json::to_value(crate::vault::decide(
+                &located_config(&config)?,
+                &plan,
+                decision,
+            )?)
+            .map_err(|e| Error::new("output_failed", e.to_string()))
+        }
         Command::Init { config } => {
             let loaded = Config::parse(&read_text(&config)?)?;
             let located = crate::vault::locate(&loaded, &config)?;
