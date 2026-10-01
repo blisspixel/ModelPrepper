@@ -19,7 +19,7 @@ No command executes repository code. No automatic scan, account service, telemet
 
 ## Observed evidence
 
-- Native Windows unit, CLI, contract, HTTP, integrity, and vault tests pass.
+- Native Windows unit, CLI, contract, HTTP, integrity, and vault tests pass. Additional [validation drills](validation-drills.md) exercise abrupt process termination, the live NTFS test vault, and durable pinned-source decisions.
 - HTTP fixtures exercise bounded reads, interruptions, redirect trust, signed-URL redaction, bad status/encoding, access restrictions, source changes, and metadata disagreement.
 - Rights fixtures reject missing, changed, conflicting, and excessive evidence. Shard fixtures require exact index closure over selected weights.
 - Vault fixtures exercise competing writer ownership, stable IDs, unrelated data rejection, all-volume preflight, interrupted marker publication, missing/substituted disks, schema/configuration drift, and Windows junctions.
@@ -28,7 +28,7 @@ No command executes repository code. No automatic scan, account service, telemet
 - Live source inspection pins SmolLM2-135M-Instruct at 12fd25f77366fa6b3b4b768ec3050bf629380bac. Configuration bytes verify; missing license text remains unreviewed despite the Apache tag. No weights were fetched.
 - A second release inspection pins Qwen2.5-0.5B-Instruct at 7ae557604adf67be50417f59c2c2f167def9a775. License/config/tokenizer configuration bytes verify, and the Apache template with its filled appendix copyright matches. Transfer authorization remains false; no weights were fetched.
 
-Local Windows validation passes 59 Rust tests, seven offline installer/packaging tests, and six documentation-tool tests. Measured owned Rust coverage is 96.73% of lines and 93.10% of branches; the documentation link library measures 100% for both. Rust formatting, Clippy with warnings denied, Markdown lint, local links, and Python tooling lint pass. CLI captures are regenerated from the release binary and checked for freshness. Dependency source/license/duplicate checks and the vulnerability audit passed for the unchanged lockfile; no known vulnerabilities were reported. A release smoke test creates an empty vault and reports its mounted disk without contacting a publisher. Current artifact sizes are observations, not distribution guarantees.
+Local Windows validation passes 61 Rust tests, ten offline installer/packaging tests, and six documentation-tool tests. Measured owned Rust coverage is 96.73% of lines and 93.10% of branches; the documentation link library measures 100% for both. Rust formatting, Clippy with warnings denied, Markdown lint, local links, and Python tooling lint pass. CLI captures are regenerated from the release binary and checked for freshness. Dependency source/license/duplicate checks and the vulnerability audit passed for the unchanged lockfile; no known vulnerabilities were reported. A release smoke test creates an empty vault and reports its mounted disk without contacting a publisher. Current artifact sizes are observations, not distribution guarantees.
 
 Live source state can change. These checks are observations, not permanently pinned model recommendations. Use resolve to inspect a current source and retain the exact commit/evidence before later approval.
 

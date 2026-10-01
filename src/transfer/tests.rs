@@ -186,6 +186,155 @@ fn recovery_reports_read_only_truncation_failure_and_keeps_payload() {
     assert_eq!(bytes(&mut file), b"abcTAIL");
 }
 
+// Re-entered in a separate native test process. Ordinary runs do no work here.
+#[test]
+fn termination_worker() {
+    let Some(root) = std::env::var_os("MODELPREPPER_TERMINATION_ROOT") else {
+        return;
+    };
+    let root = std::path::PathBuf::from(root);
+    let mut file = File::options()
+        .create_new(true)
+        .read(true)
+        .write(true)
+        .open(root.join("partial"))
+        .unwrap();
+    file.try_lock().unwrap();
+    let model = expected(b"abcdef");
+    let committed = run(
+        response(206, "Content-Range: bytes 0-2/6\r\n", b"abc"),
+        &model,
+        &mut file,
+        None,
+        3,
+    )
+    .unwrap();
+    let mut journal = File::create(root.join("checkpoint.json")).unwrap();
+    journal
+        .write_all(&serde_json::to_vec(&committed.checkpoint).unwrap())
+        .unwrap();
+    journal.sync_all().unwrap();
+    if std::env::var("MODELPREPPER_TERMINATION_PHASE").unwrap() == "after_sync" {
+        run(
+            response(206, "Content-Range: bytes 3-5/6\r\n", b"def"),
+            &model,
+            &mut file,
+            Some(&committed.checkpoint),
+            3,
+        )
+        .unwrap();
+        std::fs::write(root.join("ready"), b"synced").unwrap();
+        loop {
+            std::thread::sleep(std::time::Duration::from_secs(1));
+        }
+    }
+    // Block inside a genuine HTTP body read after appending one new byte.
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let origin = format!("http://{}", listener.local_addr().unwrap());
+    let signal = root.join("ready");
+    std::thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        let mut request = Vec::new();
+        let mut byte = [0];
+        while !request.ends_with(b"\r\n\r\n") {
+            stream.read_exact(&mut byte).unwrap();
+            request.push(byte[0]);
+        }
+        stream
+            .write_all(
+                b"HTTP/1.1 206 OK\r\nContent-Range: bytes 3-5/6\r\nContent-Length: 3\r\n\r\nd",
+            )
+            .unwrap();
+        stream.flush().unwrap();
+        std::fs::write(signal, b"body").unwrap();
+        loop {
+            std::thread::sleep(std::time::Duration::from_secs(1));
+        }
+    });
+    stage_with(
+        &Http::fixture(&origin),
+        &origin,
+        &source(),
+        &model,
+        &mut file,
+        Some(&committed.checkpoint),
+        3,
+    )
+    .unwrap();
+    panic!("parent should terminate this worker during the body read");
+}
+
+#[test]
+fn terminated_transfer_process_releases_lock_and_recovers_only_committed_bytes() {
+    struct Worker(std::process::Child);
+    impl Drop for Worker {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+    for phase in ["after_sync", "during_body"] {
+        let dir = tempfile::tempdir().unwrap();
+        let mut worker = Worker(
+            std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "transfer::tests::termination_worker",
+                    "--nocapture",
+                ])
+                .env("MODELPREPPER_TERMINATION_ROOT", dir.path())
+                .env("MODELPREPPER_TERMINATION_PHASE", phase)
+                .spawn()
+                .unwrap(),
+        );
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+        let target_length = if phase == "after_sync" { 6 } else { 4 };
+        loop {
+            let length = std::fs::metadata(dir.path().join("partial"))
+                .map(|m| m.len())
+                .unwrap_or(0);
+            if dir.path().join("ready").exists() && length == target_length {
+                break;
+            }
+            assert!(
+                worker.0.try_wait().unwrap().is_none(),
+                "worker exited early"
+            );
+            assert!(
+                std::time::Instant::now() < deadline,
+                "worker readiness timeout: {phase}"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        worker.0.kill().unwrap();
+        assert!(!worker.0.wait().unwrap().success());
+        let checkpoint: Checkpoint =
+            serde_json::from_slice(&std::fs::read(dir.path().join("checkpoint.json")).unwrap())
+                .unwrap();
+        let mut file = File::options()
+            .read(true)
+            .write(true)
+            .open(dir.path().join("partial"))
+            .unwrap();
+        file.try_lock().unwrap();
+        let model = expected(b"abcdef");
+        assert_eq!(
+            recover_stage(&source(), &model, &mut file, &checkpoint).unwrap(),
+            target_length - 3
+        );
+        assert_eq!(bytes(&mut file), b"abc");
+        let final_segment = run(
+            response(206, "Content-Range: bytes 3-5/6\r\n", b"def"),
+            &model,
+            &mut file,
+            Some(&checkpoint),
+            3,
+        )
+        .unwrap();
+        assert_eq!(final_segment.verified_sha256, Some(digest(b"abcdef")));
+    }
+}
+
 #[test]
 fn resumes_identity_bound_segments_and_verifies_the_whole_file() {
     let mut file = tempfile::tempfile().unwrap();

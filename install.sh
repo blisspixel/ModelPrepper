@@ -76,9 +76,24 @@ printf '%s\n' "$checksum" | LC_ALL=C grep -Eq '^[0-9a-f]{64}$' || fail 'SHA-256 
 [ -f "$archive" ] || fail 'archive does not exist'
 [ "$(hash_file "$archive")" = "$checksum" ] || fail 'archive checksum mismatch; existing installation was retained'
 expected_entries=$(printf '%s\n' LICENSE modelprepper)
-[ "$(tar -tzf "$archive" | LC_ALL=C sort)" = "$expected_entries" ] || fail 'archive must contain exactly modelprepper and LICENSE'
-[ "$(tar -tvzf "$archive" | cut -c1)" = "$(printf '%s\n' '-' '-')" ] || fail 'archive entries must be regular files'
-tar -xzf "$archive" -C "$work" modelprepper LICENSE
+# Preserve tar's exit status instead of hiding corrupt archives behind a pipe.
+tar -tzf "$archive" > "$work/entries" || fail 'archive listing failed'
+[ "$(LC_ALL=C sort "$work/entries")" = "$expected_entries" ] || fail 'archive must contain exactly modelprepper and LICENSE'
+tar -tvzf "$archive" > "$work/details" || fail 'archive inspection failed'
+[ "$(cut -c1 "$work/details")" = "$(printf '%s\n' '-' '-')" ] || fail 'archive entries must be regular files'
+# Cap each output before it reaches disk. Do not parse platform-specific tar
+# listing columns or trust an archive's claimed decompressed size.
+for entry in modelprepper LICENSE; do
+    (
+        if tar -xOzf "$archive" "$entry"; then
+            printf 'ok' > "$work/extract-status"
+        else
+            printf 'failed' > "$work/extract-status"
+        fi
+    ) | head -c 134217729 > "$work/$entry"
+    [ "$(wc -c < "$work/$entry")" -le 134217728 ] || fail 'archive entry exceeds the 128 MiB installer limit'
+    [ "$(cat "$work/extract-status")" = ok ] || fail 'archive extraction failed'
+done
 [ -f "$work/modelprepper" ] && [ ! -L "$work/modelprepper" ] || fail 'invalid executable entry'
 chmod 755 "$work/modelprepper"
 [ "$("$work/modelprepper" --version)" = "modelprepper ${version#v}" ] || fail 'binary version does not match release tag'

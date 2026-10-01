@@ -189,6 +189,55 @@ class InstallerTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertFalse(self.executable.exists())
 
+    def test_truncated_archive_retains_previous_installation(self):
+        self.assertEqual(self.install().returncode, 0)
+        before = self.executable.read_bytes()
+        bad = self.root / self.archive.name
+        bad.write_bytes(self.archive.read_bytes()[:100])
+        result = self.install(
+            archive=bad, digest=hashlib.sha256(bad.read_bytes()).hexdigest()
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(self.executable.read_bytes(), before)
+        self.assertEqual(list(self.destination.glob(".modelprepper*")), [])
+
+    def test_oversized_entries_are_rejected_before_installation(self):
+        limit = 134217728
+        bad = self.root / self.archive.name
+        if platform.system() == "Windows":
+            with zipfile.ZipFile(bad, "w", compression=zipfile.ZIP_DEFLATED) as bundle:
+                bundle.writestr("modelprepper.exe", BINARY.read_bytes())
+                with bundle.open("LICENSE", "w") as entry:
+                    for _ in range(128):
+                        entry.write(bytes(1024 * 1024))
+                    entry.write(b"x")
+        else:
+
+            class ZeroReader:
+                def read(self, size):
+                    return bytes(size)
+
+            with tarfile.open(bad, "w:gz") as bundle:
+                binary = tarfile.TarInfo("modelprepper")
+                binary.size = BINARY.stat().st_size
+                with BINARY.open("rb") as stream:
+                    bundle.addfile(binary, stream)
+                oversized = tarfile.TarInfo("LICENSE")
+                oversized.size = limit + 1
+                bundle.addfile(oversized, ZeroReader())
+        result = self.install(
+            archive=bad, digest=hashlib.sha256(bad.read_bytes()).hexdigest()
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("128 MiB", result.stderr)
+        self.assertFalse(self.executable.exists())
+
+    def test_destination_file_collision_does_not_replace_user_data(self):
+        self.destination.write_bytes(b"unrelated user data")
+        result = self.install()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(self.destination.read_bytes(), b"unrelated user data")
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)

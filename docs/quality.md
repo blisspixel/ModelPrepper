@@ -52,7 +52,7 @@ M0 establishes these checks on every change:
 
 Select a coverage tool that measures both metrics accurately. Generated bindings and vendored upstream code may be excluded with explicit documented reasons. Do not exclude difficult transfer or recovery logic to reach the threshold.
 
-A green aggregate percentage does not substitute for fault coverage. Release CI builds and smoke-tests every labeled architecture. No weights or private credentials are required by ordinary CI.
+A green aggregate percentage does not substitute for fault coverage. Recorded [validation drills](validation-drills.md) document actual process termination, installer regressions, and live-vault checks with their limits. Release CI builds and smoke-tests every labeled architecture. No weights or private credentials are required by ordinary CI.
 
 ## Fault and behavior matrix
 
