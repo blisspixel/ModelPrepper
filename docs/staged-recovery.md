@@ -1,6 +1,6 @@
 # Staged transfer recovery
 
-The Rust transfer experiment includes explicit, offline recovery of an uncommitted file tail. This is a library operation, not a payload CLI or a complete durable job engine. It adds no dependencies.
+The Rust transfer experiment includes explicit, offline recovery of an uncommitted file tail. This is a library operation, not a payload CLI or a complete durable job engine. The new [staging journal](staging-journal.md) now owns exclusive access and checkpoint persistence for the single-file experiment. It adds no dependencies.
 
 ## Failure being handled
 
@@ -24,7 +24,7 @@ The checkpoint is a local integrity baseline. It cannot authenticate a journal t
 
 ## Required integration protocol
 
-The following order is the contract for the future job engine, not functionality already shipped:
+The following order is the contract for the future vault job engine. The staging-session experiment implements the single-file checkpoint ordering and recovery portions; approval, reservations, accounting, and publication remain unimplemented:
 
 1. Acquire writer ownership, verify the mounted volume identity, and validate the approved immutable transfer plan.
 2. Durably establish the staging file and its initial zero-byte checkpoint before requesting payload. If a nonempty file has no committed checkpoint, report it as unowned recovery data; do not invent an identity or truncate it automatically.

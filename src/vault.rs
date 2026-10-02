@@ -137,7 +137,7 @@ fn validate_locations(config: &Config) -> Result<()> {
     Ok(())
 }
 
-fn check_path(path: &Path) -> Result<()> {
+pub(crate) fn check_path(path: &Path) -> Result<()> {
     let mut current = PathBuf::new();
     for component in path.components() {
         current.push(component);

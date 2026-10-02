@@ -15,6 +15,9 @@ use std::{
 };
 use url::Url;
 
+mod session;
+pub use session::StagingSession;
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Checkpoint {

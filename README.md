@@ -89,7 +89,7 @@ These are product requirements. [Current status](docs/implementation-status.md) 
 | [Responsibilities and limits](docs/notice.md) | [Quality and CI gates](docs/quality.md) |
 | [Contributing](CONTRIBUTING.md) | [Repository and release gates](docs/release.md) |
 
-Additional design details: [model sources and mirrors](docs/model-sources.md), [interfaces](docs/interfaces.md), [watch/discovery priorities](docs/worries.md), and [related projects](docs/related-projects.md).
+Additional design details: [durable staging experiment](docs/staging-journal.md), [model sources and mirrors](docs/model-sources.md), [interfaces](docs/interfaces.md), [watch/discovery priorities](docs/worries.md), and [related projects](docs/related-projects.md).
 
 ## License and disclaimer
 
