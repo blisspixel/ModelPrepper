@@ -4,7 +4,7 @@ use rusqlite::{Connection, OpenFlags, params};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeSet,
-    fs::{self, File, OpenOptions},
+    fs::{self, OpenOptions},
     io::Write,
     path::{Path, PathBuf},
 };
@@ -395,7 +395,7 @@ fn read_identity(path: &Path) -> Result<Identity> {
 
 fn sync_directory(path: &Path) -> Result<()> {
     #[cfg(unix)]
-    File::open(path).map_err(io)?.sync_all().map_err(io)?;
+    fs::File::open(path).map_err(io)?.sync_all().map_err(io)?;
     #[cfg(not(unix))]
     let _ = path;
     Ok(())
