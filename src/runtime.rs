@@ -117,7 +117,7 @@ pub fn inventory(dirs: &[PathBuf], preserved: &BTreeSet<String>) -> Result<Runti
             "{} local models, {preserved_count} preserved, {unlicensed} without a license layer",
             models.len()
         ),
-        message: notes.join(" "),
+        message: notes.join("; "),
         models,
     })
 }
@@ -193,7 +193,7 @@ fn read_store(
         if notes.is_empty() {
             None
         } else {
-            Some(notes.join(" "))
+            Some(notes.join("; "))
         },
     ))
 }
