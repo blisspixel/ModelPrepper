@@ -7,7 +7,6 @@ use crate::{
     Config, Error, Result,
     integrity::hash_exact,
     inventory::{EvidenceStatus, HashAlgorithm, SourceFile},
-    plan::digest,
     verify::{self, Verification},
 };
 use serde::Serialize;
@@ -96,6 +95,7 @@ pub(crate) fn adopt_stopping(
     let staging_root = volume_path.join(".modelprepper-adopt");
     let staging = staging_root.join(plan_id);
     let journal = staging_root.join(format!("{plan_id}.json"));
+    let source = checked_source(config, source)?;
 
     if published.exists() {
         let check = verify::verify_tree(&inventory, &published, progress)?;
@@ -121,24 +121,26 @@ pub(crate) fn adopt_stopping(
         let _ = fs::remove_dir_all(&staging);
         let _ = fs::remove_file(&journal);
         if move_source {
-            remove_sources(source, &inventory.files)?;
+            remove_sources(&source, &published, &inventory.files)?;
         }
         return Ok(recorded(&repo, &revision, published, move_source));
     }
 
-    let source = fs::canonicalize(source)
-        .map_err(|error| Error::new("path_not_found", format!("{}: {error}", source.display())))?;
-    check_path(&source)?;
-    if source.starts_with(&volume_path) || volume_path.starts_with(&source) {
-        return Err(Error::new(
-            "overlapping_vault_paths",
-            "local source must be outside the vault volume",
-        ));
-    }
     for item in &evidence {
-        let bytes = fs::read(verify::local_path(&source, &item.path))
-            .map_err(|error| Error::new("evidence_mismatch", format!("{}: {error}", item.path)))?;
-        if digest(&bytes) != item.sha256 {
+        let mismatch = || {
+            Error::new(
+                "evidence_mismatch",
+                format!("{} does not match captured license evidence", item.path),
+            )
+        };
+        let size = item.text.len() as u64;
+        let meta = verify::metadata_nofollow(&source, &item.path)?.ok_or_else(mismatch)?;
+        if !meta.is_file() || meta.len() != size {
+            return Err(mismatch());
+        }
+        let input = File::open(verify::local_path(&source, &item.path)).map_err(|_| mismatch())?;
+        let hashed = hash_exact(input, size, |_| {}).map_err(|_| mismatch())?;
+        if hashed.sha256 != item.sha256 {
             return Err(Error::new(
                 "evidence_mismatch",
                 format!("{} does not match captured license evidence", item.path),
@@ -192,7 +194,7 @@ pub(crate) fn adopt_stopping(
     )?;
     let _ = fs::remove_file(&journal);
     if move_source {
-        remove_sources(&source, &inventory.files)?;
+        remove_sources(&source, &published, &inventory.files)?;
     }
     Ok(recorded(&repo, &revision, published, move_source))
 }
@@ -371,13 +373,73 @@ fn record(
     Ok(())
 }
 
-fn remove_sources(source: &Path, files: &[SourceFile]) -> Result<()> {
-    let Ok(source) = fs::canonicalize(source) else {
-        return Ok(());
+fn checked_source(config: &Config, source: &Path) -> Result<PathBuf> {
+    let meta = fs::symlink_metadata(source)
+        .map_err(|error| Error::new("path_not_found", format!("{}: {error}", source.display())))?;
+    let linked = meta.file_type().is_symlink();
+    #[cfg(windows)]
+    let linked = {
+        use std::os::windows::fs::MetadataExt;
+        linked || meta.file_attributes() & 0x400 != 0
     };
+    if linked || !meta.is_dir() {
+        return Err(Error::new(
+            "unsafe_path",
+            "local source must be a real directory",
+        ));
+    }
+    let source = fs::canonicalize(source)
+        .map_err(|error| Error::new("path_not_found", format!("{}: {error}", source.display())))?;
+    check_path(&source)?;
+    let source_alias = PathBuf::from(source.to_string_lossy().to_lowercase());
+    for managed in
+        std::iter::once(&config.catalog_path).chain(config.volumes.iter().map(|v| &v.path))
+    {
+        // Offline volumes still reserve their configured paths.
+        let managed = match fs::canonicalize(managed) {
+            Ok(path) => path,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => managed.clone(),
+            Err(error) => return Err(io(error)),
+        };
+        let managed_alias = PathBuf::from(managed.to_string_lossy().to_lowercase());
+        if source_alias.starts_with(&managed_alias) || managed_alias.starts_with(&source_alias) {
+            return Err(Error::new(
+                "overlapping_vault_paths",
+                "local source must be outside the catalog and every vault volume",
+            ));
+        }
+    }
+    Ok(source)
+}
+
+fn removable(source: &Path, published: &Path, file: &SourceFile) -> Result<bool> {
+    if verify::metadata_nofollow(source, &file.path)?.is_none() {
+        return Ok(false); // A prior successful cleanup may have removed this entry.
+    }
+    // Check the source last so a potentially large destination read does not
+    // separate source verification from removal.
+    if verify::file_status(published, file, &mut |_, _, _| {})? != "match"
+        || verify::file_status(source, file, &mut |_, _, _| {})? != "match"
+    {
+        return Err(Error::new(
+            "source_remove_failed",
+            format!(
+                "{} must match its preserved upstream copy before removal",
+                file.path
+            ),
+        ));
+    }
+    Ok(true)
+}
+
+fn remove_sources(source: &Path, published: &Path, files: &[SourceFile]) -> Result<()> {
+    // Preflight every remaining file before deleting any; preserve partial retries.
     for file in files {
-        let path = verify::local_path(&source, &file.path);
-        if path.exists() {
+        removable(source, published, file)?;
+    }
+    for file in files {
+        if removable(source, published, file)? {
+            let path = verify::local_path(source, &file.path);
             fs::remove_file(&path).map_err(|error| {
                 Error::new("source_remove_failed", format!("{}: {error}", file.path))
             })?;

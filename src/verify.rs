@@ -80,7 +80,7 @@ pub fn verify_tree(
     })
 }
 
-fn file_status(
+pub(crate) fn file_status(
     root: &Path,
     file: &SourceFile,
     progress: &mut dyn FnMut(&str, u64, u64),
@@ -119,7 +119,7 @@ pub(crate) fn local_path(root: &Path, rel: &str) -> std::path::PathBuf {
         .fold(root.to_path_buf(), |path, part| path.join(part))
 }
 
-fn metadata_nofollow(root: &Path, rel: &str) -> Result<Option<fs::Metadata>> {
+pub(crate) fn metadata_nofollow(root: &Path, rel: &str) -> Result<Option<fs::Metadata>> {
     let mut current = root.to_path_buf();
     let parts: Vec<&str> = rel.split('/').filter(|part| !part.is_empty()).collect();
     for (index, part) in parts.iter().enumerate() {
@@ -131,10 +131,16 @@ fn metadata_nofollow(root: &Path, rel: &str) -> Result<Option<fs::Metadata>> {
                 return Err(Error::new("input_read_failed", format!("{rel}: {error}")));
             }
         };
-        if meta.file_type().is_symlink() {
+        let linked = meta.file_type().is_symlink();
+        #[cfg(windows)]
+        let linked = {
+            use std::os::windows::fs::MetadataExt;
+            linked || meta.file_attributes() & 0x400 != 0
+        };
+        if linked {
             return Err(Error::new(
                 "unsafe_path",
-                format!("{rel} is a symlink and was not followed"),
+                format!("{rel} is a symlink or reparse point and was not followed"),
             ));
         }
         let last = index + 1 == parts.len();
@@ -142,7 +148,10 @@ fn metadata_nofollow(root: &Path, rel: &str) -> Result<Option<fs::Metadata>> {
             return Ok(Some(meta));
         }
         if !meta.is_dir() {
-            return Ok(Some(meta));
+            return Err(Error::new(
+                "unsafe_path",
+                format!("{rel} has a non-directory ancestor"),
+            ));
         }
     }
     Ok(None)
