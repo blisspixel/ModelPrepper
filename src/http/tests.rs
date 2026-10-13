@@ -62,6 +62,8 @@ fn bounded_http_follows_only_allowed_redirects_and_preserves_exact_bytes() {
 fn http_errors_do_not_disclose_signed_urls() {
     for (reply, limit, code) in [
         (response(403, "", b"secret"), 10, "source_status"),
+        (response(404, "", b"missing"), 10, "source_status"),
+        (response(401, "", b"nope"), 10, "source_status"),
         (response(200, "", b"abcd"), 3, "metadata_too_large"),
         (
             response(200, "Content-Encoding: gzip\r\n", b"abc"),

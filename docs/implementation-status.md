@@ -8,8 +8,10 @@ This records executable behavior and evidence as of October 1, 2026. It does not
 | --- | --- | --- |
 | config init/check | Exclusive config creation and strict validation. | No automatic configuration migration. |
 | init | Bundled local SQLite, writer lock, stable vault/disk UUIDs, empty-directory adoption. | Full power-loss recovery and filesystem qualification remain open. |
-| status | Offline catalog and mounted identity check, actual free bytes. | No archived bundles, jobs, reservations, replicas, or relocation yet. |
-| resolve | Moving ref followed by pinned metadata; verified license/config/index bytes. | Public ungated models only; no payload download or approval. |
+| status | Offline catalog and mounted identity check, actual free bytes, and preserved local copies. | No downloaded bundles, jobs, reservations, replicas, or relocation yet. |
+| resolve | Moving ref followed by pinned metadata; verified license/config/index bytes. GGUF-only repos report layout `gguf-v1`. | Public ungated models only; no payload download or approval. |
+| verify-local / adopt | Read-only hash against a resolved commit, then copy or move a match. Provenance is `upstream-verified (local source)`. | Not a download and not a local-baseline import. License evidence must already match. |
+| local list | Read-only Ollama manifest inventory and preserved-digest comparison. | Does not import blobs or call the Ollama API. |
 | propose / proposals / decide | Durable evidence/volume binding, paginated offline inspection, idempotent rejection, schema-1 migration. | Approval is blocked until transfer bounds and accounting qualify. |
 | plan | Canonical preview from local inventory, file selection and blockers. | Always untrusted, never persisted or authorized. |
 | Integrity library | Bounded-memory Git blob/LFS verification plus local SHA-256. | Transfer writer and durable manifest integration are next. |

@@ -95,6 +95,8 @@ Offline export includes the selected bundles, volume identity, sanitized invento
 
 Imported bytes with no captured source evidence remain local-baseline imports. Matching a known manifest can establish consistency with that captured identity.
 
+Upstream-verified local adoption is narrower and already available. `verify-local` and `adopt` accept a folder only when its files match a resolved commit's sizes and upstream hashes, and when that commit's license evidence is matched. The catalog records `upstream-verified (local source)`. A local-baseline import, still future work, may record a copy that lacks that upstream proof. Adoption does not relabel a baseline as upstream-verified, and it does not download from the hub.
+
 A second copy on the same physical disk does not satisfy a separate-media target. Ask the user to label failure domains; filesystem paths alone cannot establish that two disks are independent.
 
 ## Repair and deletion

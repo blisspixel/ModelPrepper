@@ -7,7 +7,7 @@ Images under assets render actual command output from the native release executa
 | [Help](assets/cli-help.png) | modelprepper --help |
 | [Offline status](assets/cli-status.png) | modelprepper status for a newly initialized demonstration vault |
 
-Status is formatted as JSON without changing field values. The demonstration vault lives under target and contains no weights. Source fingerprint and output/image hashes are recorded in [the manifest](assets/captures.json). No capture claims model preservation or offline loading.
+Status JSON keeps the command's field values. Compact JSON is the default when stdout is not a terminal; a terminal or `--pretty` indents those same fields. Captures record the non-interactive compact default rather than a second pretty-printer. The demonstration vault lives under target and contains no weights. Source fingerprint and output/image hashes are recorded in [the manifest](assets/captures.json). No capture claims model preservation or offline loading.
 
 ## Regenerate
 

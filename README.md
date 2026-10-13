@@ -10,15 +10,17 @@ Local custody, portable data, and user control are central. The project rejects 
 
 ## Project status
 
-**Experimental prototype.** Vault setup, disk identities, offline status, public-source inspection, durable source reviews, and local inventory previews work today. The streaming transfer library is an experiment. Approved downloads, budget accounting, sealed bundles, replicas, and unattended maintenance are still being built. No current CLI command preserves a model end to end.
+**Experimental prototype.** Vault setup, disk identities, offline status, public-source inspection, durable source reviews, and local inventory previews work today. `verify-local` and `adopt` can check a folder you already downloaded and store it as an upstream-verified local copy. The streaming transfer library is an experiment. Approved downloads, budget accounting, sealed bundles, replicas, and unattended maintenance are still being built. No current command downloads a model into the vault.
 
 | Available now | Behavior |
 | --- | --- |
-| config init/check | Create configuration exclusively and validate its schema and policies. |
+| config init/check | Create configuration exclusively and validate its schema, policies, and non-overlapping paths. |
 | init | Initialize bundled SQLite and adopt empty storage directories with stable disk identities. |
-| status | Inspect catalog, disk identities, and actual free space without publisher access. |
-| resolve | Pin a public commit and verify license, configuration, tokenizer configuration, and index evidence. |
+| status | Inspect catalog, disk identities, preserved copies, and actual free space without publisher access. |
+| resolve | Pin a public commit and verify license, configuration, tokenizer configuration, and index evidence. GGUF-only repos are labeled `gguf-v1`. |
 | propose / proposals / decide | Save exact source reviews, browse offline, and record rejection. Approval remains blocked. |
+| verify-local / adopt | Compare a local folder with a resolved commit, then copy or move a match into the vault. |
+| local list | Read Ollama manifests and report which tags are not preserved. Nothing in the store is changed. |
 | plan | Preview untrusted local inventory with selected files, costs, exclusions, and blockers. |
 
 See [implementation status](docs/implementation-status.md) for observed evidence and limitations, and the [roadmap](docs/roadmap.md) for delivery gates.
@@ -48,7 +50,14 @@ Inspect a public model without downloading weights:
 
     cargo run --locked --release -- resolve --repo Qwen/Qwen2.5-0.5B-Instruct --revision main
 
-Review the resolved commit and original license evidence. A license tag alone is insufficient. Source inspection always reports transfer_authorized=false.
+Review the resolved commit and original license evidence. A license tag alone is insufficient. Source inspection always reports transfer_authorized=false. JSON is indented when stdout is a terminal, or when you pass `--pretty`; pipes stay compact. A missing repository is `repository_not_found_or_private` (Hugging Face uses HTTP 401 for both), and a missing revision is `revision_not_found`.
+
+If you already have the files, verify them against that commit and adopt the folder. This is not a download, and it is not a local-baseline import: every required file must match the resolved sizes and upstream hashes, and the commit must already have matched license evidence. The catalog then records provenance `upstream-verified (local source)`.
+
+    cargo run --locked --release -- verify-local --repo Qwen/Qwen2.5-0.5B-Instruct --revision main --path ~/Downloads/qwen
+    cargo run --locked --release -- adopt --config config.local.toml --plan <plan_id> --path ~/Downloads/qwen --copy
+
+`verify-local --config config.local.toml --plan <plan_id> --path ...` uses the saved review and does not contact the network. Hashing streams and prints progress on stderr. `local list` answers which Ollama tags are still only in the runtime store. Pass `--config` to compare them with preserved digests. The command never calls the Ollama API and never modifies blobs.
 
 Try the offline planning fixture:
 

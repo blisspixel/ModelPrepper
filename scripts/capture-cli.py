@@ -29,7 +29,12 @@ def execute(binary, *args):
 
 
 def render(name, command, output):
-    fonts = [Path("C:/Windows/Fonts/consola.ttf"), Path("/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf"), Path("/System/Library/Fonts/Menlo.ttc")]
+    fonts = [
+        Path("C:/Windows/Fonts/consola.ttf"),
+        Path("/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf"),
+        Path("/usr/share/fonts/liberation/LiberationMono-Regular.ttf"),
+        Path("/System/Library/Fonts/Menlo.ttc"),
+    ]
     font_path = next((p for p in fonts if p.exists()), None)
     if font_path is None:
         raise SystemExit("A monospace system font is required for capture rendering")
@@ -64,8 +69,7 @@ def main():
     ]:
         raw = execute(binary, *args)
         (ASSETS / (name + ".txt")).write_bytes(raw.encode())
-        displayed = json.dumps(json.loads(raw), indent=2, ensure_ascii=False) if name == "cli-status" else raw
-        render(name, command, displayed)
+        render(name, command, raw)
         captures.append({"command": command, "output": name + ".txt", "image": name + ".png", "output_sha256": hashlib.sha256(raw.encode()).hexdigest(), "image_sha256": hashlib.sha256((ASSETS / (name + ".png")).read_bytes()).hexdigest()})
     manifest = {"schema_version": 1, "captured_at": datetime.now(timezone.utc).isoformat(), "platform": platform.system(), "version": execute(binary, "--version").strip(), "source_digest": source_digest(), "captures": captures}
     (ASSETS / "captures.json").write_bytes((json.dumps(manifest, indent=2) + "\n").encode())

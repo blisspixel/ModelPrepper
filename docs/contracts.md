@@ -76,19 +76,25 @@ The future trusted transfer plan gets a distinct identity domain. An offline pre
 
 ## CLI output and errors
 
-Successful commands emit a single JSON object on stdout. Structured application failures emit schema_version plus error.code and error.message on stderr and exit 1.
+Successful commands emit a single JSON object on stdout. Pipes and files receive compact JSON. A terminal, or `--pretty`, indents the same object. `local list --format text` is the one plain-text summary. Structured application failures emit schema_version plus error.code and error.message on stderr and exit 1.
+
+A closed stdout or stderr (SIGPIPE / broken pipe) ends the process with status 0 and no panic. The Rust runtime already ignores SIGPIPE; write errors of kind broken pipe are not application failures.
+
+`verify-local` prints a local_verification object. It exits 1 when `ok` is false. The message names each required file that is missing, the wrong size, or the wrong hash. `adopt` copies or moves only after that check passes, re-hashes the destination, and records provenance `upstream-verified (local source)`. A partial staging directory is removed when verification fails and is resumed when the process is interrupted before publication. A local-baseline import, which would record bytes without upstream proof, is not implemented. Adoption cannot proceed when the saved review's license evidence is not matched.
 
 Clap argument errors exit 2. Help and version are ordinary text. Successful offline preview exits 0 even when blockers are present: it completed a preview rather than a transfer.
 
 Local metadata reads are capped at 2 MiB and require UTF-8, with optional leading BOM. Parser errors avoid echoing a full TOML source excerpt. Only resolve and propose make publisher requests today. Proposal listing, inspection, and rejection remain offline.
 
-config init creates only a config file using exclusive creation. It does not initialize a vault and never overwrites an existing output. Failure during writing is reported; if storage failure leaves a partial config, the user inspects it before retrying.
+config init creates only a config file using exclusive creation. It does not initialize a vault and never overwrites an existing output. Overlapping catalog and volume paths are rejected at generation and at config check with overlapping_vault_paths, before init. Failure during writing is reported; if storage failure leaves a partial config, the user inspects it before retrying.
 
 ## Implemented source resolution
 
 resolve accepts a repository id or official hub URL and a bounded revision. It reads the moving revision, then reads its exact 40-character commit. Repository identity, pin, access flags, file paths, sizes, and upstream identities are checked before evidence is fetched. Only public, ungated model repositories are supported.
 
-The complete pinned inventory remains in the output, including excluded alternatives. Root publisher safetensors, conventional configuration/tokenizer files, templates, README, licenses, and notices receive explicit roles. Nested weight variants, adapters, repository code, and pickle weights are not selected by this profile.
+The complete pinned inventory remains in the output, including excluded alternatives. Root publisher safetensors, conventional configuration/tokenizer files, templates, README, licenses, and notices receive explicit roles. Root `.gguf` files are weights. A repository whose weights are GGUF files and not safetensors is labeled `gguf-v1` instead of `unsupported`, so it can be reviewed. That label does not select GGUF into the safetensors profile, and `include_gguf` stays rejected. Nested weight variants, adapters, repository code, and pickle weights are not selected by this profile.
+
+Repository metadata HTTP 401 is `repository_not_found_or_private`. HTTP 404 on that metadata request is `revision_not_found`. Other file-fetch statuses stay `source_status`.
 
 License and notice bytes are fetched at the pinned commit and verified against their Git blob or LFS identity. Exact text and local SHA-256 remain in the result. Git blob SHA-1 includes the object header; it is never raw file SHA-1.
 
@@ -108,7 +114,7 @@ Initialization commits disk identities to the catalog before publishing volume m
 
 Once initialization reaches ready, init never recreates a missing volume or adopts a replacement. Existing user payload files are retained. Status reports mounted, offline, identity_missing, or identity_mismatch per volume. Invalid marker text is an application error. The top-level ready state means catalog initialization completed; availability is reported separately for each disk.
 
-status is offline, acquires the writer lock, opens only an existing catalog, and checks identities before measuring free bytes. It can update SQLite journal bookkeeping, so it is not a read-only media command. Changing a configured disk path or label fails with volume_configuration_changed. Relocating a volume requires a future explicit operation.
+status is offline, acquires the writer lock, opens only an existing catalog, and checks identities before measuring free bytes. It can update SQLite journal bookkeeping, so it is not a read-only media command. It also lists preserved copies: repository id, resolved commit, volume label, and provenance. `upstream-verified (local source)` means the bytes matched a resolved commit and its captured license evidence. It is not a downloaded seal and not a local-baseline import. Changing a configured disk path or label fails with volume_configuration_changed. Relocating a volume requires a future explicit operation.
 
 ## Future manifest contract
 

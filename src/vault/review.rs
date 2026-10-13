@@ -139,7 +139,7 @@ pub fn propose(config: &Config, repo: &str, revision: &str) -> Result<Proposal> 
     save(&catalog, config, resolved, current)
 }
 
-fn save(
+pub(crate) fn save(
     catalog: &Catalog,
     config: &Config,
     mut resolved: Resolution,
@@ -188,7 +188,7 @@ fn save(
     load(catalog, config, &id)
 }
 
-fn load(catalog: &Catalog, config: &Config, id: &str) -> Result<Proposal> {
+pub(crate) fn load(catalog: &Catalog, config: &Config, id: &str) -> Result<Proposal> {
     validate_hex(id, 64)?;
     let row: Option<(String, String, i64, Option<i64>, String)> = catalog.db.query_row(
         "SELECT document,decision,created_at,decided_at,observed_available_bytes FROM proposals WHERE id=?1 AND length(CAST(document AS BLOB))<=?2 AND length(observed_available_bytes)<=20", params![id, MAX_DOCUMENT_BYTES as i64],

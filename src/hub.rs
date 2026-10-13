@@ -26,7 +26,7 @@ pub struct Resolution {
     pub evidence: Vec<CapturedEvidence>,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct CapturedEvidence {
     pub path: String,
@@ -82,13 +82,20 @@ fn metadata(http: &Http, base: &str, repo: &str, revision: &str) -> Result<Metad
         .expect("HTTP origin")
         .extend(["api", "models", owner, name, "revision", revision]);
     url.set_query(Some("blobs=true"));
+    let mut response = http.open(&url, None)?;
+    let status = response.status().as_u16();
+    if status != 200 {
+        return Err(metadata_status(status));
+    }
     let value: Metadata =
-        serde_json::from_slice(&http.get(&url, METADATA_LIMIT)?).map_err(|_| {
-            Error::new(
-                "invalid_source_metadata",
-                "source lacks complete file sizes and identities",
-            )
-        })?;
+        serde_json::from_slice(&crate::http::read_body(&mut response, METADATA_LIMIT)?).map_err(
+            |_| {
+                Error::new(
+                    "invalid_source_metadata",
+                    "source lacks complete file sizes and identities",
+                )
+            },
+        )?;
     validate_hex(&value.sha, 40)?;
     if value.id != repo {
         return Err(Error::new(
@@ -145,15 +152,19 @@ fn resolve_with(http: &Http, base: &str, repo: &str, revision: &str) -> Result<R
             }
         };
         let role = classify(&sibling.rfilename);
+        // GGUF weights are labeled, not selected, until a GGUF-only layout is recognized.
+        let gguf_weight =
+            role == Role::Weight && sibling.rfilename.to_ascii_lowercase().ends_with(".gguf");
         files.push(SourceFile {
             path: sibling.rfilename,
             size_bytes: sibling.size,
             upstream_hash: Some(hash),
             role,
-            required: matches!(
-                role,
-                Role::Weight | Role::Config | Role::Tokenizer | Role::License | Role::Notice
-            ),
+            required: !gguf_weight
+                && matches!(
+                    role,
+                    Role::Weight | Role::Config | Role::Tokenizer | Role::License | Role::Notice
+                ),
         });
     }
     let paths = files
@@ -240,6 +251,16 @@ fn resolve_with(http: &Http, base: &str, repo: &str, revision: &str) -> Result<R
     }
     if supported_layout(http, base, &inventory)? {
         inventory.layout = "transformers-safetensors-v1".into();
+    } else if gguf_only(&inventory) {
+        inventory.layout = "gguf-v1".into();
+        for file in &mut inventory.files {
+            if file.role == Role::Weight
+                && !file.path.contains('/')
+                && file.path.to_ascii_lowercase().ends_with(".gguf")
+            {
+                file.required = true;
+            }
+        }
     }
     inventory.files.sort_by(|a, b| a.path.cmp(&b.path));
     inventory.license.paths.sort();
@@ -301,7 +322,41 @@ fn classify(path: &str) -> Role {
         "readme.md" => Role::Documentation,
         "model.safetensors" => Role::Weight,
         _ if name.starts_with("model-") && name.ends_with(".safetensors") => Role::Weight,
+        _ if name.ends_with(".gguf") => Role::Weight,
         _ => Role::Other,
+    }
+}
+
+fn gguf_only(inventory: &Inventory) -> bool {
+    let mut gguf = false;
+    for file in &inventory.files {
+        let name = file
+            .path
+            .rsplit('/')
+            .next()
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        if name.ends_with(".safetensors") {
+            return false;
+        }
+        if name.ends_with(".gguf") && !file.path.contains('/') {
+            gguf = true;
+        }
+    }
+    gguf
+}
+
+fn metadata_status(status: u16) -> Error {
+    match status {
+        401 => Error::new(
+            "repository_not_found_or_private",
+            "repository was not found or is private; Hugging Face answers HTTP 401 for both",
+        ),
+        404 => Error::new(
+            "revision_not_found",
+            "revision was not found; check the branch, tag, or commit",
+        ),
+        _ => Error::new("source_status", format!("source returned HTTP {status}")),
     }
 }
 

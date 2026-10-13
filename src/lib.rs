@@ -9,9 +9,11 @@ pub mod integrity;
 pub mod inventory;
 pub mod licenses;
 pub mod plan;
+mod runtime;
 pub mod transfer;
 pub mod validation;
 pub mod vault;
+mod verify;
 
 pub use config::Config;
 pub use error::{Error, Result};

@@ -250,13 +250,13 @@ fn invalid_source_fails_without_saving_a_review() {
 
 #[test]
 fn cli_shows_saved_evidence_and_records_only_the_exact_rejection() {
-    use crate::cli::{Cli, execute};
+    use crate::cli::{Cli, CommandOutput, execute};
     use clap::Parser;
     let (dir, config) = setup();
     let proposal = fixture(&config);
     let path = dir.path().join("config.toml");
     fs::write(&path, toml::to_string(&config).unwrap()).unwrap();
-    let shown = execute(
+    let CommandOutput::Json(shown) = execute(
         Cli::try_parse_from([
             "modelprepper",
             "proposals",
@@ -268,9 +268,11 @@ fn cli_shows_saved_evidence_and_records_only_the_exact_rejection() {
         ])
         .unwrap(),
     )
-    .unwrap();
+    .unwrap() else {
+        panic!("expected json");
+    };
     assert_eq!(shown["review"]["evidence"][0]["text"], "fixture evidence");
-    let rejected = execute(
+    let CommandOutput::Json(rejected) = execute(
         Cli::try_parse_from([
             "modelprepper",
             "decide",
@@ -283,7 +285,9 @@ fn cli_shows_saved_evidence_and_records_only_the_exact_rejection() {
         ])
         .unwrap(),
     )
-    .unwrap();
+    .unwrap() else {
+        panic!("expected json");
+    };
     assert_eq!(rejected["decision"], "rejected");
     assert_eq!(rejected["transfer_authorized"], false);
 }

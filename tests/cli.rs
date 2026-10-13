@@ -1,7 +1,10 @@
 use clap::Parser;
-use modelprepper::cli::{Cli, Command as AppCommand, ConfigCommand, execute, read_text};
+use modelprepper::cli::{
+    Cli, Command as AppCommand, ConfigCommand, execute, pretty_output, read_text,
+};
 use std::fs;
-use std::process::{Command, Output};
+use std::io::Read;
+use std::process::{Command, Output, Stdio};
 use tempfile::TempDir;
 
 fn binary(args: &[&str]) -> Output {
@@ -248,6 +251,7 @@ fn library_cli_has_the_same_errors_as_the_binary() {
     assert!(error.to_string().contains("config_write_failed"));
     let _: &dyn std::error::Error = &error;
     let cli = Cli {
+        pretty: false,
         command: AppCommand::Config {
             command: ConfigCommand::Init {
                 output,
@@ -296,4 +300,108 @@ fn native_vault_commands_resolve_paths_from_config_and_status_stays_offline() {
     ] {
         assert!(!binary(&args).status.success());
     }
+}
+
+#[test]
+fn flag_help_describes_plan_repo_and_decision() {
+    for (args, needle) in [
+        (vec!["propose", "--help"], "Hugging Face repository"),
+        (vec!["decide", "--help"], "Exact plan id"),
+        (vec!["proposals", "show", "--help"], "Exact plan id"),
+        (vec!["resolve", "--help"], "Branch, tag, or commit"),
+    ] {
+        let output = binary(&args);
+        assert!(output.status.success(), "{output:?}");
+        let text = String::from_utf8(output.stdout).unwrap();
+        assert!(text.contains(needle), "{text}");
+    }
+}
+
+#[test]
+fn overlapping_paths_fail_at_config_generation_and_check() {
+    let dir = TempDir::new().unwrap();
+    let output = dir.path().join("c3.toml");
+    let created = binary(&[
+        "config",
+        "init",
+        "--output",
+        output.to_str().unwrap(),
+        "--catalog",
+        "x",
+        "--volume",
+        "x",
+    ]);
+    assert!(!created.status.success(), "{created:?}");
+    assert!(!output.exists());
+    let error: serde_json::Value = serde_json::from_slice(&created.stderr).unwrap();
+    assert_eq!(error["error"]["code"], "overlapping_vault_paths");
+    fs::write(
+        &output,
+        toml::to_string(&modelprepper::Config::default_for("x".into(), "x".into())).unwrap(),
+    )
+    .unwrap();
+    let check = binary(&["config", "check", "--config", output.to_str().unwrap()]);
+    assert!(!check.status.success());
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&check.stderr).unwrap()["error"]["code"],
+        "overlapping_vault_paths"
+    );
+}
+
+#[test]
+fn pretty_flag_indents_json_and_closed_stdout_does_not_panic() {
+    assert!(pretty_output(true, false));
+    assert!(pretty_output(false, true));
+    assert!(!pretty_output(false, false));
+    let dir = TempDir::new().unwrap();
+    let output = dir.path().join("config.toml");
+    assert!(
+        binary(&[
+            "config",
+            "init",
+            "--output",
+            output.to_str().unwrap(),
+            "--catalog",
+            "catalog",
+            "--volume",
+            "models",
+        ])
+        .status
+        .success()
+    );
+    let compact = binary(&["config", "check", "--config", output.to_str().unwrap()]);
+    assert_eq!(
+        compact.stdout.iter().filter(|byte| **byte == b'\n').count(),
+        1
+    );
+    let pretty = binary(&[
+        "config",
+        "check",
+        "--pretty",
+        "--config",
+        output.to_str().unwrap(),
+    ]);
+    assert!(pretty.status.success(), "{pretty:?}");
+    assert!(pretty.stdout.windows(3).any(|bytes| bytes == b"\n  "));
+
+    let (reader, writer) = std::io::pipe().unwrap();
+    drop(reader);
+    let mut child = Command::new(env!("CARGO_BIN_EXE_modelprepper"))
+        .args(["config", "check", "--config", output.to_str().unwrap()])
+        .stdout(writer)
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut stderr = Vec::new();
+    child
+        .stderr
+        .take()
+        .unwrap()
+        .read_to_end(&mut stderr)
+        .unwrap();
+    let status = child.wait().unwrap();
+    let stderr = String::from_utf8_lossy(&stderr);
+    assert!(status.success(), "{status:?} {stderr}");
+    assert!(!stderr.contains("panicked"), "{stderr}");
+    assert!(!stderr.contains("Broken pipe"), "{stderr}");
 }

@@ -1,18 +1,22 @@
 Model preservation planning and public-source inspection.
 
-Usage: modelprepper.exe <COMMAND>
+Usage: modelprepper [OPTIONS] <COMMAND>
 
 Commands:
-  propose    Inspect a public source and persist its exact evidence and destination
-  proposals  Browse saved source reviews offline
-  decide     Record a final review decision. Transfer approval is not available yet
-  init       Initialize the local catalog and adopt empty storage directories
-  status     Inspect catalog and disk identities without contacting a publisher
-  resolve    Resolve a public model to a pinned commit and inspect its license evidence
-  config     Generate or validate configuration without creating a vault
-  plan       Preview an untrusted local inventory. Never authorizes model transfers
-  help       Print this message or the help of the given subcommand(s)
+  propose       Inspect a public source and persist its exact evidence and destination
+  proposals     Browse saved source reviews offline
+  decide        Record a final review decision. Transfer approval is not available yet
+  init          Initialize the local catalog and adopt empty storage directories
+  status        Inspect catalog and disk identities without contacting a publisher
+  resolve       Resolve a public model to a pinned commit and inspect its license evidence
+  verify-local  Hash a local folder against a resolved commit. Reads only; nothing is copied
+  adopt         Copy or move a verified local folder into the vault
+  local         Read-only inventory of local runtime stores
+  config        Generate or validate configuration without creating a vault
+  plan          Preview an untrusted local inventory. Never authorizes model transfers
+  help          Print this message or the help of the given subcommand(s)
 
 Options:
+      --pretty   Indent JSON. Also used automatically when stdout is a terminal
   -h, --help     Print help
   -V, --version  Print version

@@ -368,6 +368,78 @@ fn tokenizer_configuration_cannot_silently_require_repository_code() {
 }
 
 #[test]
+fn missing_repository_and_revision_are_not_generic_http_errors() {
+    let missing = Server::new(vec![response(401, "", b"{}")]);
+    let error = resolve_with(
+        &Http::fixture(&missing.origin),
+        &missing.origin,
+        "owner/model",
+        "main",
+    )
+    .unwrap_err();
+    assert_eq!(error.code, "repository_not_found_or_private");
+    assert!(error.message.contains("private"), "{}", error.message);
+    missing.finish();
+
+    let revision = Server::new(vec![response(404, "", b"{}")]);
+    let error = resolve_with(
+        &Http::fixture(&revision.origin),
+        &revision.origin,
+        "owner/model",
+        "missing-ref",
+    )
+    .unwrap_err();
+    assert_eq!(error.code, "revision_not_found");
+    assert!(error.message.contains("revision"), "{}", error.message);
+    revision.finish();
+}
+
+#[test]
+fn gguf_only_repositories_report_layout_and_roles() {
+    let weight = b"GGUF-fixture";
+    let mut gguf = sibling("model-q4_k_m.gguf", weight);
+    gguf["lfs"] = json!({"sha256": digest(weight), "size": weight.len()});
+    let meta = json!({
+        "id": "owner/model",
+        "sha": COMMIT,
+        "private": false,
+        "gated": false,
+        "cardData": {"license": "mit"},
+        "siblings": [sibling("LICENSE", licenses::MIT.as_bytes()), sibling("README.md", b"readme"), gguf]
+    });
+    let resolved = inspect(&meta, vec![licenses::MIT.as_bytes().to_vec()]).unwrap();
+    assert_eq!(resolved.inventory.layout, "gguf-v1");
+    let file = resolved
+        .inventory
+        .files
+        .iter()
+        .find(|file| file.path.ends_with(".gguf"))
+        .unwrap();
+    assert_eq!(file.role, Role::Weight);
+    assert!(file.required);
+    assert_eq!(
+        resolved
+            .inventory
+            .files
+            .iter()
+            .find(|file| file.path == "README.md")
+            .unwrap()
+            .role,
+        Role::Documentation
+    );
+    assert_eq!(
+        resolved
+            .inventory
+            .files
+            .iter()
+            .find(|file| file.path == "LICENSE")
+            .unwrap()
+            .role,
+        Role::License
+    );
+}
+
+#[test]
 fn role_selection_is_narrow_and_all_license_paths_are_evidence() {
     for (path, role) in [
         ("LICENSE.md", Role::License),
