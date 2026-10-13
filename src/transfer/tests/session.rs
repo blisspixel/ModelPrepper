@@ -91,6 +91,21 @@ fn journal_survives_reopen_and_completion_requires_full_verification() {
     assert_eq!(contents(&mut session.file), b"abcdef");
 }
 
+#[cfg(unix)]
+#[test]
+fn closing_a_session_releases_ownership_despite_an_inherited_descriptor() {
+    let (_temp, path) = root();
+    let session = StagingSession::create(&path, &source(), &expected()).unwrap();
+    // A process fork in another thread can retain the open file description
+    // briefly before exec closes its CLOEXEC copy.
+    let inherited = session._writer.0.try_clone().unwrap();
+    drop(session);
+    let reopened = StagingSession::open(&path, &source(), &expected()).unwrap();
+    assert!(inherited.try_lock().is_err());
+    drop(reopened);
+    inherited.try_lock().unwrap();
+}
+
 #[test]
 fn failed_checkpoint_commit_keeps_old_progress_and_next_segment_reconciles_tail() {
     let (_temp, path) = root();

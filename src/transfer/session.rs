@@ -7,6 +7,7 @@ use crate::{
     plan::digest,
     validation::validate_hex,
     vault::check_path,
+    writer_lock::WriterLock,
 };
 use rusqlite::{Connection, OpenFlags, params};
 use std::{
@@ -94,7 +95,7 @@ pub struct StagingSession {
     // Release SQLite and payload handles before releasing writer ownership.
     db: Connection,
     file: File,
-    _writer: File,
+    _writer: WriterLock,
     source: Source,
     expected: SourceFile,
     identity: String,
@@ -114,8 +115,7 @@ impl StagingSession {
             .create_new(true)
             .open(root.join("writer.lock"))
             .map_err(disk)?;
-        writer
-            .try_lock()
+        let writer = WriterLock::acquire(writer)
             .map_err(|_| Error::new("writer_busy", "another process owns this staging session"))?;
         let file = OpenOptions::new()
             .read(true)
@@ -168,8 +168,7 @@ impl StagingSession {
             .write(true)
             .open(root.join("writer.lock"))
             .map_err(disk)?;
-        writer
-            .try_lock()
+        let writer = WriterLock::acquire(writer)
             .map_err(|_| Error::new("writer_busy", "another process owns this staging session"))?;
         let file = OpenOptions::new()
             .read(true)

@@ -1,5 +1,5 @@
 //! Local catalog ownership and restartable volume initialization.
-use crate::{Config, Error, Result};
+use crate::{Config, Error, Result, writer_lock::WriterLock};
 use rusqlite::{Connection, OpenFlags, params};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -15,6 +15,9 @@ const PENDING: &str = ".modelprepper-volume.pending";
 
 #[path = "vault/adopt.rs"]
 mod adoption;
+#[cfg(all(test, unix))]
+#[path = "vault/tests/ownership.rs"]
+mod ownership_tests;
 mod review;
 pub use adoption::{Outcome, PROVENANCE_LOCAL_UPSTREAM, adopt};
 pub use review::{Decision, Proposal, ProposalPage, decide, proposals, propose, show_proposal};
@@ -56,7 +59,7 @@ pub struct VolumeStatus {
 
 struct Catalog {
     db: Connection,
-    _writer: File,
+    _writer: WriterLock,
 }
 
 struct CatalogIdentity {
@@ -231,8 +234,7 @@ fn open_catalog(config: &Config, create: bool) -> Result<Catalog> {
         .truncate(false)
         .open(lock)
         .map_err(io)?;
-    writer
-        .try_lock()
+    let writer = WriterLock::acquire(writer)
         .map_err(|_| Error::new("writer_busy", "another process owns the vault writer lock"))?;
     let flags = OpenFlags::SQLITE_OPEN_READ_WRITE
         | if new {
