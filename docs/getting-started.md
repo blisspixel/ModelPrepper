@@ -35,6 +35,19 @@ Only public, ungated official Hugging Face model repositories are supported. A b
 
 Matched evidence meets the narrow current text matcher. Missing/conflicting evidence needs review. Configuration checks do not establish runtime compatibility. This example demonstrates inspection, not a workload or hardware recommendation.
 
+Interactive terminals indent JSON. Redirects and pipes stay on one line unless you pass `--pretty`. A repository Hugging Face answers with HTTP 401 is `repository_not_found_or_private`. A missing branch, tag, or commit is `revision_not_found`.
+
+## Verify a copy you already have
+
+```text
+cargo run --locked --release -- verify-local --repo Qwen/Qwen2.5-0.5B-Instruct --revision main --path ~/Downloads/qwen
+cargo run --locked --release -- adopt --config config.local.toml --plan <plan_id> --path ~/Downloads/qwen --copy
+```
+
+`verify-local` only reads. With `--plan` and `--config` it uses the saved review and does not use the network. Exit status is non-zero when a required file is missing or does not match, and the message names that file. `adopt` requires a pending review whose license evidence matched, copies or moves the files through a staging journal, re-checks the destination, and records `upstream-verified (local source)`. That is not a local-baseline import: a baseline would record bytes without this upstream proof, and that import is not implemented. Interrupted adoption resumes; a failed hash removes the staging copy and does not publish a partial tree.
+
+`local list` reads Ollama manifests from `OLLAMA_MODELS`, `~/.ollama/models`, and `/usr/share/ollama/.ollama/models`. It does not contact Ollama and does not change the store. `--config` compares blob digests with the vault. A missing store is explained in the output instead of failing with only an error code.
+
 ## Preview local metadata
 
 ```text
@@ -54,6 +67,10 @@ To retain pinned source evidence and record rejection, use the [source review wo
 | volume_configuration_changed | Restore the configured label/path. Relocation is not implemented yet. |
 | offline or identity_missing | Reconnect the expected disk. Init never recreates a ready vault's missing volume. |
 | identity_mismatch | Check the actual disk and marker. Do not copy a different disk's identity to bypass the check. |
+| repository_not_found_or_private | The hub returned HTTP 401. The repository is missing or private. |
+| revision_not_found | The branch, tag, or commit was not found. |
+| overlapping_vault_paths | Choose separate catalog and volume directories. config check rejects this before init. |
+| license_needs_review | Adoption will not store a commit whose license evidence did not match. |
 | access_restricted | Choose an authorized public source supported by this prototype. |
 | unreviewed or conflicting license | Inspect the original evidence. A tag alone cannot clear it. |
 | invalid_range or invalid_checkpoint | The library experiment rejected inconsistent bytes/identity. No CLI download workflow uses it yet. |

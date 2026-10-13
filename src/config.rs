@@ -204,6 +204,20 @@ impl Config {
                 return Err(Error::new("invalid_config", "duplicate watch"));
             }
         }
+        let mut locations = vec![self.catalog_path.clone()];
+        locations.extend(self.volumes.iter().map(|volume| volume.path.clone()));
+        for (index, path) in locations.iter().enumerate() {
+            for other in &locations[index + 1..] {
+                let left = PathBuf::from(path.to_string_lossy().to_lowercase());
+                let right = PathBuf::from(other.to_string_lossy().to_lowercase());
+                if left.starts_with(&right) || right.starts_with(&left) {
+                    return Err(Error::new(
+                        "overlapping_vault_paths",
+                        "catalog and volumes need separate, non-overlapping directories",
+                    ));
+                }
+            }
+        }
         Ok(())
     }
 

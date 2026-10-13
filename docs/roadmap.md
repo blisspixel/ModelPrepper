@@ -104,6 +104,8 @@ Acceptance:
 
 Implement full and quick checks, resumable verification sweeps, replica/export, import, repair, and catalog backup/reconstruction.
 
+Upstream-verified adoption of a local folder that matches a resolved commit is available before this milestone. Local-baseline import, which records a copy without that upstream proof, stays here.
+
 Acceptance:
 
 - A corrupted file is found by a full sweep.

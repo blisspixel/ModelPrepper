@@ -3,6 +3,7 @@ use crate::{Config, Error, Result};
 use rusqlite::{Connection, OpenFlags, params};
 use serde::{Deserialize, Serialize};
 use std::{
+    collections::BTreeSet,
     fs::{self, File, OpenOptions},
     io::Write,
     path::{Path, PathBuf},
@@ -12,7 +13,10 @@ use uuid::Uuid;
 const MARKER: &str = ".modelprepper-volume.json";
 const PENDING: &str = ".modelprepper-volume.pending";
 
+#[path = "vault/adopt.rs"]
+mod adoption;
 mod review;
+pub use adoption::{Outcome, PROVENANCE_LOCAL_UPSTREAM, adopt};
 pub use review::{Decision, Proposal, ProposalPage, decide, proposals, propose, show_proposal};
 
 #[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -30,6 +34,15 @@ pub struct Status {
     pub state: String,
     pub vault_id: String,
     pub volumes: Vec<VolumeStatus>,
+    pub preserved: Vec<PreservedCopy>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct PreservedCopy {
+    pub repo_id: String,
+    pub resolved_revision: String,
+    pub provenance: String,
+    pub volume_label: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -231,7 +244,7 @@ fn open_catalog(config: &Config, create: bool) -> Result<Catalog> {
     let version: u32 = connection
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .map_err(db)?;
-    if (!new && !matches!(version, 1 | 2)) || (new && version != 0) {
+    if (!new && !matches!(version, 1..=3)) || (new && version != 0) {
         return Err(Error::new(
             "unsupported_catalog_schema",
             "catalog schema is not supported",
@@ -279,6 +292,24 @@ fn open_catalog(config: &Config, create: bool) -> Result<Catalog> {
             );
             PRAGMA user_version=2;
             COMMIT;").map_err(db)?;
+    }
+    if version < 3 {
+        connection
+            .execute_batch(
+                "BEGIN IMMEDIATE;
+            CREATE TABLE IF NOT EXISTS custody (
+                plan_id TEXT PRIMARY KEY CHECK(length(plan_id)=64),
+                repo_id TEXT NOT NULL,
+                resolved_revision TEXT NOT NULL CHECK(length(resolved_revision)=40),
+                provenance TEXT NOT NULL,
+                volume_label TEXT NOT NULL,
+                relative_dir TEXT NOT NULL,
+                manifest TEXT NOT NULL
+            );
+            PRAGMA user_version=3;
+            COMMIT;",
+            )
+            .map_err(db)?;
     }
     Ok(Catalog {
         db: connection,
@@ -455,5 +486,50 @@ fn report(catalog: &Catalog, config: &Config) -> Result<Status> {
         state,
         vault_id,
         volumes: reports,
+        preserved: preserved_copies(catalog)?,
     })
+}
+
+fn preserved_copies(catalog: &Catalog) -> Result<Vec<PreservedCopy>> {
+    let mut query = catalog
+        .db
+        .prepare(
+            "SELECT repo_id, resolved_revision, provenance, volume_label FROM custody ORDER BY repo_id, resolved_revision, volume_label",
+        )
+        .map_err(db)?;
+    let rows = query
+        .query_map([], |row| {
+            Ok(PreservedCopy {
+                repo_id: row.get(0)?,
+                resolved_revision: row.get(1)?,
+                provenance: row.get(2)?,
+                volume_label: row.get(3)?,
+            })
+        })
+        .map_err(db)?;
+    rows.collect::<std::result::Result<Vec<_>, _>>().map_err(db)
+}
+
+/// Lowercase SHA-256 hex strings recorded for upstream-verified local copies.
+pub fn preserved_digests(config: &Config) -> Result<BTreeSet<String>> {
+    let catalog = open_catalog(config, false)?;
+    let mut query = catalog
+        .db
+        .prepare("SELECT manifest FROM custody")
+        .map_err(db)?;
+    let rows = query
+        .query_map([], |row| row.get::<_, String>(0))
+        .map_err(db)?;
+    let mut digests = BTreeSet::new();
+    for row in rows {
+        let manifest = row.map_err(db)?;
+        let files: Vec<serde_json::Value> = serde_json::from_str(&manifest)
+            .map_err(|_| Error::new("invalid_catalog", "custody manifest is invalid"))?;
+        for file in files {
+            if let Some(value) = file.get("sha256").and_then(serde_json::Value::as_str) {
+                digests.insert(value.to_ascii_lowercase());
+            }
+        }
+    }
+    Ok(digests)
 }

@@ -33,23 +33,7 @@ impl Http {
                 format!("source returned HTTP {status}"),
             ));
         }
-        let bound = limit
-            .checked_add(1)
-            .ok_or_else(|| Error::new("invalid_limit", "HTTP byte limit is too large"))?;
-        let mut bytes = Vec::new();
-        response
-            .body_mut()
-            .as_reader()
-            .take(bound)
-            .read_to_end(&mut bytes)
-            .map_err(|_| Error::new("source_read_failed", "HTTP body was interrupted"))?;
-        if bytes.len() as u64 > limit {
-            return Err(Error::new(
-                "metadata_too_large",
-                "source exceeds metadata byte limit",
-            ));
-        }
-        Ok(bytes)
+        read_body(&mut response, limit)
     }
 
     pub(crate) fn open(
@@ -115,6 +99,29 @@ impl Http {
             ..Self::default()
         }
     }
+}
+
+pub(crate) fn read_body(
+    response: &mut ureq::http::Response<ureq::Body>,
+    limit: u64,
+) -> Result<Vec<u8>> {
+    let bound = limit
+        .checked_add(1)
+        .ok_or_else(|| Error::new("invalid_limit", "HTTP byte limit is too large"))?;
+    let mut bytes = Vec::new();
+    response
+        .body_mut()
+        .as_reader()
+        .take(bound)
+        .read_to_end(&mut bytes)
+        .map_err(|_| Error::new("source_read_failed", "HTTP body was interrupted"))?;
+    if bytes.len() as u64 > limit {
+        return Err(Error::new(
+            "metadata_too_large",
+            "source exceeds metadata byte limit",
+        ));
+    }
+    Ok(bytes)
 }
 
 fn validate_url(url: &Url, test_origin: Option<&str>) -> Result<()> {
