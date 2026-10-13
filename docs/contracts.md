@@ -82,6 +82,10 @@ A closed stdout or stderr (SIGPIPE / broken pipe) ends the process with status 0
 
 `verify-local` prints a local_verification object. It exits 1 when `ok` is false. The message names each required file that is missing, the wrong size, or the wrong hash. `adopt` copies or moves only after that check passes, re-hashes the destination, and records provenance `upstream-verified (local source)`. A partial staging directory is removed when verification fails and is resumed when the process is interrupted before publication. A local-baseline import, which would record bytes without upstream proof, is not implemented. Adoption cannot proceed when the saved review's license evidence is not matched.
 
+Adoption requires a real source directory outside the catalog and every configured vault volume, including on retries with an existing preserved copy. Local license evidence must be a regular file with the captured byte length before it is opened; its hash is streamed in bounded chunks. Symlinks and Windows reparse points within reviewed file paths are rejected.
+
+Before `--move` removes any remaining source files, it checks all of them against their upstream identities and preserved copies, then repeats each check before removing that file. Changed or unsafe files fail cleanup without deleting earlier files during preflight. Files already absent after partial cleanup are allowed on retry; unrelated extra files are retained, and the source directory must still exist. These checks do not provide handle-relative protection against hostile concurrent directory replacement or an atomic multi-file deletion transaction.
+
 Clap argument errors exit 2. Help and version are ordinary text. Successful offline preview exits 0 even when blockers are present: it completed a preview rather than a transfer.
 
 Local metadata reads are capped at 2 MiB and require UTF-8, with optional leading BOM. Parser errors avoid echoing a full TOML source excerpt. Only resolve and propose make publisher requests today. Proposal listing, inspection, and rejection remain offline.

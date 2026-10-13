@@ -53,7 +53,7 @@ struct Sample {
 
 fn sample(matched: bool) -> Sample {
     let dir = TempDir::new().unwrap();
-    let download = dir.path().join("download");
+    let download = fs::canonicalize(dir.path()).unwrap().join("download");
     fs::create_dir(&download).unwrap();
     let license = b"upstream license text";
     let config = br#"{"model_type":"fixture"}"#;
@@ -246,4 +246,245 @@ fn schema_upgrade_keeps_custody_available() {
         .unwrap();
     drop(catalog);
     assert!(status(&config).unwrap().preserved.is_empty());
+}
+
+#[test]
+fn move_retry_preserves_changed_source_and_all_other_files() {
+    let (_dir, config) = setup();
+    let sample = sample(true);
+    let plan = stored(&config, &sample);
+    adopt(&config, &plan, &sample.download, false, &mut |_, _, _| {}).unwrap();
+    fs::write(sample.download.join("model.safetensors"), b"CHANGED").unwrap();
+    assert!(adopt(&config, &plan, &sample.download, true, &mut |_, _, _| {}).is_err());
+    assert_eq!(
+        fs::read(sample.download.join("model.safetensors")).unwrap(),
+        b"CHANGED"
+    );
+    assert!(sample.download.join("LICENSE").exists());
+}
+
+#[test]
+fn move_retry_rejects_the_published_tree_as_source() {
+    let (_dir, config) = setup();
+    let sample = sample(true);
+    let plan = stored(&config, &sample);
+    let Outcome::Recorded(copy) =
+        adopt(&config, &plan, &sample.download, false, &mut |_, _, _| {}).unwrap()
+    else {
+        panic!("copy");
+    };
+    assert!(adopt(&config, &plan, &copy.path, true, &mut |_, _, _| {}).is_err());
+    assert_eq!(
+        fs::read(copy.path.join("model.safetensors")).unwrap(),
+        b"weights"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn license_fifo_is_rejected_before_opening() {
+    let (_dir, config) = setup();
+    let sample = sample(true);
+    let plan = stored(&config, &sample);
+    let license = sample.download.join("LICENSE");
+    fs::remove_file(&license).unwrap();
+    assert!(
+        std::process::Command::new("mkfifo")
+            .arg(&license)
+            .status()
+            .unwrap()
+            .success()
+    );
+    assert!(adopt(&config, &plan, &sample.download, false, &mut |_, _, _| {}).is_err());
+    assert!(status(&config).unwrap().preserved.is_empty());
+}
+
+#[test]
+fn move_retry_resumes_partial_cleanup_without_touching_extra_files() {
+    let (_dir, config) = setup();
+    let sample = sample(true);
+    let plan = stored(&config, &sample);
+    adopt(&config, &plan, &sample.download, false, &mut |_, _, _| {}).unwrap();
+    fs::remove_file(sample.download.join("LICENSE")).unwrap();
+    fs::write(sample.download.join("personal.txt"), b"keep").unwrap();
+    for _ in 0..2 {
+        assert!(matches!(
+            adopt(&config, &plan, &sample.download, true, &mut |_, _, _| {}).unwrap(),
+            Outcome::Recorded(_)
+        ));
+    }
+    assert!(!sample.download.join("model.safetensors").exists());
+    assert_eq!(
+        fs::read(sample.download.join("personal.txt")).unwrap(),
+        b"keep"
+    );
+}
+
+#[test]
+fn move_preserves_source_changed_after_staging_started() {
+    let (_dir, config) = setup();
+    let sample = sample(true);
+    let plan = stored(&config, &sample);
+    let mut weight_updates = 0;
+    let result = adopt(&config, &plan, &sample.download, true, &mut |path, _, _| {
+        if path == "model.safetensors" {
+            weight_updates += 1;
+            if weight_updates == 3 {
+                fs::write(sample.download.join(path), b"CHANGED").unwrap();
+            }
+        }
+    });
+    assert_eq!(result.unwrap_err().code, "source_remove_failed");
+    assert_eq!(
+        fs::read(sample.download.join("model.safetensors")).unwrap(),
+        b"CHANGED"
+    );
+    assert!(sample.download.join("LICENSE").exists());
+    assert_eq!(
+        fs::read(
+            publish_dir(&config.volumes[0].path, "example/model", COMMIT).join("model.safetensors")
+        )
+        .unwrap(),
+        b"weights"
+    );
+}
+
+#[test]
+fn source_must_not_overlap_any_managed_root() {
+    let (dir, mut config) = setup();
+    let other = fs::canonicalize(dir.path()).unwrap().join("other-volume");
+    fs::create_dir(&other).unwrap();
+    config.volumes.push(crate::config::Volume {
+        label: "other".into(),
+        path: other.clone(),
+    });
+    for path in [
+        &config.catalog_path,
+        &config.volumes[0].path,
+        &other,
+        &fs::canonicalize(dir.path()).unwrap(),
+    ] {
+        assert_eq!(
+            super::checked_source(&config, path).unwrap_err().code,
+            "overlapping_vault_paths"
+        );
+    }
+    let file = dir.path().join("regular-file");
+    fs::write(&file, b"x").unwrap();
+    assert_eq!(
+        super::checked_source(&config, &file).unwrap_err().code,
+        "unsafe_path"
+    );
+}
+
+#[test]
+fn oversized_and_corrupt_license_evidence_is_rejected() {
+    let (_dir, config) = setup();
+    let sample = sample(true);
+    let plan = stored(&config, &sample);
+    let license = sample.download.join("LICENSE");
+    let file = fs::OpenOptions::new().write(true).open(&license).unwrap();
+    file.set_len(8 * 1024 * 1024 * 1024).unwrap();
+    drop(file);
+    assert_eq!(
+        adopt(&config, &plan, &sample.download, false, &mut |_, _, _| {})
+            .unwrap_err()
+            .code,
+        "evidence_mismatch"
+    );
+    fs::write(&license, b"UPSTREAM LICENSE TEXT").unwrap();
+    assert_eq!(
+        adopt(&config, &plan, &sample.download, false, &mut |_, _, _| {})
+            .unwrap_err()
+            .code,
+        "evidence_mismatch"
+    );
+    assert!(status(&config).unwrap().preserved.is_empty());
+}
+
+#[cfg(unix)]
+#[test]
+fn linked_evidence_and_retry_ancestors_are_not_followed() {
+    use std::os::unix::fs::symlink;
+    let (_dir, config) = setup();
+    let mut sample = sample(true);
+    // A reviewed nested path lets the retry exercise an ancestor link.
+    fs::create_dir(sample.download.join("nested")).unwrap();
+    fs::rename(
+        sample.download.join("model.safetensors"),
+        sample.download.join("nested/model.safetensors"),
+    )
+    .unwrap();
+    sample.inventory.files[2].path = "nested/model.safetensors".into();
+    let plan = stored(&config, &sample);
+    adopt(&config, &plan, &sample.download, false, &mut |_, _, _| {}).unwrap();
+    let outside = sample._dir.path().join("outside");
+    fs::rename(sample.download.join("nested"), &outside).unwrap();
+    symlink(&outside, sample.download.join("nested")).unwrap();
+    assert_eq!(
+        adopt(&config, &plan, &sample.download, true, &mut |_, _, _| {})
+            .unwrap_err()
+            .code,
+        "unsafe_path"
+    );
+    assert_eq!(
+        fs::read(outside.join("model.safetensors")).unwrap(),
+        b"weights"
+    );
+    assert!(sample.download.join("LICENSE").exists());
+
+    let sample = self::sample(true);
+    let license = sample.download.join("LICENSE");
+    let original = sample._dir.path().join("original-license");
+    fs::rename(&license, &original).unwrap();
+    symlink(&original, &license).unwrap();
+    // Use a fresh vault so the first-publication evidence path is exercised.
+    let (_fresh, config) = setup();
+    let plan = stored(&config, &sample);
+    assert_eq!(
+        adopt(&config, &plan, &sample.download, false, &mut |_, _, _| {})
+            .unwrap_err()
+            .code,
+        "unsafe_path"
+    );
+}
+
+#[cfg(windows)]
+#[test]
+fn retry_does_not_follow_windows_junctions() {
+    let (_dir, config) = setup();
+    let mut sample = sample(true);
+    let nested = sample.download.join("nested");
+    fs::create_dir(&nested).unwrap();
+    fs::rename(
+        sample.download.join("model.safetensors"),
+        nested.join("model.safetensors"),
+    )
+    .unwrap();
+    sample.inventory.files[2].path = "nested/model.safetensors".into();
+    let plan = stored(&config, &sample);
+    adopt(&config, &plan, &sample.download, false, &mut |_, _, _| {}).unwrap();
+    let outside = sample._dir.path().join("outside");
+    fs::rename(&nested, &outside).unwrap();
+    assert!(
+        std::process::Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(&nested)
+            .arg(&outside)
+            .status()
+            .unwrap()
+            .success()
+    );
+    assert_eq!(
+        adopt(&config, &plan, &sample.download, true, &mut |_, _, _| {})
+            .unwrap_err()
+            .code,
+        "unsafe_path"
+    );
+    assert_eq!(
+        fs::read(outside.join("model.safetensors")).unwrap(),
+        b"weights"
+    );
+    assert!(sample.download.join("LICENSE").exists());
+    fs::remove_dir(&nested).unwrap();
 }
