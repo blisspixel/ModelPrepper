@@ -6,7 +6,7 @@ The experimental `StagingSession` library owns persistent checkpoints for one pi
 
 Creation requires an absolute new directory under an existing parent. It rejects dot segments, symlink/reparse ancestors, existing directories, and unrelated entries. Windows UNC paths are rejected because the checkpoint database requires a local filesystem. Other network filesystems remain unqualified.
 
-The directory contains an OS-locked `writer.lock`, `payload.part`, and `checkpoint.sqlite3`, with a temporary SQLite rollback journal during transactions. The lock is held for the lifetime of the session. Payload and database handles close before writer ownership is released. Reopening does not create missing files or infer ownership from a partial filename.
+The directory contains an OS-locked `writer.lock`, `payload.part`, and `checkpoint.sqlite3`, with a temporary SQLite rollback journal during transactions. The lock is held for the lifetime of the session. Payload and database handles close before writer ownership is explicitly released, including when a concurrent process spawn briefly inherits the Unix file description. Reopening does not create missing files or infer ownership from a partial filename.
 
 The caller supplies the same pinned source and expected file inventory when creating and reopening a session. The journal binds their canonical transfer-file identity. A changed commit, path, expected size, or hash cannot reuse the checkpoint. Full original inventory remains the future vault job's responsibility.
 

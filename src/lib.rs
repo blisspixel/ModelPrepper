@@ -14,6 +14,7 @@ pub mod transfer;
 pub mod validation;
 pub mod vault;
 mod verify;
+mod writer_lock;
 
 pub use config::Config;
 pub use error::{Error, Result};
