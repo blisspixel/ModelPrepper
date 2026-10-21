@@ -1,0 +1,7 @@
+{
+  "schema_version": 1,
+  "error": {
+    "code": "input_read_failed",
+    "message": "/vault/config.toml: No such file or directory (os error 2)"
+  }
+}

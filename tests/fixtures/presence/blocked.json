@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "state": "initializing",
+  "vault_id": "8397c2c3aaaaaaaaaaaaaaaaaaaaaaaa",
+  "volumes": [
+    {
+      "label": "primary",
+      "volume_id": "11111111-1111-1111-1111-111111111111",
+      "path": "/vault/models",
+      "state": "mounted",
+      "available_bytes": 1000
+    }
+  ],
+  "preserved": []
+}

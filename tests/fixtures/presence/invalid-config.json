@@ -1,0 +1,7 @@
+{
+  "schema_version": 1,
+  "error": {
+    "code": "invalid_config",
+    "message": "config schema_version must be 1"
+  }
+}

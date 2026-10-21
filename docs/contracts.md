@@ -126,6 +126,8 @@ Once initialization reaches ready, init never recreates a missing volume or adop
 
 status is offline, acquires the writer lock, opens only an existing catalog, and checks identities before measuring free bytes. It can update SQLite journal bookkeeping, so it is not a read-only media command. It also lists preserved copies: repository id, resolved commit, volume label, and provenance. `upstream-verified (local source)` means the bytes matched a resolved commit and its captured license evidence. It is not a downloaded seal and not a local-baseline import. Changing a configured disk path or label fails with volume_configuration_changed. Relocating a volume requires a future explicit operation.
 
+An optional Omarchy bar widget in [plugins/omarchy-presence](../plugins/omarchy-presence/README.md) projects this status object. It is not part of the CLI, it is not installed with the binary, and it is not a second custody verdict. Its only command is `status`. The projection keeps writer-busy, missing config, invalid config, malformed output, timeout, and stale data distinct, and it labels catalog rows as historical provenance. An Omarchy session has not validated the widget.
+
 ## Future manifest contract
 
 The [source review contract](source-reviews.md) describes propose, proposals list/show, and decide. Reviews bind original evidence in a distinct identity domain; transfer approval remains unavailable. Rejected reviews are retained. A source review is not the future executable transfer plan or a manifest.

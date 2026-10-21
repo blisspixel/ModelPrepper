@@ -19,6 +19,8 @@ This records executable behavior and evidence as of October 20, 2026. It does no
 
 No command executes repository code. No automatic scan, account service, telemetry, deletion, or conversion exists.
 
+An optional Omarchy presence chip in [plugins/omarchy-presence](../plugins/omarchy-presence/README.md) projects `status` into disk presence, free space, and historical custody rows. It is not installed, not published, and not part of the CLI. `qmllint`, click, Escape, disable, restart, and removal have not been run.
+
 ## Observed evidence
 
 - Native Windows unit, CLI, contract, HTTP, integrity, and vault tests pass. Additional [validation drills](validation-drills.md) exercise abrupt process termination, the live NTFS test vault, and durable pinned-source decisions.
@@ -27,10 +29,11 @@ No command executes repository code. No automatic scan, account service, telemet
 - Vault fixtures exercise competing writer ownership, stable IDs, unrelated data rejection, all-volume preflight, interrupted marker publication, missing/substituted disks, schema/configuration drift, and Windows junctions.
 - Source-review fixtures cover restart persistence, policy changes, exact decisions, offline disks, corruption, pagination, and identity-preserving migration. Native installer fixtures cover verification, version mismatch, archive path rejection, retained configuration, and upgrades.
 - A Windows release builds with bundled SQLite and Rust TLS. Import inspection finds only OS DLLs.
+- Offline fixtures for the optional Omarchy presence projection cover mounted, offline, missing, and replaced disks, writer contention, invalid and malformed status, missing executables, hostile paths, timeouts, stale snapshots, and a changed config. They check the launched arguments. They do not run `qmllint` or an Omarchy session.
 - Live source inspection pins SmolLM2-135M-Instruct at 12fd25f77366fa6b3b4b768ec3050bf629380bac. Configuration bytes verify; missing license text remains unreviewed despite the Apache tag. No weights were fetched.
 - A second release inspection pins Qwen2.5-0.5B-Instruct at 7ae557604adf67be50417f59c2c2f167def9a775. License/config/tokenizer configuration bytes verify, and the Apache template with its filled appendix copyright matches. Transfer authorization remains false; no weights were fetched.
 
-Local Windows validation passes 104 Rust tests and six documentation-tool tests. Formatting and Clippy with warnings denied pass on Rust 1.99.1. Markdown lint and local links pass. The documentation link library measures 100% line and branch coverage. The CI coverage gate requires at least 80% of owned Rust lines and a real branch measurement; a new local percentage is not claimed until that job measures this tree. CLI captures are regenerated from the release executable. Dependency audit and license checks run in CI against the current lockfile. Offline installer fixtures run from the release binary. A release smoke test creates an empty vault and reports its mounted disk without contacting a publisher. Current artifact sizes are observations, not distribution guarantees.
+Local Windows validation passes 104 Rust tests and 27 documentation-tool tests. Formatting and Clippy with warnings denied pass on Rust 1.99.1. Markdown lint and local links pass. The documentation link library measures 100% line and branch coverage. The CI coverage gate requires at least 80% of owned Rust lines and a real branch measurement; a new local percentage is not claimed until that job measures this tree. CLI captures are regenerated from the release executable. Dependency audit and license checks run in CI against the current lockfile. Offline installer fixtures run from the release binary. A release smoke test creates an empty vault and reports its mounted disk without contacting a publisher. Current artifact sizes are observations, not distribution guarantees.
 
 Live source state can change. These checks are observations, not permanently pinned model recommendations. Use resolve to inspect a current source and retain the exact commit/evidence before later approval.
 

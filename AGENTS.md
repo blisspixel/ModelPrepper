@@ -12,6 +12,7 @@ Read [README](README.md) and [implementation status](docs/implementation-status.
 - Byte identities live in [src/integrity.rs](src/integrity.rs) and [src/verify.rs](src/verify.rs).
 - Catalog ownership, the writer lock, adoption, persistence, and recovery live under [src/vault/](src/vault/).
 - Deeper design is in [architecture](docs/architecture.md) and [contracts](docs/contracts.md). Link those instead of copying them.
+- The optional Omarchy presence projection lives in [plugins/omarchy-presence/Model.js](plugins/omarchy-presence/Model.js). The QML shell only displays it. Do not add a second status verdict or a background service.
 
 ## Invariants
 

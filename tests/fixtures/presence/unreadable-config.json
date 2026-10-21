@@ -1,0 +1,7 @@
+{
+  "schema_version": 1,
+  "error": {
+    "code": "input_read_failed",
+    "message": "/vault/config.toml: Permission denied (os error 13)"
+  }
+}

@@ -25,6 +25,8 @@ Local custody, portable data, and user control are central. The project rejects 
 
 See [implementation status](docs/implementation-status.md) for observed evidence and limitations, and the [roadmap](docs/roadmap.md) for delivery gates.
 
+An optional Omarchy bar chip lives in [plugins/omarchy-presence](plugins/omarchy-presence/README.md). It is not installed with the CLI and it is not a marketplace plugin. The chip reads `status` and reports disk presence only.
+
 ## Get started
 
 Build from source with the pinned Rust toolchain:
