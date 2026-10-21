@@ -1,4 +1,8 @@
 //! Experimental durable single-file staging. No approval or vault publication.
+//!
+//! `spent` is the sum of segment allowances charged before each request. It is
+//! not reduced when recovery discards a tail, and it is not a bandwidth
+//! measurement or a vault reservation.
 use super::{Checkpoint, Segment, disk, file_identity, recover_stage, stage_with};
 use crate::{
     Error, Result,
@@ -16,6 +20,16 @@ use std::{
 };
 
 const APPLICATION_ID: u32 = 0x4d50534a;
+/// One checkpoint database or its rollback journal. This is a disk cap, not
+/// process memory, a TLS buffer, or a measured transfer rate.
+const SIDE_FILE_CAP: u64 = 1024 * 1024;
+
+/// Extra disk the single-file session may use besides `payload.part`: the
+/// checkpoint database and its rollback journal. Preview `workspace_bytes`
+/// stays unset until a bound also covers every selected file.
+pub fn staging_workspace_bound() -> u64 {
+    SIDE_FILE_CAP * 2
+}
 const ENTRIES: &[&str] = &[
     "writer.lock",
     "payload.part",
@@ -133,11 +147,11 @@ impl StagingSession {
         db.execute_batch(
             "BEGIN IMMEDIATE;
             CREATE TABLE checkpoint (id INTEGER PRIMARY KEY CHECK(id=1), identity TEXT NOT NULL,
-                bytes TEXT NOT NULL, prefix_sha256 TEXT NOT NULL);",
+                bytes TEXT NOT NULL, prefix_sha256 TEXT NOT NULL, spent TEXT NOT NULL);",
         )
         .map_err(journal)?;
         db.execute(
-            "INSERT INTO checkpoint VALUES (1, ?1, '0', ?2)",
+            "INSERT INTO checkpoint VALUES (1, ?1, '0', ?2, '0')",
             params![identity, digest(b"")],
         )
         .map_err(journal)?;
@@ -175,13 +189,8 @@ impl StagingSession {
             .write(true)
             .open(root.join("payload.part"))
             .map_err(disk)?;
-        if fs::metadata(root.join("checkpoint.sqlite3"))
-            .map_err(disk)?
-            .len()
-            > 1024 * 1024
-        {
-            return Err(invalid());
-        }
+        side_file_within_cap(root, "checkpoint.sqlite3")?;
+        side_file_within_cap(root, "checkpoint.sqlite3-journal")?;
         let db = Connection::open_with_flags(
             root.join("checkpoint.sqlite3"),
             OpenFlags::SQLITE_OPEN_READ_WRITE,
@@ -206,6 +215,8 @@ impl StagingSession {
             identity,
             recovered_bytes: 0,
         };
+        // Reject a corrupt charge before recovery can truncate the payload.
+        session.spent_bytes()?;
         let checkpoint = session.checkpoint()?;
         session.recovered_bytes = recover_stage(source, expected, &mut session.file, &checkpoint)?;
         Ok(session)
@@ -246,16 +257,76 @@ impl StagingSession {
         self.recovered_bytes
     }
 
+    /// Allowances charged before requests. Recovery and a failed body do not
+    /// reduce it. A crash after this charge and before the checkpoint update
+    /// still owes the allowance.
+    pub fn spent_bytes(&self) -> Result<u64> {
+        let text: Option<String> = self
+            .db
+            .query_row(
+                "SELECT CASE WHEN length(spent)<=20 THEN spent END FROM checkpoint WHERE id=1",
+                [],
+                |row| row.get(0),
+            )
+            .map_err(journal)?;
+        let text = text.ok_or_else(invalid)?;
+        if text.is_empty() || !text.bytes().all(|byte| byte.is_ascii_digit()) {
+            return Err(invalid());
+        }
+        text.parse().map_err(|_| invalid())
+    }
+
     /// Stage and sync a bounded segment, then commit its checkpoint atomically.
-    /// Journal failure reports failure even if file bytes have reached disk.
+    /// The allowance is journaled before the request. Journal failure after the
+    /// payload sync reports failure even if those bytes have reached disk.
     pub fn stage(&mut self, max_new_bytes: u64) -> Result<Segment> {
         self.stage_with(&Http::default(), "https://huggingface.co", max_new_bytes)
     }
 
+    fn reserve(&mut self, amount: u64) -> Result<()> {
+        if amount == 0 {
+            return Ok(());
+        }
+        let next = self.spent_bytes()?.checked_add(amount).ok_or_else(|| {
+            Error::new(
+                "size_overflow",
+                "staged transfer spending exceeds u64 capacity",
+            )
+        })?;
+        let tx = self.db.transaction().map_err(journal)?;
+        let changed = tx
+            .execute(
+                "UPDATE checkpoint SET spent=?1 WHERE id=1 AND identity=?2 AND length(spent)<=20",
+                params![next.to_string(), self.identity],
+            )
+            .map_err(journal)?;
+        if changed != 1 {
+            return Err(invalid());
+        }
+        tx.commit().map_err(journal)
+    }
+
     fn stage_with(&mut self, http: &Http, base: &str, allowance: u64) -> Result<Segment> {
+        if allowance == 0 {
+            return Err(Error::new(
+                "invalid_limit",
+                "segment allowance must be positive",
+            ));
+        }
+        // Validate the charge before recovery so a bad journal cannot truncate.
+        self.spent_bytes()?;
         let checkpoint = self.checkpoint()?;
         self.recovered_bytes =
             recover_stage(&self.source, &self.expected, &mut self.file, &checkpoint)?;
+        let remaining = self
+            .expected
+            .size_bytes
+            .checked_sub(checkpoint.bytes)
+            .ok_or_else(invalid)?;
+        let count = remaining.min(allowance);
+        if count > 0 {
+            self.reserve(count)?;
+        }
         let segment = stage_with(
             http,
             base,
@@ -286,6 +357,14 @@ impl StagingSession {
         }
         tx.commit().map_err(journal)
     }
+}
+
+fn side_file_within_cap(root: &Path, name: &str) -> Result<()> {
+    let path = root.join(name);
+    if path.exists() && fs::metadata(&path).map_err(disk)?.len() > SIDE_FILE_CAP {
+        return Err(invalid());
+    }
+    Ok(())
 }
 
 fn configure(db: &Connection) -> Result<()> {
