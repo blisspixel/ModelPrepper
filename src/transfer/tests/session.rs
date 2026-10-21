@@ -507,9 +507,15 @@ fn canonical_path() -> String {
     format!("/owner/model/resolve/{}/model.safetensors", "a".repeat(40))
 }
 
-fn assert_no_credentials(requests: &[String]) {
+fn wire_bytes(exchanges: &[crate::fixture::Exchange]) -> u64 {
+    exchanges.iter().fold(0, |sum, exchange| {
+        sum + exchange.read_bytes + exchange.written_bytes
+    })
+}
+
+fn assert_no_credentials(requests: &[impl AsRef<str>]) {
     for request in requests {
-        let lower = request.to_ascii_lowercase();
+        let lower = request.as_ref().to_ascii_lowercase();
         assert!(!lower.contains("authorization:"));
         assert!(!lower.contains("cookie:"));
     }
@@ -532,8 +538,16 @@ fn expired_payload_location_refreshes_once_without_changing_identity_or_charge()
     let segment = session
         .stage_with(&Http::fixture(&server.origin), &server.origin, 3)
         .unwrap();
-    let requests = server.finish();
+    let exchanges = server.finish_measured();
+    let requests: Vec<&str> = exchanges
+        .iter()
+        .map(|exchange| exchange.request.as_str())
+        .collect();
     assert_eq!(requests.len(), 4);
+    let wire = wire_bytes(&exchanges);
+    assert!(wire > 3, "plaintext wire bytes exceed the charged payload");
+    assert!(exchanges.iter().all(|exchange| exchange.read_bytes < 8192));
+    assert!(exchanges.last().unwrap().written_bytes > 3);
     for request in &requests {
         assert!(request.to_ascii_lowercase().contains("range: bytes=3-5"));
     }
@@ -592,7 +606,16 @@ fn rejected_or_substituted_refresh_keeps_the_charge_and_the_pinned_identity() {
             .unwrap_err();
         assert_eq!(error.code, code);
         assert!(!error.message.contains("sig"));
-        let requests = server.finish();
+        let exchanges = server.finish_measured();
+        let requests: Vec<&str> = exchanges
+            .iter()
+            .map(|exchange| exchange.request.as_str())
+            .collect();
+        let wire = wire_bytes(&exchanges);
+        assert!(
+            wire > 6,
+            "plaintext wire bytes exceed the charged allowance"
+        );
         assert!(requests[0].contains(&canonical));
         assert_eq!(
             requests

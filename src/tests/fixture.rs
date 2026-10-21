@@ -5,9 +5,17 @@ use std::{
     time::{Duration, Instant},
 };
 
+/// One plaintext HTTP exchange. Counts are bytes read and written on the
+/// fixture socket. They are not TLS records or kernel socket-buffer sizes.
+pub struct Exchange {
+    pub request: String,
+    pub read_bytes: u64,
+    pub written_bytes: u64,
+}
+
 pub struct Server {
     pub origin: String,
-    worker: JoinHandle<Vec<String>>,
+    worker: JoinHandle<Vec<Exchange>>,
 }
 
 impl Server {
@@ -16,7 +24,7 @@ impl Server {
         listener.set_nonblocking(true).unwrap();
         let origin = format!("http://{}", listener.local_addr().unwrap());
         let worker = thread::spawn(move || {
-            let mut requests = Vec::new();
+            let mut exchanges = Vec::new();
             for response in responses {
                 let deadline = Instant::now() + Duration::from_secs(5);
                 let mut stream = loop {
@@ -44,17 +52,39 @@ impl Server {
                     request.push(byte[0]);
                     assert!(request.len() < 8192);
                 }
-                requests.push(String::from_utf8(request).unwrap());
-                // Oversize-body tests may close the socket as soon as the limit is reached.
-                let _ = stream.write_all(&response);
+                let read_bytes = request.len() as u64;
+                let mut written_bytes = 0u64;
+                let mut offset = 0;
+                while offset < response.len() {
+                    // A peer that hits its read limit can close before this write finishes.
+                    match stream.write(&response[offset..]) {
+                        Ok(0) | Err(_) => break,
+                        Ok(count) => {
+                            written_bytes += count as u64;
+                            offset += count;
+                        }
+                    }
+                }
+                exchanges.push(Exchange {
+                    request: String::from_utf8(request).unwrap(),
+                    read_bytes,
+                    written_bytes,
+                });
             }
-            requests
+            exchanges
         });
         Self { origin, worker }
     }
 
-    pub fn finish(self) -> Vec<String> {
+    pub fn finish_measured(self) -> Vec<Exchange> {
         self.worker.join().unwrap()
+    }
+
+    pub fn finish(self) -> Vec<String> {
+        self.finish_measured()
+            .into_iter()
+            .map(|exchange| exchange.request)
+            .collect()
     }
 }
 
