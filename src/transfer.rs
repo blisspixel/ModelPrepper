@@ -1,4 +1,6 @@
-//! Restart-focused transport experiment. No approval, accounting, or publication.
+//! Restart-focused transport experiment. No approval or publication.
+//! The staging journal charges a segment allowance before the request and does
+//! not refund it when an uncommitted tail is discarded.
 use crate::{
     Error, Result,
     http::Http,
@@ -16,7 +18,7 @@ use std::{
 use url::Url;
 
 mod session;
-pub use session::StagingSession;
+pub use session::{StagingSession, staging_workspace_bound};
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]

@@ -47,7 +47,7 @@ Blockers are stable snake_case identifiers:
 | transfer_budget_exceeded | Payload exceeds the standalone period transfer allowance. |
 | insufficient_space | Payload plus minimum reserve exceeds the supplied free-space observation. |
 
-Byte arithmetic is checked for overflow. The current budget checks are standalone lower bounds. They do not account for existing archive occupancy, reservations, transfer history, or workspace. workspace_bytes is null until a backend bound is established.
+Byte arithmetic is checked for overflow. The current budget checks are standalone lower bounds. They do not account for existing archive occupancy, reservations, transfer history, or workspace. The single-file staging experiment caps its checkpoint database and rollback journal at 1 MiB each. That is not a plan workspace bound: `workspace_bytes` stays null until a bound also covers every selected file, TLS and socket buffers, and measured bandwidth overrun.
 
 ## Canonical preview identity
 

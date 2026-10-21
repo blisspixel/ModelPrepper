@@ -74,6 +74,7 @@ fn journal_survives_reopen_and_completion_requires_full_verification() {
     let first = stage(&mut session, 0, b"abc").unwrap();
     assert!(first.verified_sha256.is_none());
     assert_eq!(session.checkpoint().unwrap().bytes, 3);
+    assert_eq!(session.spent_bytes().unwrap(), 3);
     drop(session);
     let mut session = StagingSession::open(&path, &source(), &expected()).unwrap();
     assert_eq!(session.recovered_bytes(), 0);
@@ -81,12 +82,15 @@ fn journal_survives_reopen_and_completion_requires_full_verification() {
         stage(&mut session, 3, b"def").unwrap().verified_sha256,
         Some(digest(b"abcdef"))
     );
+    assert_eq!(session.spent_bytes().unwrap(), 6);
     drop(session);
     let mut session = StagingSession::open(&path, &source(), &expected()).unwrap();
+    assert_eq!(session.spent_bytes().unwrap(), 6);
     assert_eq!(
         session.stage(1).unwrap().verified_sha256,
         Some(digest(b"abcdef"))
     );
+    assert_eq!(session.spent_bytes().unwrap(), 6);
     assert_eq!(session.stage(0).unwrap_err().code, "invalid_limit");
     assert_eq!(contents(&mut session.file), b"abcdef");
 }
@@ -112,17 +116,61 @@ fn failed_checkpoint_commit_keeps_old_progress_and_next_segment_reconciles_tail(
     let mut session = StagingSession::create(&path, &source(), &expected()).unwrap();
     stage(&mut session, 0, b"abc").unwrap();
     session.db.execute_batch("PRAGMA query_only=ON;").unwrap();
+    // The charge is recorded before any request. A journal that cannot record
+    // it must not download or extend the payload.
     assert_eq!(
-        stage(&mut session, 3, b"def").unwrap_err().code,
+        session
+            .stage_with(&Http::default(), "http://127.0.0.1:9", 3)
+            .unwrap_err()
+            .code,
+        "checkpoint_journal_failed"
+    );
+    assert_eq!(contents(&mut session.file), b"abc");
+    assert_eq!(session.spent_bytes().unwrap(), 3);
+    session.db.execute_batch("PRAGMA query_only=OFF;").unwrap();
+    session.reserve(3).unwrap();
+    assert_eq!(session.spent_bytes().unwrap(), 6);
+    session.db.execute_batch("PRAGMA query_only=ON;").unwrap();
+    let checkpoint = session.checkpoint().unwrap();
+    let server = Server::new(vec![response(
+        206,
+        "Content-Range: bytes 3-5/6\r\n",
+        b"def",
+    )]);
+    stage_with(
+        &Http::fixture(&server.origin),
+        &server.origin,
+        &source(),
+        &expected(),
+        &mut session.file,
+        Some(&checkpoint),
+        3,
+    )
+    .unwrap();
+    assert!(server.finish()[0].contains("bytes=3-"));
+    assert_eq!(
+        session.commit(&checkpoint_at(6)).unwrap_err().code,
         "checkpoint_journal_failed"
     );
     assert_eq!(contents(&mut session.file), b"abcdef");
     assert_eq!(session.checkpoint().unwrap().bytes, 3);
+    assert_eq!(session.spent_bytes().unwrap(), 6);
     session.db.execute_batch("PRAGMA query_only=OFF;").unwrap();
     let final_segment = stage(&mut session, 3, b"def").unwrap();
     assert_eq!(session.recovered_bytes(), 3);
+    // The discarded tail was already charged, and the retry is charged again.
+    assert_eq!(session.spent_bytes().unwrap(), 9);
     assert_eq!(final_segment.verified_sha256, Some(digest(b"abcdef")));
     assert_eq!(session.checkpoint().unwrap().bytes, 6);
+}
+
+fn checkpoint_at(bytes: u64) -> Checkpoint {
+    Checkpoint {
+        schema_version: 1,
+        identity: String::new(),
+        bytes,
+        prefix_sha256: digest(b"abcdef"),
+    }
 }
 
 #[test]
@@ -138,6 +186,9 @@ fn corrupt_or_foreign_journals_never_truncate_payload() {
         "UPDATE checkpoint SET bytes='18446744073709551616';",
         "UPDATE checkpoint SET prefix_sha256='wrong';",
         "UPDATE checkpoint SET prefix_sha256=replace(hex(zeroblob(32)), '0', 'a');",
+        "UPDATE checkpoint SET spent='-1';",
+        "UPDATE checkpoint SET spent='spent';",
+        "UPDATE checkpoint SET spent='18446744073709551616';",
     ] {
         let (_temp, path) = root();
         let mut session = StagingSession::create(&path, &source(), &expected()).unwrap();
@@ -258,6 +309,8 @@ fn journal_termination_worker() {
         b"def",
     )]);
     let checkpoint = session.checkpoint().unwrap();
+    // Charge the next allowance, then write the payload without committing it.
+    session.reserve(3).unwrap();
     // Genuine payload write/sync, but deliberately stop before journal commit.
     stage_with(
         &Http::fixture(&server.origin),
@@ -333,6 +386,7 @@ fn killed_worker_reopens_real_journal_and_discards_uncommitted_segment() {
         worker.0.wait().unwrap();
         fs::remove_file(path.join("ready")).unwrap();
         let mut session = StagingSession::open(&path, &source(), &expected()).unwrap();
+        assert_eq!(session.spent_bytes().unwrap(), 6);
         if phase == "committed" {
             assert_eq!(session.recovered_bytes(), 0);
             assert_eq!(session.checkpoint().unwrap().bytes, 6);
@@ -340,6 +394,7 @@ fn killed_worker_reopens_real_journal_and_discards_uncommitted_segment() {
                 session.stage(1).unwrap().verified_sha256,
                 Some(digest(b"abcdef"))
             );
+            assert_eq!(session.spent_bytes().unwrap(), 6);
         } else {
             assert_eq!(session.recovered_bytes(), 3);
             assert_eq!(session.checkpoint().unwrap().bytes, 3);
@@ -348,6 +403,7 @@ fn killed_worker_reopens_real_journal_and_discards_uncommitted_segment() {
                 stage(&mut session, 3, b"def").unwrap().verified_sha256,
                 Some(digest(b"abcdef"))
             );
+            assert_eq!(session.spent_bytes().unwrap(), 9);
         }
     }
 }
@@ -383,4 +439,80 @@ fn oversized_journal_and_nonregular_entries_fail_without_payload_changes() {
             .code,
         "invalid_checkpoint_journal"
     );
+    let (_temp, path) = root();
+    let session = StagingSession::create(&path, &source(), &expected()).unwrap();
+    drop(session);
+    fs::write(
+        path.join("checkpoint.sqlite3-journal"),
+        vec![0; 1024 * 1024 + 1],
+    )
+    .unwrap();
+    assert_eq!(
+        StagingSession::open(&path, &source(), &expected())
+            .err()
+            .unwrap()
+            .code,
+        "invalid_checkpoint_journal"
+    );
+    assert!(fs::read(path.join("payload.part")).unwrap().is_empty());
+}
+
+#[test]
+fn rejected_segments_keep_the_charge_and_side_files_stay_inside_the_cap() {
+    let (_temp, path) = root();
+    let mut session = StagingSession::create(&path, &source(), &expected()).unwrap();
+    assert!(sqlite_side_bytes(&path) <= staging_workspace_bound());
+    assert_eq!(staging_workspace_bound(), 2 * 1024 * 1024);
+    stage(&mut session, 0, b"abc").unwrap();
+    let server = Server::new(vec![response(206, "Content-Range: bytes 3-5/6\r\n", b"de")]);
+    assert_eq!(
+        session
+            .stage_with(&Http::fixture(&server.origin), &server.origin, 3)
+            .unwrap_err()
+            .code,
+        "invalid_range"
+    );
+    assert!(server.finish()[0].contains("bytes=3-"));
+    assert_eq!(session.spent_bytes().unwrap(), 6);
+    assert_eq!(session.checkpoint().unwrap().bytes, 3);
+    assert_eq!(contents(&mut session.file), b"abc");
+    drop(session);
+    let session = StagingSession::open(&path, &source(), &expected()).unwrap();
+    assert_eq!(session.spent_bytes().unwrap(), 6);
+    assert_eq!(session.recovered_bytes(), 0);
+    assert!(sqlite_side_bytes(&path) <= staging_workspace_bound());
+    drop(session);
+
+    let (_temp, path) = root();
+    let mut session = StagingSession::create(&path, &source(), &expected()).unwrap();
+    session
+        .db
+        .execute(
+            "UPDATE checkpoint SET spent=?1 WHERE id=1",
+            [u64::MAX.to_string()],
+        )
+        .unwrap();
+    assert_eq!(
+        session
+            .stage_with(&Http::default(), "http://127.0.0.1:9", 1)
+            .unwrap_err()
+            .code,
+        "size_overflow"
+    );
+    assert_eq!(session.spent_bytes().unwrap(), u64::MAX);
+    assert!(fs::read(path.join("payload.part")).unwrap().is_empty());
+}
+
+fn sqlite_side_bytes(path: &std::path::Path) -> u64 {
+    ["checkpoint.sqlite3", "checkpoint.sqlite3-journal"]
+        .into_iter()
+        .map(|name| {
+            let file = path.join(name);
+            if file.exists() {
+                fs::metadata(file).unwrap().len()
+            } else {
+                0
+            }
+        })
+        .sum()
 }

@@ -28,7 +28,7 @@ The following order is the contract for the future vault job engine. The staging
 
 1. Acquire writer ownership, verify the mounted volume identity, and validate the approved immutable transfer plan.
 2. Durably establish the staging file and its initial zero-byte checkpoint before requesting payload. If a nonempty file has no committed checkpoint, report it as unowned recovery data; do not invent an identity or truncate it automatically.
-3. Reserve storage and transfer allowance before each segment. Network spending and verified file progress are separate records.
+3. Charge the segment allowance in the staging journal before requesting it. Network spending and verified file progress are separate records. The current journal does this for one file; it still does not reserve vault storage or period budget. A discarded tail is not a refund, and a retry is charged again.
 4. Write and sync the segment, then transactionally commit its new checkpoint. Never commit a checkpoint ahead of the file sync.
 5. On restart, load the last committed checkpoint and call recovery before ordinary resumption. Failures leave the job incomplete and expose an actionable reason.
 6. Re-download discarded bytes only with remaining transfer allowance. Discarding local bytes does not refund network spending. A crash during a request needs conservative accounting for its reserved allowance until reconciled.
