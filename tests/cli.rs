@@ -484,7 +484,9 @@ fn json_wins_over_local_text_format_and_text_is_available_in_a_pipe() {
 #[test]
 fn offline_text_view_names_a_verdict_for_each_local_command() {
     let dir = TempDir::new().unwrap();
-    let config = dir.path().join("c.toml");
+    // macOS runners keep TempDir under /var, which is a symlink. Vault paths reject that.
+    let root = fs::canonicalize(dir.path()).unwrap();
+    let config = root.join("c.toml");
     let view = View {
         text: true,
         json: false,
@@ -500,9 +502,9 @@ fn offline_text_view_names_a_verdict_for_each_local_command() {
             "--output",
             config.to_str().unwrap(),
             "--catalog",
-            dir.path().join("catalog").to_str().unwrap(),
+            root.join("catalog").to_str().unwrap(),
             "--volume",
-            dir.path().join("models").to_str().unwrap(),
+            root.join("models").to_str().unwrap(),
         ])
         .unwrap(),
         view,
@@ -552,7 +554,7 @@ fn offline_text_view_names_a_verdict_for_each_local_command() {
             "local",
             "list",
             "--ollama-dir",
-            dir.path().to_str().unwrap(),
+            root.to_str().unwrap(),
         ],
     ];
     for args in commands {
