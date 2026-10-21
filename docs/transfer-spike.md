@@ -26,7 +26,7 @@ Reference source: the crate's src/repository/download.rs. These observations mus
 
 Use ureq with Rust TLS for a blocking, bounded HTTP adapter. No async runtime, Python, external downloader, compression, or native Xet engine is required by source inspection. URL parsing and redirect origin validation use the maintained url crate.
 
-The adapter proves moving-ref resolution followed by pinned metadata and hash-verified config/license/index bytes. Local fixtures cover redirects, rejected origins, bad status, truncated bodies, unexpected encoding, limits, source changes, access restrictions, and shard closure.
+The adapter proves moving-ref resolution followed by pinned metadata and hash-verified config/license/index bytes. Local fixtures cover redirects, rejected origins, bad status, truncated bodies, unexpected encoding, limits, source changes, access restrictions, and shard closure. A redirected location that returns 401 or 403 is abandoned. The original URL is requested once more, without credentials, and the signed query is not stored or repeated. A second rejection stops. This does not change the pinned transfer identity.
 
 The new transfer library experiment streams bounded segments into a caller-owned staging file using a 64 KiB application buffer. Its checkpoint binds the source/file identity, exact prefix length, prefix SHA-256, and the cumulative segment allowance charged before each request. That charge is not a measured socket total: a rejected body still owes the full allowance. The 64 KiB buffer is not included in the 2 MiB side-file cap. Existing bytes are checked before any resumed request. Range responses must match the requested start/end and full pinned size; ignored Range during resumption is rejected before appending. Truncated, excessive, or wrong-hash bodies roll back the current segment. A complete file is verified against its upstream hash, including Git object-header semantics.
 
@@ -54,7 +54,7 @@ Do not add Python, external downloaders, or a mandatory service to work around a
 | Local HTTP fixture | Revision resolution, valid full and partial responses, ignored Range, malformed ranges, truncated bodies. |
 | Interrupted ordinary download | Checkpoint bound to pinned identity; resume without loss or mixed bytes. |
 | Xet download | Cancellation/resume and measured workspace under controlled limits. |
-| Expired source URL | Refresh location without changing content identity or leaking credentials. |
+| Expired source URL | One local refresh from the original URL is fixture-tested. Live hub expiry and credentialed refresh remain unproven. |
 | Resource limits | Memory, temporary cache, concurrency, and bounded transfer-budget overrun. |
 | Cross-platform execution | Actual Windows/macOS/Linux binaries, not only cross-target type checks. |
 | Opt-in live comparison | One pinned small repository compared with the reference hub client's dry run. |

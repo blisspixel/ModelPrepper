@@ -503,6 +503,123 @@ fn rejected_segments_keep_the_charge_and_side_files_stay_inside_the_cap() {
     assert!(fs::read(path.join("payload.part")).unwrap().is_empty());
 }
 
+fn canonical_path() -> String {
+    format!("/owner/model/resolve/{}/model.safetensors", "a".repeat(40))
+}
+
+fn assert_no_credentials(requests: &[String]) {
+    for request in requests {
+        let lower = request.to_ascii_lowercase();
+        assert!(!lower.contains("authorization:"));
+        assert!(!lower.contains("cookie:"));
+    }
+}
+
+#[test]
+fn expired_payload_location_refreshes_once_without_changing_identity_or_charge() {
+    let (_temp, path) = root();
+    let mut session = StagingSession::create(&path, &source(), &expected()).unwrap();
+    let identity = session.checkpoint().unwrap().identity.clone();
+    stage(&mut session, 0, b"abc").unwrap();
+    assert_eq!(session.spent_bytes().unwrap(), 3);
+    let canonical = canonical_path();
+    let server = Server::new(vec![
+        response(302, "Location: /cdn?sig=old-secret\r\n", b""),
+        response(403, "", b"sig=old-secret"),
+        response(302, "Location: /cdn?sig=new-secret\r\n", b""),
+        response(206, "Content-Range: bytes 3-5/6\r\n", b"def"),
+    ]);
+    let segment = session
+        .stage_with(&Http::fixture(&server.origin), &server.origin, 3)
+        .unwrap();
+    let requests = server.finish();
+    assert_eq!(requests.len(), 4);
+    for request in &requests {
+        assert!(request.to_ascii_lowercase().contains("range: bytes=3-5"));
+    }
+    assert!(requests[0].contains(&canonical));
+    assert!(requests[1].contains("GET /cdn?sig=old-secret "));
+    assert!(requests[2].contains(&canonical));
+    assert!(requests[3].contains("GET /cdn?sig=new-secret "));
+    assert_eq!(
+        requests
+            .iter()
+            .filter(|request| request.contains("sig=old-secret"))
+            .count(),
+        1
+    );
+    assert_no_credentials(&requests);
+    assert_eq!(segment.checkpoint.identity, identity);
+    assert_eq!(segment.verified_sha256, Some(digest(b"abcdef")));
+    assert_eq!(session.spent_bytes().unwrap(), 6);
+    assert_eq!(session.checkpoint().unwrap().bytes, 6);
+    assert_eq!(contents(&mut session.file), b"abcdef");
+    assert!(
+        !String::from_utf8_lossy(&fs::read(path.join("checkpoint.sqlite3")).unwrap())
+            .contains("sig=")
+    );
+}
+
+#[test]
+fn rejected_or_substituted_refresh_keeps_the_charge_and_the_pinned_identity() {
+    let canonical = canonical_path();
+    for (replies, code) in [
+        (
+            vec![
+                response(302, "Location: /cdn?sig=old-secret\r\n", b""),
+                response(403, "", b"sig=old-secret"),
+                response(302, "Location: /cdn?sig=new-secret\r\n", b""),
+                response(403, "", b"sig=new-secret"),
+            ],
+            "payload_location_rejected",
+        ),
+        (
+            vec![
+                response(302, "Location: /cdn?sig=old-secret\r\n", b""),
+                response(401, "", b"sig=old-secret"),
+                response(302, "Location: /cdn?sig=new-secret\r\n", b""),
+                response(200, "", b"abcdeg"),
+            ],
+            "hash_mismatch",
+        ),
+    ] {
+        let (_temp, path) = root();
+        let mut session = StagingSession::create(&path, &source(), &expected()).unwrap();
+        let identity = session.checkpoint().unwrap().identity.clone();
+        let server = Server::new(replies);
+        let error = session
+            .stage_with(&Http::fixture(&server.origin), &server.origin, 6)
+            .unwrap_err();
+        assert_eq!(error.code, code);
+        assert!(!error.message.contains("sig"));
+        let requests = server.finish();
+        assert!(requests[0].contains(&canonical));
+        assert_eq!(
+            requests
+                .iter()
+                .filter(|request| request.contains("sig=old-secret"))
+                .count(),
+            1
+        );
+        assert_eq!(
+            requests
+                .iter()
+                .filter(|request| request.contains("sig=new-secret"))
+                .count(),
+            1
+        );
+        assert_no_credentials(&requests);
+        assert_eq!(session.spent_bytes().unwrap(), 6);
+        assert_eq!(session.checkpoint().unwrap().identity, identity);
+        assert_eq!(session.checkpoint().unwrap().bytes, 0);
+        assert!(contents(&mut session.file).is_empty());
+        assert!(
+            !String::from_utf8_lossy(&fs::read(path.join("checkpoint.sqlite3")).unwrap())
+                .contains("sig=")
+        );
+    }
+}
+
 fn sqlite_side_bytes(path: &std::path::Path) -> u64 {
     ["checkpoint.sqlite3", "checkpoint.sqlite3-journal"]
         .into_iter()

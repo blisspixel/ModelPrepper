@@ -1,4 +1,6 @@
 //! Blocking, bounded HTTP with explicit redirect trust and no credential handling.
+//! A redirected location that returns 401 or 403 is abandoned. The original URL
+//! is requested once more, and the rejected location is not retried or stored.
 use crate::{Error, Result};
 use std::{io::Read, time::Duration};
 use url::Url;
@@ -42,7 +44,9 @@ impl Http {
         range: Option<(u64, u64)>,
     ) -> Result<ureq::http::Response<ureq::Body>> {
         let mut current = url.clone();
-        for attempt in 0..=5 {
+        let mut redirects = 0u8;
+        let mut refreshed = false;
+        loop {
             validate_url(&current, self.test_origin.as_deref())?;
             let mut request = self
                 .agent
@@ -59,7 +63,7 @@ impl Http {
             })?;
             let status = response.status().as_u16();
             if matches!(status, 301 | 302 | 303 | 307 | 308) {
-                if attempt == 5 {
+                if redirects == 5 {
                     return Err(Error::new(
                         "redirect_limit",
                         "source exceeded redirect limit",
@@ -75,6 +79,15 @@ impl Http {
                 current = current
                     .join(location)
                     .map_err(|_| Error::new("invalid_redirect", "invalid redirect destination"))?;
+                redirects += 1;
+                continue;
+            }
+            // A rejected redirect location is not retried. One new request goes
+            // back to the caller's original URL so a signed query is not reused.
+            if matches!(status, 401 | 403) && &current != url && !refreshed {
+                refreshed = true;
+                redirects = 0;
+                current = url.clone();
                 continue;
             }
             if response
@@ -89,7 +102,6 @@ impl Http {
             }
             return Ok(response);
         }
-        unreachable!("redirect loop always returns")
     }
 
     #[cfg(test)]

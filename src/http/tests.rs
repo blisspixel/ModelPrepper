@@ -115,3 +115,116 @@ fn http_errors_do_not_disclose_signed_urls() {
         "source_unavailable"
     );
 }
+
+fn assert_no_credentials(requests: &[String]) {
+    for request in requests {
+        let lower = request.to_ascii_lowercase();
+        assert!(!lower.contains("authorization:"));
+        assert!(!lower.contains("cookie:"));
+    }
+}
+
+#[test]
+fn expired_redirect_locations_are_refreshed_from_the_original_url_once() {
+    let path = format!("/owner/model/resolve/{}/model.safetensors", "a".repeat(40));
+    for rejected in [403u16, 401] {
+        let server = Server::new(vec![
+            response(302, "Location: /cdn?sig=old-secret\r\n", b""),
+            response(rejected, "", b"sig=old-secret"),
+            response(302, "Location: /cdn?sig=new-secret\r\n", b""),
+            response(200, "", b"abc"),
+        ]);
+        let url = Url::parse(&format!("{}{path}", server.origin)).unwrap();
+        assert_eq!(Http::fixture(&server.origin).get(&url, 3).unwrap(), b"abc");
+        let requests = server.finish();
+        assert_eq!(requests.len(), 4);
+        assert!(requests[0].contains(&path));
+        assert!(requests[1].contains("GET /cdn?sig=old-secret "));
+        assert!(requests[2].contains(&path));
+        assert!(requests[3].contains("GET /cdn?sig=new-secret "));
+        assert_eq!(
+            requests
+                .iter()
+                .filter(|request| request.contains("sig=old-secret"))
+                .count(),
+            1
+        );
+        assert_no_credentials(&requests);
+    }
+
+    let server = Server::new(vec![
+        response(302, "Location: /cdn?sig=old-secret\r\n", b""),
+        response(403, "", b"sig=old-secret"),
+        response(302, "Location: /cdn?sig=new-secret\r\n", b""),
+        response(403, "", b"sig=new-secret"),
+    ]);
+    let url = Url::parse(&format!("{}{path}", server.origin)).unwrap();
+    let error = Http::fixture(&server.origin).get(&url, 3).unwrap_err();
+    assert_eq!(error.code, "source_status");
+    assert!(!error.message.contains("sig"));
+    let requests = server.finish();
+    assert_eq!(requests.iter().filter(|r| r.contains(&path)).count(), 2);
+    assert_eq!(
+        requests
+            .iter()
+            .filter(|request| request.contains("sig=old-secret"))
+            .count(),
+        1
+    );
+    assert_eq!(
+        requests
+            .iter()
+            .filter(|request| request.contains("sig=new-secret"))
+            .count(),
+        1
+    );
+    assert_no_credentials(&requests);
+
+    let server = Server::new(vec![response(403, "", b"sig=direct-secret")]);
+    let url = Url::parse(&format!("{}{path}?sig=direct-secret", server.origin)).unwrap();
+    let error = Http::fixture(&server.origin).get(&url, 3).unwrap_err();
+    assert_eq!(error.code, "source_status");
+    assert!(!error.message.contains("sig"));
+    assert_eq!(server.finish().len(), 1);
+
+    let server = Server::new(vec![
+        response(302, "Location: /cdn?sig=old-secret\r\n", b""),
+        response(403, "", b"sig=old-secret"),
+        response(
+            302,
+            "Location: https://evil.example/?sig=evil-secret\r\n",
+            b"",
+        ),
+    ]);
+    let url = Url::parse(&format!("{}{path}", server.origin)).unwrap();
+    let error = Http::fixture(&server.origin).get(&url, 3).unwrap_err();
+    assert_eq!(error.code, "untrusted_url");
+    assert!(!error.message.contains("sig"));
+    let requests = server.finish();
+    assert_eq!(requests.len(), 3);
+    assert!(
+        requests
+            .iter()
+            .all(|request| !request.contains("evil.example"))
+    );
+    assert_no_credentials(&requests);
+
+    let mut replies = vec![
+        response(302, "Location: /cdn?sig=old-secret\r\n", b""),
+        response(401, "", b"sig=old-secret"),
+    ];
+    replies.extend(vec![
+        response(
+            302,
+            "Location: /again?sig=still-secret\r\n",
+            b""
+        );
+        6
+    ]);
+    let server = Server::new(replies);
+    let url = Url::parse(&format!("{}{path}", server.origin)).unwrap();
+    let error = Http::fixture(&server.origin).get(&url, 3).unwrap_err();
+    assert_eq!(error.code, "redirect_limit");
+    assert!(!error.message.contains("sig"));
+    assert_eq!(server.finish().len(), 8);
+}
