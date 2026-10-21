@@ -853,4 +853,310 @@ mod tests {
         assert!(colored.contains("\u{1b}[32mpreserved\u{1b}[0m"));
         assert!(!colored.contains("\u{1b}[32mexample"));
     }
+
+    #[test]
+    fn text_renderers_cover_ready_blocked_and_unreviewed_states() {
+        use crate::inventory::{
+            EvidenceStatus, Inventory, LicenseEvidence, Role, Source, SourceFile,
+        };
+        use crate::plan::{Blocker, Plan};
+        use crate::vault::{Decision, PreservedCopy, Proposal, ProposalPage, ProposalSummary};
+
+        let source = Source {
+            endpoint: "https://huggingface.co".into(),
+            repo_type: "model".into(),
+            repo_id: "example/model".into(),
+            requested_revision: "main".into(),
+            resolved_revision: "0123456789abcdef0123456789abcdef01234567".into(),
+            gated: false,
+            private: false,
+        };
+        let inventory = |status| Inventory {
+            schema_version: 1,
+            source: source.clone(),
+            complete: true,
+            layout: "transformers-safetensors-v1".into(),
+            license: LicenseEvidence {
+                license_id: "apache-2.0".into(),
+                status,
+                paths: vec!["LICENSE".into()],
+            },
+            files: Vec::new(),
+        };
+        let file = SourceFile {
+            path: "model.safetensors".into(),
+            size_bytes: 5504,
+            upstream_hash: None,
+            role: Role::Weight,
+            required: true,
+        };
+        for (color, columns) in [(false, 80), (true, 40)] {
+            let created = render_config_created(std::path::Path::new("c.toml"), color, columns);
+            assert!(
+                created.contains("created") || created.contains("creat"),
+                "{created}"
+            );
+            let checked = render_config_check(0, 1, color, columns);
+            assert!(
+                checked.contains("valid") || checked.contains("vali"),
+                "{checked}"
+            );
+            for status in [
+                EvidenceStatus::Matched,
+                EvidenceStatus::Unreviewed,
+                EvidenceStatus::Conflicting,
+            ] {
+                let text = render_resolution(
+                    &crate::hub::Resolution {
+                        schema_version: 1,
+                        mode: "resolution",
+                        transfer_authorized: false,
+                        inventory: inventory(status),
+                        evidence: Vec::new(),
+                    },
+                    color,
+                    columns,
+                );
+                assert!(text.contains("next:"), "{text}");
+            }
+            for (ok, excluded) in [(true, Vec::new()), (false, vec!["README.md".into()])] {
+                let text = render_verification(
+                    &crate::verify::Verification {
+                        schema_version: 1,
+                        mode: "local_verification",
+                        ok,
+                        repo_id: source.repo_id.clone(),
+                        resolved_revision: source.resolved_revision.clone(),
+                        files: Vec::new(),
+                        selected: vec!["model.safetensors".into()],
+                        excluded,
+                        message: "model.safetensors hash_mismatch".into(),
+                    },
+                    color,
+                    columns,
+                );
+                assert!(text.contains("next:"), "{text}");
+            }
+            for decision in [Decision::Pending, Decision::Approved, Decision::Rejected] {
+                let text = render_proposal(
+                    &Proposal {
+                        schema_version: 1,
+                        plan_id: "0123456789abcdef".into(),
+                        decision,
+                        created_at: 0,
+                        observed_available_bytes: 1,
+                        decided_at: None,
+                        policy_current: true,
+                        transfer_authorized: false,
+                        review: crate::vault::SourceReview {
+                            schema_version: 1,
+                            domain: "modelprepper.source-review.v1".into(),
+                            vault_id: "vault".into(),
+                            volume_id: "volume".into(),
+                            volume_label: "primary".into(),
+                            policy_digest: "abc".into(),
+                            inventory: inventory(EvidenceStatus::Matched),
+                            evidence: Vec::new(),
+                            selected_files: vec![file.clone()],
+                            excluded_files: Vec::new(),
+                            payload_bytes: 5504,
+                            min_free_bytes: 1,
+                            workspace_bytes: None,
+                            blockers: vec![Blocker::LocalInventoryUntrusted],
+                        },
+                    },
+                    color,
+                    columns,
+                );
+                assert!(text.contains("next:"), "{text}");
+            }
+            for proposals in [
+                Vec::new(),
+                vec![ProposalSummary {
+                    plan_id: "0123456789abcdef".into(),
+                    repo_id: source.repo_id.clone(),
+                    resolved_revision: source.resolved_revision.clone(),
+                    payload_bytes: 5504,
+                    decision: Decision::Pending,
+                    policy_current: true,
+                    blocker_count: 1,
+                }],
+            ] {
+                let text = render_proposals(
+                    &ProposalPage {
+                        schema_version: 1,
+                        proposals,
+                        next_after: None,
+                    },
+                    color,
+                    columns,
+                );
+                assert!(text.contains("next:"), "{text}");
+            }
+            let preview = render_plan(
+                &Plan {
+                    schema_version: 1,
+                    plan_id: "plan".into(),
+                    policy_digest: "abc".into(),
+                    mode: "offline_preview",
+                    transfer_authorized: false,
+                    source: source.clone(),
+                    volume_label: "primary".into(),
+                    volume_path: std::path::PathBuf::from("models"),
+                    selected_files: vec![file.clone()],
+                    excluded_files: Vec::new(),
+                    payload_bytes: 5504,
+                    min_free_bytes: 1,
+                    available_bytes: 2,
+                    workspace_bytes: None,
+                    blockers: vec![
+                        Blocker::LocalInventoryUntrusted,
+                        Blocker::LicenseNeedsReview,
+                    ],
+                },
+                color,
+                columns,
+            );
+            assert!(
+                preview.contains("preview") || preview.contains("prev"),
+                "{preview}"
+            );
+        }
+
+        let blocked = crate::vault::Status {
+            schema_version: 1,
+            state: "blocked".into(),
+            vault_id: "vault-id-long-enough".into(),
+            volumes: vec![crate::vault::VolumeStatus {
+                label: "primary".into(),
+                volume_id: "volume".into(),
+                path: std::path::PathBuf::from(r"\\?\C:\very\long\path\that\must\stay\readable"),
+                state: "offline",
+                available_bytes: None,
+            }],
+            preserved: vec![PreservedCopy {
+                repo_id: "example/model".into(),
+                resolved_revision: source.resolved_revision.clone(),
+                provenance: crate::vault::PROVENANCE_LOCAL_UPSTREAM.into(),
+                volume_label: "primary".into(),
+            }],
+        };
+        let blocked_text = render_status(&blocked, true, 40);
+        assert!(blocked_text.contains("offline"), "{blocked_text}");
+        assert!(blocked_text.contains("preserved"), "{blocked_text}");
+        assert!(
+            blocked_text.lines().all(|line| line
+                .replace("\u{1b}[33m", "")
+                .replace("\u{1b}[0m", "")
+                .chars()
+                .count()
+                <= 40
+                || line.contains('\u{1b}')),
+            "{blocked_text}"
+        );
+
+        let mut runtime = crate::runtime::RuntimeInventory {
+            schema_version: 2,
+            summary: "1 local models, 0 fully recorded".into(),
+            message: "store note".into(),
+            note: "historical byte identity".into(),
+            models: vec![crate::runtime::RuntimeModel {
+                name: "library/demo:latest".into(),
+                store: std::path::PathBuf::from("store"),
+                size_bytes: 32,
+                digests: vec!["ab".into()],
+                format: "gguf".into(),
+                quantization: None,
+                license_layer: false,
+                template_layer: false,
+                preserved: Some(false),
+                coverage: "partially_recorded".into(),
+                matched_digests: 1,
+                total_digests: 2,
+                missing_roles: vec!["weights".into(), "license".into()],
+                components: Vec::new(),
+            }],
+        };
+        let partial = render_runtime(&runtime, true, 80);
+        assert!(partial.contains("partial"), "{partial}");
+        assert!(partial.contains("missing weights, license"), "{partial}");
+        runtime.models.clear();
+        assert!(render_runtime(&runtime, false, 80).starts_with("empty"));
+        runtime.models.push(crate::runtime::RuntimeModel {
+            coverage: "not_checked".into(),
+            preserved: None,
+            missing_roles: Vec::new(),
+            ..runtime_model()
+        });
+        assert!(render_runtime(&runtime, true, 80).contains("unchecked"));
+
+        for code in [
+            "config_write_failed",
+            "overlapping_vault_paths",
+            "invalid_config",
+            "invalid_usage",
+            "license_needs_review",
+            "proposal_not_pending",
+            "volume_unavailable",
+            "vault_not_ready",
+            "repository_not_found_or_private",
+            "revision_not_found",
+            "path_not_found",
+            "evidence_mismatch",
+            "destination_conflict",
+            "source_remove_failed",
+            "selection_changed",
+        ] {
+            let text = error_text(&Error::new(code, "details"), false, 80);
+            assert!(text.starts_with("error:"), "{code}: {text}");
+            assert!(text.contains("next:"), "{code}: {text}");
+        }
+        let narrow = error_text(&Error::new("invalid_usage", "nope"), false, 3);
+        assert!(
+            narrow.lines().all(|line| line.chars().count() <= 3),
+            "{narrow}"
+        );
+        let usage = clap_text("error: unexpected argument\nrest", true, 80);
+        assert!(usage.contains("unexpected argument"), "{usage}");
+        assert!(clap_text(" \n", false, 80).contains("invalid arguments"));
+
+        let start = Instant::now();
+        let mut quiet = ProgressLine::new(Vec::<u8>::new(), true, true, 80, 1);
+        quiet.render(start, "verifying", "a", 1, 2);
+        assert!(quiet.out.is_empty());
+        let mut log = ProgressLine::new(Vec::<u8>::new(), false, false, 20, 0);
+        log.render(start, "verifying", "weights.bin", 0, 0);
+        log.render(start + Duration::from_secs(1), "copying", "big.bin", 1, 121);
+        log.render(
+            start + Duration::from_secs(2),
+            "copying",
+            "big.bin",
+            50,
+            100,
+        );
+        let mut terminal = ProgressLine::new(Vec::<u8>::new(), true, false, 80, 1);
+        terminal.render(start, "recording", "catalog", 1, 1);
+        let shown = String::from_utf8(terminal.out).unwrap();
+        assert!(shown.contains("recording  catalog"), "{shown}");
+        assert!(shown.contains('\r'), "{shown}");
+    }
+
+    fn runtime_model() -> crate::runtime::RuntimeModel {
+        crate::runtime::RuntimeModel {
+            name: "library/demo:latest".into(),
+            store: std::path::PathBuf::from("store"),
+            size_bytes: 32,
+            digests: Vec::new(),
+            format: "gguf".into(),
+            quantization: Some("q4_0".into()),
+            license_layer: true,
+            template_layer: true,
+            preserved: None,
+            coverage: "not_checked".into(),
+            matched_digests: 0,
+            total_digests: 1,
+            missing_roles: Vec::new(),
+            components: Vec::new(),
+        }
+    }
 }

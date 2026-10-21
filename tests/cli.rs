@@ -1,6 +1,7 @@
 use clap::Parser;
 use modelprepper::cli::{
-    Cli, ColorMode, Command as AppCommand, ConfigCommand, execute, pretty_output, read_text,
+    Cli, ColorMode, Command as AppCommand, CommandOutput, ConfigCommand, View, execute, execute_in,
+    pretty_output, read_text,
 };
 use std::fs;
 use std::io::Read;
@@ -478,4 +479,90 @@ fn json_wins_over_local_text_format_and_text_is_available_in_a_pipe() {
     let value: serde_json::Value = serde_json::from_slice(&forced.stdout).unwrap();
     assert_eq!(value["schema_version"], 2);
     assert!(value["note"].as_str().unwrap().contains("--config"));
+}
+
+#[test]
+fn offline_text_view_names_a_verdict_for_each_local_command() {
+    let dir = TempDir::new().unwrap();
+    let config = dir.path().join("c.toml");
+    let view = View {
+        text: true,
+        json: false,
+        color: true,
+        stderr_terminal: true,
+        columns: 80,
+    };
+    let created = execute_in(
+        Cli::try_parse_from([
+            "modelprepper",
+            "config",
+            "init",
+            "--output",
+            config.to_str().unwrap(),
+            "--catalog",
+            dir.path().join("catalog").to_str().unwrap(),
+            "--volume",
+            dir.path().join("models").to_str().unwrap(),
+        ])
+        .unwrap(),
+        view,
+    )
+    .unwrap();
+    match created {
+        CommandOutput::Text { body, ok } => {
+            assert!(ok, "{body}");
+            assert!(body.contains("created"), "{body}");
+        }
+        CommandOutput::Json(value) => panic!("{value}"),
+    }
+    let commands = [
+        vec![
+            "modelprepper",
+            "config",
+            "check",
+            "--config",
+            config.to_str().unwrap(),
+        ],
+        vec!["modelprepper", "init", "--config", config.to_str().unwrap()],
+        vec![
+            "modelprepper",
+            "status",
+            "--config",
+            config.to_str().unwrap(),
+        ],
+        vec![
+            "modelprepper",
+            "proposals",
+            "--config",
+            config.to_str().unwrap(),
+            "list",
+        ],
+        vec![
+            "modelprepper",
+            "plan",
+            "--config",
+            "examples/config.toml",
+            "--inventory",
+            "tests/fixtures/inventory.json",
+            "--available-bytes",
+            "500000000000",
+        ],
+        vec![
+            "modelprepper",
+            "local",
+            "list",
+            "--ollama-dir",
+            dir.path().to_str().unwrap(),
+        ],
+    ];
+    for args in commands {
+        let owned: Vec<String> = args.into_iter().map(str::to_owned).collect();
+        match execute_in(Cli::try_parse_from(&owned).unwrap(), view).unwrap() {
+            CommandOutput::Text { body, ok } => {
+                assert!(ok, "{body}");
+                assert!(body.contains("next:"), "{body}");
+            }
+            CommandOutput::Json(value) => panic!("{value}"),
+        }
+    }
 }
