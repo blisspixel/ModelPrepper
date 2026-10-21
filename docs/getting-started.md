@@ -35,7 +35,7 @@ Only public, ungated official Hugging Face model repositories are supported. A b
 
 Matched evidence meets the narrow current text matcher. Missing/conflicting evidence needs review. Configuration checks do not establish runtime compatibility. This example demonstrates inspection, not a workload or hardware recommendation.
 
-Interactive terminals indent JSON. Redirects and pipes stay on one line unless you pass `--pretty`. A repository Hugging Face answers with HTTP 401 is `repository_not_found_or_private`. A missing branch, tag, or commit is `revision_not_found`.
+A terminal shows a short text verdict. Redirects, pipes, and `--json` stay on one compact JSON object unless you pass `--pretty`. A repository Hugging Face answers with HTTP 401 is `repository_not_found_or_private`. A missing branch, tag, or commit is `revision_not_found`.
 
 ## Verify a copy you already have
 
@@ -44,9 +44,9 @@ cargo run --locked --release -- verify-local --repo Qwen/Qwen2.5-0.5B-Instruct -
 cargo run --locked --release -- adopt --config config.local.toml --plan <plan_id> --path ~/Downloads/qwen --copy
 ```
 
-`verify-local` only reads. With `--plan` and `--config` it uses the saved review and does not use the network. Exit status is non-zero when a required file is missing or does not match, and the message names that file. `adopt` requires a pending review whose license evidence matched, copies or moves the files through a staging journal, re-checks the destination, and records `upstream-verified (local source)`. That is not a local-baseline import: a baseline would record bytes without this upstream proof, and that import is not implemented. Interrupted adoption resumes; a failed hash removes the staging copy and does not publish a partial tree.
+`verify-local` only reads the local folder. `--repo` still resolves the commit from the publisher. With `--plan` and `--config` it uses the saved review and does not use the network. Exit status is non-zero when a required file is missing or does not match, or when an optional file is present but damaged. The message names that file. An optional file that is absent is reported as excluded and is left out of the copy. `adopt` requires a pending review whose license evidence matched, copies or moves only that frozen matched set through a staging journal, re-checks the destination, and records `upstream-verified (local source)`. A successful adopt can print a preservation receipt. A mismatch does not. That is not a local-baseline import: a baseline would record bytes without this upstream proof, and that import is not implemented. Interrupted adoption resumes; a failed hash removes the staging copy and does not publish a partial tree.
 
-`local list` reads Ollama manifests from `OLLAMA_MODELS`, `~/.ollama/models`, and `/usr/share/ollama/.ollama/models`. It does not contact Ollama and does not change the store. `--config` compares blob digests with the vault. A missing store is explained in the output instead of failing with only an error code.
+`local list` reads Ollama manifests from `OLLAMA_MODELS`, `~/.ollama/models`, and `/usr/share/ollama/.ollama/models`. It does not contact Ollama and does not change the store. Without `--config` every tag is `not_checked`. With `--config` the command compares manifest digests with digests already recorded in the catalog and names missing roles when the match is partial. A recorded match survives an unplugged disk because it is catalog history, not a live hash of the volume. A missing store is explained in the output instead of failing with only an error code.
 
 ## Preview local metadata
 
@@ -78,6 +78,6 @@ To retain pinned source evidence and record rejection, use the [source review wo
 | stale_policy | Propose a new review using the current configuration. |
 | decision_conflict | Inspect the saved final decision; it cannot be changed or reset silently. |
 
-Commands emit JSON; application errors emit JSON on stderr and exit 1. Argument errors exit 2. Help/version are text. A preview can succeed while reporting blockers.
+A terminal prints text, including `error:` and `next:` for failures. Pipes and `--json` print JSON on stdout or, for failures, on stderr. Application errors exit 1. Argument errors exit 2. Help and version are text. A preview can succeed while reporting blockers.
 
 The [roadmap](roadmap.md) prioritizes transfer, persisted decisions, publication, and recovery. The [user experience plan](user-experience.md) covers all four user types. Read [responsibilities](notice.md) before relying on an archive.

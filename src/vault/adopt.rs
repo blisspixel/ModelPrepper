@@ -27,6 +27,10 @@ pub struct Adoption {
     pub provenance: &'static str,
     pub path: PathBuf,
     pub moved: bool,
+    pub file_count: usize,
+    pub size_bytes: u64,
+    pub license_id: String,
+    pub excluded: Vec<String>,
 }
 
 #[derive(Debug)]
@@ -40,7 +44,7 @@ pub fn adopt(
     plan_id: &str,
     source: &Path,
     move_source: bool,
-    progress: &mut dyn FnMut(&str, u64, u64),
+    progress: &mut dyn FnMut(&str, &str, u64, u64),
 ) -> Result<Outcome> {
     adopt_stopping(config, plan_id, source, move_source, progress, None)
 }
@@ -50,7 +54,7 @@ pub(crate) fn adopt_stopping(
     plan_id: &str,
     source: &Path,
     move_source: bool,
-    progress: &mut dyn FnMut(&str, u64, u64),
+    progress: &mut dyn FnMut(&str, &str, u64, u64),
     stop_after_files: Option<usize>,
 ) -> Result<Outcome> {
     let catalog = open_catalog(config, false)?;
@@ -98,7 +102,8 @@ pub(crate) fn adopt_stopping(
     let source = checked_source(config, source)?;
 
     if published.exists() {
-        let check = verify::verify_tree(&inventory, &published, progress)?;
+        let mut verifying = |path: &str, done, total| progress("verifying", path, done, total);
+        let check = verify::verify_tree(&inventory, &published, &mut verifying)?;
         if !check.ok {
             return Err(Error::new(
                 "destination_conflict",
@@ -108,7 +113,8 @@ pub(crate) fn adopt_stopping(
                 ),
             ));
         }
-        let manifest = manifest_from_tree(&published, &inventory.files)?;
+        let chosen = verify::selected_sources(&inventory, &check)?;
+        let manifest = manifest_from_tree(&published, &chosen)?;
         record(
             &catalog,
             plan_id,
@@ -121,9 +127,17 @@ pub(crate) fn adopt_stopping(
         let _ = fs::remove_dir_all(&staging);
         let _ = fs::remove_file(&journal);
         if move_source {
-            remove_sources(&source, &published, &inventory.files)?;
+            remove_sources(&source, &published, &chosen)?;
         }
-        return Ok(recorded(&repo, &revision, published, move_source));
+        return Ok(recorded(
+            &repo,
+            &revision,
+            published,
+            move_source,
+            &chosen,
+            &check.excluded,
+            &inventory.license.license_id,
+        ));
     }
 
     for item in &evidence {
@@ -148,30 +162,54 @@ pub(crate) fn adopt_stopping(
         }
     }
 
-    let verification = verify::verify_tree(&inventory, &source, progress)?;
+    let verification = {
+        let mut verifying = |path: &str, done, total| progress("verifying", path, done, total);
+        verify::verify_tree(&inventory, &source, &mut verifying)?
+    };
     if !verification.ok {
         rollback(&staging, &journal);
         return Ok(Outcome::Mismatch(verification));
     }
+    let chosen = verify::selected_sources(&inventory, &verification)?;
+    let excluded = verification.excluded.clone();
 
-    if let Err(error) = stage_files(
-        &source,
-        &staging,
-        &journal,
-        plan_id,
-        &inventory.files,
-        progress,
-        stop_after_files,
-    ) {
+    if let Err(error) = {
+        let mut copying = |path: &str, done, total| progress("copying", path, done, total);
+        stage_files(
+            &source,
+            &staging,
+            &journal,
+            plan_id,
+            &chosen,
+            &mut copying,
+            stop_after_files,
+        )
+    } {
         if error.code != "adopt_interrupted" {
             rollback(&staging, &journal);
         }
         return Err(error);
     }
-    let staged = verify::verify_tree(&inventory, &staging, progress)?;
+    let staged = {
+        let mut reverifying = |path: &str, done, total| progress("re-verifying", path, done, total);
+        verify::verify_tree(&inventory, &staging, &mut reverifying)?
+    };
     if !staged.ok {
         rollback(&staging, &journal);
         return Ok(Outcome::Mismatch(staged));
+    }
+    let staged_chosen = verify::selected_sources(&inventory, &staged)?;
+    if staged_chosen.len() != chosen.len()
+        || staged_chosen
+            .iter()
+            .zip(&chosen)
+            .any(|(left, right)| left.path != right.path)
+    {
+        rollback(&staging, &journal);
+        return Err(Error::new(
+            "selection_changed",
+            "the verified file set changed before publication",
+        ));
     }
     if let Some(parent) = published.parent() {
         fs::create_dir_all(parent).map_err(io)?;
@@ -182,7 +220,8 @@ pub(crate) fn adopt_stopping(
         sync_dir(parent)?;
     }
     // The published tree is already durable. A later read failure must not delete it.
-    let manifest = manifest_from_tree(&published, &inventory.files)?;
+    progress("recording", "catalog", 1, 1);
+    let manifest = manifest_from_tree(&published, &chosen)?;
     record(
         &catalog,
         plan_id,
@@ -194,12 +233,28 @@ pub(crate) fn adopt_stopping(
     )?;
     let _ = fs::remove_file(&journal);
     if move_source {
-        remove_sources(&source, &published, &inventory.files)?;
+        remove_sources(&source, &published, &chosen)?;
     }
-    Ok(recorded(&repo, &revision, published, move_source))
+    Ok(recorded(
+        &repo,
+        &revision,
+        published,
+        move_source,
+        &chosen,
+        &excluded,
+        &inventory.license.license_id,
+    ))
 }
 
-fn recorded(repo: &str, revision: &str, path: PathBuf, moved: bool) -> Outcome {
+fn recorded(
+    repo: &str,
+    revision: &str,
+    path: PathBuf,
+    moved: bool,
+    files: &[SourceFile],
+    excluded: &[String],
+    license_id: &str,
+) -> Outcome {
     Outcome::Recorded(Adoption {
         schema_version: 1,
         status: "adopted",
@@ -208,6 +263,12 @@ fn recorded(repo: &str, revision: &str, path: PathBuf, moved: bool) -> Outcome {
         provenance: PROVENANCE_LOCAL_UPSTREAM,
         path,
         moved,
+        file_count: files.len(),
+        size_bytes: files
+            .iter()
+            .fold(0_u64, |sum, file| sum.saturating_add(file.size_bytes)),
+        license_id: license_id.to_owned(),
+        excluded: excluded.to_vec(),
     })
 }
 
@@ -248,15 +309,19 @@ fn copy_one(
     if let Some(parent) = to.parent() {
         fs::create_dir_all(parent).map_err(io)?;
     }
-    if destination_matches(&to, file)?.is_some() {
+    if matched_sha256(&to, file)?.is_some() {
         progress(&file.path, file.size_bytes, file.size_bytes);
         return Ok(());
+    }
+    if to.exists() {
+        fs::remove_file(&to).map_err(io)?;
     }
     let partial = partial_path(&to);
     if partial.exists() {
         fs::remove_file(&partial).map_err(io)?;
     }
-    let mut input = File::open(&from).map_err(io)?;
+    let mut input = File::open(&from)
+        .map_err(|error| Error::new("input_read_failed", format!("{}: {error}", file.path)))?;
     let mut output = OpenOptions::new()
         .write(true)
         .create_new(true)
@@ -295,7 +360,7 @@ fn copy_one(
     if let Some(parent) = to.parent() {
         sync_dir(parent)?;
     }
-    if destination_matches(&to, file)?.is_none() {
+    if matched_sha256(&to, file)?.is_none() {
         let _ = fs::remove_file(&to);
         return Err(Error::new(
             "hash_mismatch",
@@ -305,13 +370,13 @@ fn copy_one(
     Ok(())
 }
 
-fn destination_matches(path: &Path, file: &SourceFile) -> Result<Option<String>> {
+/// Hash check that never deletes. Publication uses this so a bad read cannot erase a sealed copy.
+fn matched_sha256(path: &Path, file: &SourceFile) -> Result<Option<String>> {
     if !path.exists() {
         return Ok(None);
     }
     let meta = fs::symlink_metadata(path).map_err(io)?;
     if meta.file_type().is_symlink() || !meta.is_file() || meta.len() != file.size_bytes {
-        fs::remove_file(path).map_err(io)?;
         return Ok(None);
     }
     let expected = file.upstream_hash.as_ref().ok_or_else(|| {
@@ -326,7 +391,6 @@ fn destination_matches(path: &Path, file: &SourceFile) -> Result<Option<String>>
         HashAlgorithm::GitSha1 => hashed.git_sha1.clone(),
     };
     if actual != expected.value {
-        fs::remove_file(path).map_err(io)?;
         return Ok(None);
     }
     Ok(Some(hashed.sha256))
@@ -335,7 +399,7 @@ fn destination_matches(path: &Path, file: &SourceFile) -> Result<Option<String>>
 fn manifest_from_tree(root: &Path, files: &[SourceFile]) -> Result<String> {
     let mut entries = Vec::new();
     for file in files {
-        let sha256 = destination_matches(&verify::local_path(root, &file.path), file)?
+        let sha256 = matched_sha256(&verify::local_path(root, &file.path), file)?
             .ok_or_else(|| Error::new("hash_mismatch", format!("{} hash_mismatch", file.path)))?;
         entries.push(serde_json::json!({
             "path": file.path,

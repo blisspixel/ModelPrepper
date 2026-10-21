@@ -1,6 +1,6 @@
 # Native installation
 
-Installer scripts are implemented for release binaries and have offline fixture tests. No downloadable release has been published yet. Online commands below are prepared for a future qualified release and cannot install a binary today. Build from source using [getting started](getting-started.md) until qualified artifacts are available.
+Installer scripts are implemented for release binaries and have offline fixture tests. Production binaries are not qualified. The default `latest` lookup selects a stable GitHub release and ignores prereleases, so it does not install a preview. Tag `v0.1.0`, when published, is a Windows x64 preview only. Linux and macOS builds still come from source. See [getting started](getting-started.md) to build, and use an explicit version below for a preview archive.
 
 ## One-command release installation
 

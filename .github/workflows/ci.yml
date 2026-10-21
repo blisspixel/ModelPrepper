@@ -23,11 +23,11 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
-          python-version: '3.13'
-      - run: rustup toolchain install 1.96.0 --profile minimal --component clippy,rustfmt
+          python-version: '3.15'
+      - run: rustup toolchain install 1.99.1 --profile minimal --component clippy,rustfmt
       - run: cargo fmt --check
       - run: cargo clippy --locked --all-targets -- -D warnings
       - run: cargo test --locked
@@ -56,17 +56,17 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
-          node-version: '22'
+          node-version: '24'
           cache: npm
       - run: npm ci --ignore-scripts
       - run: npm run check
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         if: runner.os == 'Linux'
         with:
-          python-version: '3.13'
+          python-version: '3.15'
       - name: Lint installer development tools
         if: runner.os == 'Linux'
         run: |
@@ -78,21 +78,21 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
-          node-version: '22'
-      - run: rustup toolchain install nightly-2026-07-26 --profile minimal --component llvm-tools-preview
+          node-version: '24'
+      - run: rustup toolchain install nightly-2026-10-08 --profile minimal --component llvm-tools-preview
       - run: cargo install cargo-llvm-cov --version 0.9.1 --locked
-      - run: cargo +nightly-2026-07-26 llvm-cov --locked --branch --json --output-path target/coverage.json --ignore-filename-regex 'tests[\\/]' --fail-under-lines 80
+      - run: cargo +nightly-2026-10-08 llvm-cov --locked --branch --json --output-path target/coverage.json --ignore-filename-regex 'tests[\\/]' --fail-under-lines 80
       - run: node scripts/check-rust-coverage.mjs target/coverage.json
 
   dependencies:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-      - run: rustup toolchain install 1.96.0 --profile minimal
+      - uses: actions/checkout@v7
+      - run: rustup toolchain install 1.99.1 --profile minimal
       - run: cargo install cargo-audit --version 0.22.2 --locked
       - run: cargo install cargo-deny --version 0.19.8 --locked
       - run: cargo audit

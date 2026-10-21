@@ -1,6 +1,6 @@
 use clap::Parser;
 use modelprepper::cli::{
-    Cli, Command as AppCommand, ConfigCommand, execute, pretty_output, read_text,
+    Cli, ColorMode, Command as AppCommand, ConfigCommand, execute, pretty_output, read_text,
 };
 use std::fs;
 use std::io::Read;
@@ -252,13 +252,16 @@ fn library_cli_has_the_same_errors_as_the_binary() {
     let _: &dyn std::error::Error = &error;
     let cli = Cli {
         pretty: false,
-        command: AppCommand::Config {
+        json: false,
+        quiet: false,
+        color: ColorMode::Auto,
+        command: AppCommand::Setup(modelprepper::cli::SetupCommand::Config {
             command: ConfigCommand::Init {
                 output,
                 catalog: "".into(),
                 volume: "models".into(),
             },
-        },
+        }),
     };
     assert!(execute(cli).is_err());
 }
@@ -404,4 +407,75 @@ fn pretty_flag_indents_json_and_closed_stdout_does_not_panic() {
     assert!(status.success(), "{status:?} {stderr}");
     assert!(!stderr.contains("panicked"), "{stderr}");
     assert!(!stderr.contains("Broken pipe"), "{stderr}");
+}
+
+#[test]
+fn help_is_grouped_and_fits_eighty_columns() {
+    let output = binary(&["--help"]);
+    assert!(output.status.success(), "{output:?}");
+    let text = String::from_utf8(output.stdout).unwrap();
+    for needle in [
+        "Keep verified copies of open-weight models on your own disks.",
+        "Setup",
+        "Review a source",
+        "Local copies",
+        "Preview",
+        "First run:",
+    ] {
+        assert!(text.contains(needle), "{needle} missing from {text}");
+    }
+    for line in text.lines() {
+        assert!(line.chars().count() <= 80, "wide help line: {line}");
+    }
+    let config_help = String::from_utf8(binary(&["config", "--help"]).stdout).unwrap();
+    assert!(
+        config_help.contains("Create a config file"),
+        "{config_help}"
+    );
+    assert!(config_help.contains("Check a config file"), "{config_help}");
+    for line in config_help.lines() {
+        assert!(line.chars().count() <= 80, "wide config help line: {line}");
+    }
+    let missing = binary(&["status"]);
+    assert_eq!(missing.status.code(), Some(2));
+    let error: serde_json::Value = serde_json::from_slice(&missing.stderr).unwrap();
+    assert_eq!(error["error"]["code"], "invalid_usage");
+    assert!(
+        error["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("status")
+    );
+}
+
+#[test]
+fn json_wins_over_local_text_format_and_text_is_available_in_a_pipe() {
+    let dir = TempDir::new().unwrap();
+    let store = dir.path().join("empty-store");
+    fs::create_dir(&store).unwrap();
+    let text = binary(&[
+        "local",
+        "list",
+        "--ollama-dir",
+        store.to_str().unwrap(),
+        "--format",
+        "text",
+    ]);
+    assert!(text.status.success(), "{text:?}");
+    let body = String::from_utf8(text.stdout).unwrap();
+    assert!(body.contains("next:"), "{body}");
+    assert!(!body.trim_start().starts_with('{'), "{body}");
+    let forced = binary(&[
+        "--json",
+        "local",
+        "list",
+        "--ollama-dir",
+        store.to_str().unwrap(),
+        "--format",
+        "text",
+    ]);
+    assert!(forced.status.success(), "{forced:?}");
+    let value: serde_json::Value = serde_json::from_slice(&forced.stdout).unwrap();
+    assert_eq!(value["schema_version"], 2);
+    assert!(value["note"].as_str().unwrap().contains("--config"));
 }
