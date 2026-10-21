@@ -1,6 +1,6 @@
 # Implementation status
 
-This records executable behavior and evidence as of October 1, 2026. It does not mark the preservation roadmap complete.
+This records executable behavior and evidence as of October 20, 2026. It does not mark the preservation roadmap complete.
 
 ## Executable features
 
@@ -10,8 +10,8 @@ This records executable behavior and evidence as of October 1, 2026. It does not
 | init | Bundled local SQLite, writer lock, stable vault/disk UUIDs, empty-directory adoption. | Full power-loss recovery and filesystem qualification remain open. |
 | status | Offline catalog and mounted identity check, actual free bytes, and preserved local copies. | No downloaded bundles, jobs, reservations, replicas, or relocation yet. |
 | resolve | Moving ref followed by pinned metadata; verified license/config/index bytes. GGUF-only repos report layout `gguf-v1`. | Public ungated models only; no payload download or approval. |
-| verify-local / adopt | Read-only hash against a resolved commit, then copy or move a match. Provenance is `upstream-verified (local source)`. | Not a download and not a local-baseline import. License evidence must already match. |
-| local list | Read-only Ollama manifest inventory and preserved-digest comparison. | Does not import blobs or call the Ollama API. |
+| verify-local / adopt | Read-only hash against a resolved commit, then copy or move the frozen matched set. Absent optional files are exclusions. Provenance is `upstream-verified (local source)`. | Not a download and not a local-baseline import. License evidence must already match. |
+| local list | Read-only Ollama manifest inventory. Coverage is unchecked, none, partial, or fully recorded. | A catalog match is historical byte identity, not a fresh hash or an offline run. Does not import blobs or call the Ollama API. |
 | propose / proposals / decide | Durable evidence/volume binding, paginated offline inspection, idempotent rejection, schema-1 migration. | Approval is blocked until transfer bounds and accounting qualify. |
 | plan | Canonical preview from local inventory, file selection and blockers. | Always untrusted, never persisted or authorized. |
 | Integrity library | Bounded-memory Git blob/LFS verification plus local SHA-256. | Transfer writer and durable manifest integration are next. |
@@ -30,7 +30,7 @@ No command executes repository code. No automatic scan, account service, telemet
 - Live source inspection pins SmolLM2-135M-Instruct at 12fd25f77366fa6b3b4b768ec3050bf629380bac. Configuration bytes verify; missing license text remains unreviewed despite the Apache tag. No weights were fetched.
 - A second release inspection pins Qwen2.5-0.5B-Instruct at 7ae557604adf67be50417f59c2c2f167def9a775. License/config/tokenizer configuration bytes verify, and the Apache template with its filled appendix copyright matches. Transfer authorization remains false; no weights were fetched.
 
-Local Windows validation passes 70 Rust tests, ten offline installer/packaging tests, and six documentation-tool tests. Measured owned Rust coverage is 96.76% of lines and 92.71% of branches; the documentation link library measures 100% for both. Rust formatting, Clippy with warnings denied, Markdown lint, local links, and Python tooling lint pass. CLI captures are regenerated from the release binary and checked for freshness. Dependency source/license/duplicate checks and the vulnerability audit passed for the unchanged lockfile; no known vulnerabilities were reported. A release smoke test creates an empty vault and reports its mounted disk without contacting a publisher. Current artifact sizes are observations, not distribution guarantees.
+Local Windows validation passes 104 Rust tests and six documentation-tool tests. Formatting and Clippy with warnings denied pass on Rust 1.99.1. Markdown lint and local links pass. The documentation link library measures 100% line and branch coverage. The CI coverage gate requires at least 80% of owned Rust lines and a real branch measurement; a new local percentage is not claimed until that job measures this tree. CLI captures are regenerated from the release executable. Dependency audit and license checks run in CI against the current lockfile. Offline installer fixtures run from the release binary. A release smoke test creates an empty vault and reports its mounted disk without contacting a publisher. Current artifact sizes are observations, not distribution guarantees.
 
 Live source state can change. These checks are observations, not permanently pinned model recommendations. Use resolve to inspect a current source and retain the exact commit/evidence before later approval.
 

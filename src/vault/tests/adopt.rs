@@ -138,7 +138,7 @@ fn copy_and_move_record_upstream_verified_local_provenance() {
     let download = sample.download.clone();
     let plan = stored(&config, &sample);
     let mut progress = 0_u32;
-    let Outcome::Recorded(adopted) = adopt(&config, &plan, &download, false, &mut |_, _, _| {
+    let Outcome::Recorded(adopted) = adopt(&config, &plan, &download, false, &mut |_, _, _, _| {
         progress += 1
     })
     .unwrap() else {
@@ -163,7 +163,7 @@ fn copy_and_move_record_upstream_verified_local_provenance() {
             .unwrap()
             .contains(&digest(b"weights"))
     );
-    let again = adopt(&config, &plan, &download, true, &mut |_, _, _| {}).unwrap();
+    let again = adopt(&config, &plan, &download, true, &mut |_, _, _, _| {}).unwrap();
     let Outcome::Recorded(moved) = again else {
         panic!("expected idempotent adoption");
     };
@@ -181,7 +181,7 @@ fn mismatch_names_the_file_and_interruption_rolls_forward() {
     let mut flipped = fs::read(download.join("model.safetensors")).unwrap();
     flipped[0] = b'W';
     fs::write(download.join("model.safetensors"), &flipped).unwrap();
-    let mismatch = adopt(&config, &plan, &download, false, &mut |_, _, _| {}).unwrap();
+    let mismatch = adopt(&config, &plan, &download, false, &mut |_, _, _, _| {}).unwrap();
     let Outcome::Mismatch(report) = mismatch else {
         panic!("expected a verification failure");
     };
@@ -193,12 +193,20 @@ fn mismatch_names_the_file_and_interruption_rolls_forward() {
     assert!(!volume.join("preserved").exists());
 
     fs::write(download.join("model.safetensors"), b"weights").unwrap();
-    let error =
-        adopt_stopping(&config, &plan, &download, false, &mut |_, _, _| {}, Some(1)).unwrap_err();
+    let error = adopt_stopping(
+        &config,
+        &plan,
+        &download,
+        false,
+        &mut |_, _, _, _| {},
+        Some(1),
+    )
+    .unwrap_err();
     assert_eq!(error.code, "adopt_interrupted");
     assert!(volume.join(".modelprepper-adopt").join(&plan).exists());
     assert!(!publish_dir(&volume, "example/model", COMMIT).exists());
-    let Outcome::Recorded(_) = adopt(&config, &plan, &download, false, &mut |_, _, _| {}).unwrap()
+    let Outcome::Recorded(_) =
+        adopt(&config, &plan, &download, false, &mut |_, _, _, _| {}).unwrap()
     else {
         panic!("resume should publish");
     };
@@ -217,7 +225,7 @@ fn missing_license_evidence_is_not_adopted() {
     let download = unreviewed.download.clone();
     let plan = stored(&config, &unreviewed);
     assert_eq!(
-        adopt(&config, &plan, &download, false, &mut |_, _, _| {})
+        adopt(&config, &plan, &download, false, &mut |_, _, _, _| {})
             .unwrap_err()
             .code,
         "license_needs_review"
@@ -229,7 +237,7 @@ fn missing_license_evidence_is_not_adopted() {
     let plan = stored(&config, &matched);
     fs::remove_file(download.join("config.json")).unwrap();
     let Outcome::Mismatch(report) =
-        adopt(&config, &plan, &download, false, &mut |_, _, _| {}).unwrap()
+        adopt(&config, &plan, &download, false, &mut |_, _, _, _| {}).unwrap()
     else {
         panic!("missing shard should be reported");
     };
@@ -253,9 +261,16 @@ fn move_retry_preserves_changed_source_and_all_other_files() {
     let (_dir, config) = setup();
     let sample = sample(true);
     let plan = stored(&config, &sample);
-    adopt(&config, &plan, &sample.download, false, &mut |_, _, _| {}).unwrap();
+    adopt(
+        &config,
+        &plan,
+        &sample.download,
+        false,
+        &mut |_, _, _, _| {},
+    )
+    .unwrap();
     fs::write(sample.download.join("model.safetensors"), b"CHANGED").unwrap();
-    assert!(adopt(&config, &plan, &sample.download, true, &mut |_, _, _| {}).is_err());
+    assert!(adopt(&config, &plan, &sample.download, true, &mut |_, _, _, _| {}).is_err());
     assert_eq!(
         fs::read(sample.download.join("model.safetensors")).unwrap(),
         b"CHANGED"
@@ -268,12 +283,17 @@ fn move_retry_rejects_the_published_tree_as_source() {
     let (_dir, config) = setup();
     let sample = sample(true);
     let plan = stored(&config, &sample);
-    let Outcome::Recorded(copy) =
-        adopt(&config, &plan, &sample.download, false, &mut |_, _, _| {}).unwrap()
-    else {
+    let Outcome::Recorded(copy) = adopt(
+        &config,
+        &plan,
+        &sample.download,
+        false,
+        &mut |_, _, _, _| {},
+    )
+    .unwrap() else {
         panic!("copy");
     };
-    assert!(adopt(&config, &plan, &copy.path, true, &mut |_, _, _| {}).is_err());
+    assert!(adopt(&config, &plan, &copy.path, true, &mut |_, _, _, _| {}).is_err());
     assert_eq!(
         fs::read(copy.path.join("model.safetensors")).unwrap(),
         b"weights"
@@ -295,7 +315,16 @@ fn license_fifo_is_rejected_before_opening() {
             .unwrap()
             .success()
     );
-    assert!(adopt(&config, &plan, &sample.download, false, &mut |_, _, _| {}).is_err());
+    assert!(
+        adopt(
+            &config,
+            &plan,
+            &sample.download,
+            false,
+            &mut |_, _, _, _| {}
+        )
+        .is_err()
+    );
     assert!(status(&config).unwrap().preserved.is_empty());
 }
 
@@ -304,12 +333,19 @@ fn move_retry_resumes_partial_cleanup_without_touching_extra_files() {
     let (_dir, config) = setup();
     let sample = sample(true);
     let plan = stored(&config, &sample);
-    adopt(&config, &plan, &sample.download, false, &mut |_, _, _| {}).unwrap();
+    adopt(
+        &config,
+        &plan,
+        &sample.download,
+        false,
+        &mut |_, _, _, _| {},
+    )
+    .unwrap();
     fs::remove_file(sample.download.join("LICENSE")).unwrap();
     fs::write(sample.download.join("personal.txt"), b"keep").unwrap();
     for _ in 0..2 {
         assert!(matches!(
-            adopt(&config, &plan, &sample.download, true, &mut |_, _, _| {}).unwrap(),
+            adopt(&config, &plan, &sample.download, true, &mut |_, _, _, _| {}).unwrap(),
             Outcome::Recorded(_)
         ));
     }
@@ -326,14 +362,20 @@ fn move_preserves_source_changed_after_staging_started() {
     let sample = sample(true);
     let plan = stored(&config, &sample);
     let mut weight_updates = 0;
-    let result = adopt(&config, &plan, &sample.download, true, &mut |path, _, _| {
-        if path == "model.safetensors" {
-            weight_updates += 1;
-            if weight_updates == 3 {
-                fs::write(sample.download.join(path), b"CHANGED").unwrap();
+    let result = adopt(
+        &config,
+        &plan,
+        &sample.download,
+        true,
+        &mut |_phase, path, _, _| {
+            if path == "model.safetensors" {
+                weight_updates += 1;
+                if weight_updates == 3 {
+                    fs::write(sample.download.join(path), b"CHANGED").unwrap();
+                }
             }
-        }
-    });
+        },
+    );
     assert_eq!(result.unwrap_err().code, "source_remove_failed");
     assert_eq!(
         fs::read(sample.download.join("model.safetensors")).unwrap(),
@@ -387,16 +429,28 @@ fn oversized_and_corrupt_license_evidence_is_rejected() {
     file.set_len(8 * 1024 * 1024 * 1024).unwrap();
     drop(file);
     assert_eq!(
-        adopt(&config, &plan, &sample.download, false, &mut |_, _, _| {})
-            .unwrap_err()
-            .code,
+        adopt(
+            &config,
+            &plan,
+            &sample.download,
+            false,
+            &mut |_, _, _, _| {}
+        )
+        .unwrap_err()
+        .code,
         "evidence_mismatch"
     );
     fs::write(&license, b"UPSTREAM LICENSE TEXT").unwrap();
     assert_eq!(
-        adopt(&config, &plan, &sample.download, false, &mut |_, _, _| {})
-            .unwrap_err()
-            .code,
+        adopt(
+            &config,
+            &plan,
+            &sample.download,
+            false,
+            &mut |_, _, _, _| {}
+        )
+        .unwrap_err()
+        .code,
         "evidence_mismatch"
     );
     assert!(status(&config).unwrap().preserved.is_empty());
@@ -417,12 +471,19 @@ fn linked_evidence_and_retry_ancestors_are_not_followed() {
     .unwrap();
     sample.inventory.files[2].path = "nested/model.safetensors".into();
     let plan = stored(&config, &sample);
-    adopt(&config, &plan, &sample.download, false, &mut |_, _, _| {}).unwrap();
+    adopt(
+        &config,
+        &plan,
+        &sample.download,
+        false,
+        &mut |_, _, _, _| {},
+    )
+    .unwrap();
     let outside = sample._dir.path().join("outside");
     fs::rename(sample.download.join("nested"), &outside).unwrap();
     symlink(&outside, sample.download.join("nested")).unwrap();
     assert_eq!(
-        adopt(&config, &plan, &sample.download, true, &mut |_, _, _| {})
+        adopt(&config, &plan, &sample.download, true, &mut |_, _, _, _| {})
             .unwrap_err()
             .code,
         "unsafe_path"
@@ -442,9 +503,15 @@ fn linked_evidence_and_retry_ancestors_are_not_followed() {
     let (_fresh, config) = setup();
     let plan = stored(&config, &sample);
     assert_eq!(
-        adopt(&config, &plan, &sample.download, false, &mut |_, _, _| {})
-            .unwrap_err()
-            .code,
+        adopt(
+            &config,
+            &plan,
+            &sample.download,
+            false,
+            &mut |_, _, _, _| {}
+        )
+        .unwrap_err()
+        .code,
         "unsafe_path"
     );
 }
@@ -463,7 +530,14 @@ fn retry_does_not_follow_windows_junctions() {
     .unwrap();
     sample.inventory.files[2].path = "nested/model.safetensors".into();
     let plan = stored(&config, &sample);
-    adopt(&config, &plan, &sample.download, false, &mut |_, _, _| {}).unwrap();
+    adopt(
+        &config,
+        &plan,
+        &sample.download,
+        false,
+        &mut |_, _, _, _| {},
+    )
+    .unwrap();
     let outside = sample._dir.path().join("outside");
     fs::rename(&nested, &outside).unwrap();
     assert!(
@@ -476,7 +550,7 @@ fn retry_does_not_follow_windows_junctions() {
             .success()
     );
     assert_eq!(
-        adopt(&config, &plan, &sample.download, true, &mut |_, _, _| {})
+        adopt(&config, &plan, &sample.download, true, &mut |_, _, _, _| {})
             .unwrap_err()
             .code,
         "unsafe_path"
@@ -487,4 +561,222 @@ fn retry_does_not_follow_windows_junctions() {
     );
     assert!(sample.download.join("LICENSE").exists());
     fs::remove_dir(&nested).unwrap();
+}
+
+fn with_optional(sample: &mut Sample, path: &str, bytes: &[u8], present: bool) {
+    if present {
+        fs::write(sample.download.join(path), bytes).unwrap();
+    }
+    let mut file = source_file(path, bytes, Role::Documentation, HashAlgorithm::GitSha1);
+    file.required = false;
+    sample.inventory.files.push(file);
+}
+
+fn manifest_for(config: &Config, plan: &str) -> String {
+    let catalog = super::super::open_catalog(config, false).unwrap();
+    catalog
+        .db
+        .query_row(
+            "SELECT manifest FROM custody WHERE plan_id = ?1",
+            [plan],
+            |row| row.get(0),
+        )
+        .unwrap()
+}
+
+#[test]
+fn absent_optional_files_stay_out_of_the_copy_manifest_and_move() {
+    let (dir, config) = setup();
+    let mut sample = sample(true);
+    with_optional(&mut sample, "README.md", b"optional readme", false);
+    let mut weight = source_file(
+        "extra.safetensors",
+        b"optional-weight",
+        Role::Weight,
+        HashAlgorithm::Sha256,
+    );
+    weight.required = false;
+    sample.inventory.files.push(weight);
+    let plan = stored(&config, &sample);
+    let Outcome::Recorded(adopted) = adopt(
+        &config,
+        &plan,
+        &sample.download,
+        false,
+        &mut |_, _, _, _| {},
+    )
+    .unwrap() else {
+        panic!("optional absence should still adopt");
+    };
+    assert_eq!(
+        adopted.excluded,
+        vec!["README.md".to_owned(), "extra.safetensors".to_owned()]
+    );
+    assert_eq!(adopted.file_count, 3);
+    assert!(!adopted.path.join("README.md").exists());
+    assert!(!adopted.path.join("extra.safetensors").exists());
+    assert_eq!(
+        fs::read(adopted.path.join("model.safetensors")).unwrap(),
+        b"weights"
+    );
+    let manifest = manifest_for(&config, &plan);
+    assert!(!manifest.contains("README.md"));
+    assert!(!manifest.contains("extra.safetensors"));
+    assert!(manifest.contains("model.safetensors"));
+    assert!(manifest.contains("LICENSE"));
+    let text = crate::present::render_adoption(&adopted, false, 80);
+    assert!(
+        text.lines().all(|line| line.chars().count() <= 80),
+        "{text}"
+    );
+    assert!(text.starts_with("preserved"));
+    assert!(text.contains("SHA-256 matched upstream"));
+    assert!(text.contains("text kept with the copy"));
+    assert!(text.contains(PROVENANCE_LOCAL_UPSTREAM));
+    assert!(!text.contains('\u{1b}'));
+    let config_path = dir.path().join("config.toml");
+    fs::write(&config_path, toml::to_string(&config).unwrap()).unwrap();
+    let listed = crate::cli::execute_in(
+        crate::cli::Cli {
+            pretty: false,
+            json: false,
+            quiet: true,
+            color: crate::cli::ColorMode::Never,
+            command: crate::cli::Command::LocalCopies(crate::cli::LocalCopiesCommand::Adopt {
+                config: config_path,
+                plan: plan.clone(),
+                path: sample.download.clone(),
+                move_source: false,
+                copy: true,
+            }),
+        },
+        crate::cli::View {
+            text: true,
+            json: false,
+            color: false,
+            stderr_terminal: false,
+            columns: 80,
+        },
+    )
+    .unwrap();
+    match listed {
+        crate::cli::CommandOutput::Text { body, ok } => {
+            assert!(ok);
+            assert!(body.contains("preserved"));
+            assert!(body.contains("README.md"));
+        }
+        other => panic!("expected text receipt, got {other:?}"),
+    }
+    assert!(matches!(
+        adopt(&config, &plan, &sample.download, true, &mut |_, _, _, _| {}).unwrap(),
+        Outcome::Recorded(_)
+    ));
+    assert!(!sample.download.join("model.safetensors").exists());
+}
+
+#[test]
+fn present_optional_files_are_copied_and_damage_does_not_publish() {
+    let (_dir, config) = setup();
+    let mut sample = sample(true);
+    with_optional(&mut sample, "README.md", b"optional readme", true);
+    let plan = stored(&config, &sample);
+    let Outcome::Recorded(adopted) = adopt(
+        &config,
+        &plan,
+        &sample.download,
+        false,
+        &mut |_, _, _, _| {},
+    )
+    .unwrap() else {
+        panic!("present optional file should be copied");
+    };
+    assert!(adopted.excluded.is_empty());
+    assert_eq!(adopted.file_count, 4);
+    assert_eq!(
+        fs::read(adopted.path.join("README.md")).unwrap(),
+        b"optional readme"
+    );
+    assert!(manifest_for(&config, &plan).contains("README.md"));
+
+    let (_dir, config) = setup();
+    let mut sample = self::sample(true);
+    with_optional(&mut sample, "README.md", b"optional readme", true);
+    fs::write(sample.download.join("README.md"), b"DAMAGED").unwrap();
+    let plan = stored(&config, &sample);
+    let outcome = adopt(
+        &config,
+        &plan,
+        &sample.download,
+        false,
+        &mut |_, _, _, _| {},
+    )
+    .unwrap();
+    let Outcome::Mismatch(report) = outcome else {
+        panic!("damaged optional file must not publish");
+    };
+    assert!(!report.ok);
+    assert!(report.message.contains("README.md"));
+    assert!(!publish_dir(&config.volumes[0].path, "example/model", COMMIT).exists());
+    let text = crate::present::render_verification(&report, false, 80);
+    assert!(text.contains("mismatch"));
+    assert!(!text.contains("preserved"));
+
+    fs::write(sample.download.join("README.md"), b"optional readme").unwrap();
+    fs::remove_file(sample.download.join("model.safetensors")).unwrap();
+    let outcome = adopt(
+        &config,
+        &plan,
+        &sample.download,
+        false,
+        &mut |_, _, _, _| {},
+    )
+    .unwrap();
+    let Outcome::Mismatch(report) = outcome else {
+        panic!("missing required file must not publish");
+    };
+    assert!(report.message.contains("model.safetensors missing"));
+    assert!(!publish_dir(&config.volumes[0].path, "example/model", COMMIT).exists());
+}
+
+#[test]
+fn unplugged_disk_keeps_historical_coverage_without_claiming_the_bytes() {
+    let (dir, config) = setup();
+    let sample = sample(true);
+    let plan = stored(&config, &sample);
+    assert!(matches!(
+        adopt(
+            &config,
+            &plan,
+            &sample.download,
+            false,
+            &mut |_, _, _, _| {}
+        )
+        .unwrap(),
+        Outcome::Recorded(_)
+    ));
+    let digests = preserved_digests(&config).unwrap();
+    assert!(digests.len() >= 3);
+    let volume = config.volumes[0].path.clone();
+    fs::rename(&volume, dir.path().join("unplugged")).unwrap();
+    let reported = status(&config).unwrap();
+    assert_eq!(reported.volumes[0].state, "offline");
+    assert_eq!(reported.preserved.len(), 1);
+    assert_eq!(preserved_digests(&config).unwrap(), digests);
+    let digest = digests.iter().next().unwrap();
+    let store = dir.path().join("ollama");
+    let model = store.join("manifests/registry.ollama.ai/library/kept");
+    fs::create_dir_all(&model).unwrap();
+    fs::write(
+        model.join("latest"),
+        format!(
+            r#"{{"schemaVersion":2,"config":{{"mediaType":"application/octet-stream","digest":"sha256:{digest}","size":4}},"layers":[]}}"#
+        ),
+    )
+    .unwrap();
+    let inventory =
+        crate::runtime::inventory(std::slice::from_ref(&store), Some(&digests)).unwrap();
+    assert_eq!(inventory.models[0].coverage, "all_components_recorded");
+    assert_eq!(inventory.models[0].preserved, Some(true));
+    assert!(inventory.note.contains("not a fresh hash"));
+    assert!(!volume.join("preserved").exists());
 }

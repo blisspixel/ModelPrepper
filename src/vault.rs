@@ -19,8 +19,10 @@ mod adoption;
 #[path = "vault/tests/ownership.rs"]
 mod ownership_tests;
 mod review;
-pub use adoption::{Outcome, PROVENANCE_LOCAL_UPSTREAM, adopt};
+pub use adoption::{Adoption, Outcome, PROVENANCE_LOCAL_UPSTREAM, adopt};
 pub use review::{Decision, Proposal, ProposalPage, decide, proposals, propose, show_proposal};
+#[cfg(test)]
+pub(crate) use review::{ProposalSummary, SourceReview};
 
 #[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]

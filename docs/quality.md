@@ -6,7 +6,7 @@ This repository contains the Rust vault foundation, public-source inspection, pe
 
 Development Node tooling is not a dependency of the planned native product.
 
-Run the current checks with Node 22.19 or newer:
+Run the current checks with Node 24 or newer:
 
 ```text
 npm ci --ignore-scripts
@@ -26,10 +26,10 @@ cargo audit
 cargo deny check
 ```
 
-Line and branch coverage use a separate pinned nightly toolchain because cargo-llvm-cov branch instrumentation is currently unstable. Release code remains pinned to Rust 1.96.0.
+Line and branch coverage use a separate pinned nightly toolchain because cargo-llvm-cov branch instrumentation is currently unstable. Release code remains pinned to Rust 1.99.1.
 
 ```text
-cargo +nightly-2026-07-26 llvm-cov --locked --branch --json --output-path target/coverage.json --ignore-filename-regex 'tests[\\/]' --fail-under-lines 80
+cargo +nightly-2026-10-08 llvm-cov --locked --branch --json --output-path target/coverage.json --ignore-filename-regex 'tests[\\/]' --fail-under-lines 80
 node scripts/check-rust-coverage.mjs target/coverage.json
 ```
 

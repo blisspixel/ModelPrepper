@@ -19,6 +19,10 @@ pub struct Verification {
     pub repo_id: String,
     pub resolved_revision: String,
     pub files: Vec<VerifiedFile>,
+    /// Inventory paths whose bytes matched. This is the only set adoption copies.
+    pub selected: Vec<String>,
+    /// Optional inventory paths that were absent. They are not copied or sealed.
+    pub excluded: Vec<String>,
     pub message: String,
 }
 
@@ -44,11 +48,17 @@ pub fn verify_tree(
     }
     let mut files = Vec::new();
     let mut problems = Vec::new();
+    let mut selected = Vec::new();
+    let mut excluded = Vec::new();
     let mut known = BTreeSet::new();
     for file in &inventory.files {
         known.insert(file.path.to_ascii_lowercase());
         let status = file_status(root, file, progress)?;
-        if status != "match" && (file.required || status != "missing") {
+        if status == "match" {
+            selected.push(file.path.clone());
+        } else if status == "missing" && !file.required {
+            excluded.push(file.path.clone());
+        } else if status != "match" {
             problems.push(format!("{} {status}", file.path));
         }
         files.push(VerifiedFile {
@@ -69,6 +79,8 @@ pub fn verify_tree(
         });
     }
     files.sort_by(|left, right| left.path.cmp(&right.path));
+    selected.sort();
+    excluded.sort();
     Ok(Verification {
         schema_version: 1,
         mode: "local_verification",
@@ -77,7 +89,43 @@ pub fn verify_tree(
         resolved_revision: inventory.source.resolved_revision.clone(),
         message: problems.join("; "),
         files,
+        selected,
+        excluded,
     })
+}
+
+/// The frozen file set for copy, manifest, retry, and move cleanup.
+pub fn selected_sources(inventory: &Inventory, report: &Verification) -> Result<Vec<SourceFile>> {
+    let mut chosen = Vec::new();
+    for path in &report.selected {
+        let Some(file) = inventory.files.iter().find(|file| file.path == *path) else {
+            return Err(Error::new(
+                "verification_inconsistent",
+                format!("{path} is not in the resolved inventory"),
+            ));
+        };
+        let matched = report
+            .files
+            .iter()
+            .any(|item| item.path == *path && item.status == "match");
+        if !matched {
+            return Err(Error::new(
+                "verification_inconsistent",
+                format!("{path} is not a verified match"),
+            ));
+        }
+        chosen.push(file.clone());
+    }
+    for file in &report.files {
+        if file.status == "match" && !report.selected.iter().any(|path| path == &file.path) {
+            return Err(Error::new(
+                "verification_inconsistent",
+                format!("{} matched but was left out of the frozen set", file.path),
+            ));
+        }
+    }
+    chosen.sort_by(|left, right| left.path.cmp(&right.path));
+    Ok(chosen)
 }
 
 pub(crate) fn file_status(
@@ -262,6 +310,11 @@ mod tests {
                 .iter()
                 .any(|file| file.path == "README.md" && file.status == "missing")
         );
+        assert!(!report.selected.iter().any(|path| path == "README.md"));
+        assert!(report.excluded.iter().any(|path| path == "README.md"));
+        let frozen = selected_sources(&good, &report).unwrap();
+        assert!(!frozen.iter().any(|file| file.path == "README.md"));
+        assert!(frozen.iter().all(|file| file.required));
         assert_eq!(
             fs::read(dir.path().join("model.safetensors")).unwrap(),
             before
@@ -279,6 +332,49 @@ mod tests {
         let missing = verify_tree(&good, dir.path(), &mut |_, _, _| {}).unwrap();
         assert!(!missing.ok);
         assert!(missing.message.contains("model.safetensors missing"));
+    }
+
+    #[test]
+    fn optional_absence_is_excluded_and_optional_damage_still_fails() {
+        let dir = TempDir::new().unwrap();
+        fs::write(dir.path().join("LICENSE"), b"license").unwrap();
+        fs::write(dir.path().join("README.md"), b"optional").unwrap();
+        let files = inventory(vec![
+            file("LICENSE", b"license", HashAlgorithm::GitSha1, true),
+            file(
+                "model.safetensors",
+                b"weights",
+                HashAlgorithm::Sha256,
+                false,
+            ),
+            file("README.md", b"optional", HashAlgorithm::GitSha1, false),
+        ]);
+        let absent = verify_tree(&files, dir.path(), &mut |_, _, _| {}).unwrap();
+        assert!(absent.ok, "{absent:?}");
+        assert_eq!(absent.excluded, vec!["model.safetensors".to_owned()]);
+        assert!(absent.selected.iter().any(|path| path == "README.md"));
+        assert!(absent.selected.iter().any(|path| path == "LICENSE"));
+        let frozen = selected_sources(&files, &absent).unwrap();
+        assert_eq!(frozen.len(), 2);
+
+        fs::write(dir.path().join("README.md"), b"damaged").unwrap();
+        let damaged = verify_tree(&files, dir.path(), &mut |_, _, _| {}).unwrap();
+        assert!(!damaged.ok);
+        assert!(damaged.message.contains("README.md"));
+        assert!(!damaged.excluded.iter().any(|path| path == "README.md"));
+        assert!(
+            damaged
+                .excluded
+                .iter()
+                .any(|path| path == "model.safetensors")
+        );
+
+        fs::remove_file(dir.path().join("LICENSE")).unwrap();
+        fs::write(dir.path().join("README.md"), b"optional").unwrap();
+        let required = verify_tree(&files, dir.path(), &mut |_, _, _| {}).unwrap();
+        assert!(!required.ok);
+        assert!(required.message.contains("LICENSE missing"));
+        assert!(!required.excluded.iter().any(|path| path == "LICENSE"));
     }
 
     #[test]

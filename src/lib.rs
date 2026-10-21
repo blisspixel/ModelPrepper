@@ -9,11 +9,12 @@ pub mod integrity;
 pub mod inventory;
 pub mod licenses;
 pub mod plan;
+mod present;
 mod runtime;
 pub mod transfer;
 pub mod validation;
 pub mod vault;
-mod verify;
+pub(crate) mod verify;
 mod writer_lock;
 
 pub use config::Config;

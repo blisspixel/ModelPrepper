@@ -1,10 +1,10 @@
 # Contributing
 
-ModelPrepper is an MIT-licensed Rust preservation utility under active development. Read the [current status](docs/implementation-status.md), [contracts](docs/contracts.md), [roadmap](docs/roadmap.md), and [user experience plan](docs/user-experience.md) before proposing broader features.
+ModelPrepper is an MIT-licensed Rust preservation utility under active development. Start with [AGENTS.md](AGENTS.md), then read the [current status](docs/implementation-status.md), [contracts](docs/contracts.md), [roadmap](docs/roadmap.md), and [user experience plan](docs/user-experience.md) before proposing broader features.
 
 ## Development
 
-Install Rust using the pinned rust-toolchain.toml. Node 22.19 or newer is used only for documentation checks.
+Install Rust using the pinned rust-toolchain.toml. Node 24 or newer is used only for documentation checks.
 
 Native installer fixture tests and packaging use Python's standard library. Install Ruff 0.15.16 for those scripts' lint/format checks. Screenshot rendering separately uses optional Pillow. None is a product runtime dependency.
 

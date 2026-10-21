@@ -1,1 +1,5 @@
-{"preserved":[],"schema_version":1,"state":"ready","vault_id":"b608c40c-601f-47c7-b7ea-da71f2799876","volumes":[{"available_bytes":3596043714560,"label":"primary","path":"/home/pueo/Work/modelprepper-adoption-fix-oct13/target/docs-capture/models","state":"mounted","volume_id":"d69196b8-d146-4253-8d0c-fb87e82a7903"}]}
+ready  vault 8397c2c3
+  primary  mounted  432.2 GB (402.6 GiB) free
+  path  \\?\C:\GitHub\ModelPrepper\target\docs-capture\models
+  preserved  none yet
+next: modelprepper resolve --repo <org/model>

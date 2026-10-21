@@ -1,6 +1,7 @@
 """Render actual CLI output for documentation. Pillow is development-only."""
 import hashlib
 import json
+import os
 import platform
 import subprocess
 import textwrap
@@ -25,7 +26,19 @@ def source_digest():
 
 
 def execute(binary, *args):
-    return subprocess.run([str(binary), *args], cwd=ROOT, check=True, capture_output=True, text=True).stdout.replace("\r\n", "\n")
+    env = os.environ.copy()
+    # A pipe is not a terminal. This asks the binary for the same text a terminal shows.
+    env["MODELPREPPER_TEXT"] = "1"
+    env["NO_COLOR"] = "1"
+    completed = subprocess.run(
+        [str(binary), *args],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+    return completed.stdout.replace("\r\n", "\n")
 
 
 def render(name, command, output):
@@ -54,7 +67,9 @@ def render(name, command, output):
 
 def main():
     subprocess.run(["cargo", "build", "--locked", "--release"], cwd=ROOT, check=True)
-    binary = ROOT / "target" / "release" / ("modelprepper.exe" if platform.system() == "Windows" else "modelprepper")
+    target = Path(os.environ.get("CARGO_TARGET_DIR", ROOT / "target"))
+    name = "modelprepper.exe" if platform.system() == "Windows" else "modelprepper"
+    binary = target / "release" / name
     demo = ROOT / "target" / "docs-capture"
     demo.mkdir(parents=True, exist_ok=True)
     config = demo / "config.toml"

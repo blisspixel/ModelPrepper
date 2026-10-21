@@ -19,8 +19,8 @@ Local custody, portable data, and user control are central. The project rejects 
 | status | Inspect catalog, disk identities, preserved copies, and actual free space without publisher access. |
 | resolve | Pin a public commit and verify license, configuration, tokenizer configuration, and index evidence. GGUF-only repos are labeled `gguf-v1`. |
 | propose / proposals / decide | Save exact source reviews, browse offline, and record rejection. Approval remains blocked. |
-| verify-local / adopt | Compare a local folder with a resolved commit, then copy or move a match into the vault. |
-| local list | Read Ollama manifests and report which tags are not preserved. Nothing in the store is changed. |
+| verify-local / adopt | Compare a local folder with a resolved commit, then copy or move the matched file set. Absent optional files are excluded. |
+| local list | Read Ollama manifests and say whether each tag was checked against the catalog. Nothing in the store is changed. |
 | plan | Preview untrusted local inventory with selected files, costs, exclusions, and blockers. |
 
 See [implementation status](docs/implementation-status.md) for observed evidence and limitations, and the [roadmap](docs/roadmap.md) for delivery gates.
@@ -35,7 +35,7 @@ Build from source with the pinned Rust toolchain:
 
 Rust is required to build. The resulting executable needs no Rust, Python, Node, Docker, database installation, inference server, or GPU to run. Platform qualification is tracked in CI and the release plan; production binary releases are not available yet.
 
-PowerShell and shell installers are prepared for verified native releases and offline archives. See [installation](docs/installation.md) for the planned one-command path and release limits.
+PowerShell and shell installers are prepared for verified native releases and offline archives. A Windows preview tag is not a production release and is not what `latest` installs. See [installation](docs/installation.md) for the limits.
 
 Create a configuration and initialize an empty vault:
 
@@ -50,14 +50,16 @@ Inspect a public model without downloading weights:
 
     cargo run --locked --release -- resolve --repo Qwen/Qwen2.5-0.5B-Instruct --revision main
 
-Review the resolved commit and original license evidence. A license tag alone is insufficient. Source inspection always reports transfer_authorized=false. JSON is indented when stdout is a terminal, or when you pass `--pretty`; pipes stay compact. A missing repository is `repository_not_found_or_private` (Hugging Face uses HTTP 401 for both), and a missing revision is `revision_not_found`.
+Review the resolved commit and original license evidence. A license tag alone is insufficient. Source inspection always reports transfer_authorized=false. A terminal prints a short text verdict and one next step. A pipe, or `--json`, prints compact JSON; `--pretty` indents that JSON. `--json` also wins over `local list --format text`. Color is `--color auto|always|never`, and `NO_COLOR` or `TERM=dumb` turns it off. JSON is never colored. A missing repository is `repository_not_found_or_private` (Hugging Face uses HTTP 401 for both), and a missing revision is `revision_not_found`.
 
-If you already have the files, verify them against that commit and adopt the folder. This is not a download, and it is not a local-baseline import: every required file must match the resolved sizes and upstream hashes, and the commit must already have matched license evidence. The catalog then records provenance `upstream-verified (local source)`.
+On a terminal, a failure is one `error:` line and one `next:` line. Piped failures stay a JSON object with `error.code` and `error.message`. Argument errors exit 2. Application errors exit 1. A closed pipe exits 0.
+
+If you already have the files, verify them against that commit and adopt the folder. This is not a download, and it is not a local-baseline import. Every required file must match the resolved sizes and upstream hashes, and the commit must already have matched license evidence. An optional file that is simply absent is an exclusion: it is not copied and it is not sealed in the manifest. An optional file that is present and matches is kept. A damaged optional file still fails the check. Verification, copy, manifest, retry, and move cleanup use that same frozen set. The catalog then records provenance `upstream-verified (local source)`. A successful adopt prints a preservation receipt. A failed or partial adopt does not.
 
     cargo run --locked --release -- verify-local --repo Qwen/Qwen2.5-0.5B-Instruct --revision main --path ~/Downloads/qwen
     cargo run --locked --release -- adopt --config config.local.toml --plan <plan_id> --path ~/Downloads/qwen --copy
 
-`verify-local --config config.local.toml --plan <plan_id> --path ...` uses the saved review and does not contact the network. Hashing streams and prints progress on stderr. `local list` answers which Ollama tags are still only in the runtime store. Pass `--config` to compare them with preserved digests. The command never calls the Ollama API and never modifies blobs.
+`verify-local --repo` resolves that commit from the publisher. `verify-local --config config.local.toml --plan <plan_id> --path ...` uses the saved review and does not contact the network. On a terminal, hashing progress is one line rewritten in place. A pipe prints at most one line per ten percent of each file, and `--quiet` prints none. `local list` reads Ollama tags only. Without `--config` the coverage is `not_checked`. With `--config` it reports `none_recorded`, `partially_recorded`, or `all_components_recorded`, plus matched and total distinct digests and the missing roles. That match is historical byte identity from the catalog. It is not a fresh hash, not proof the disk is mounted, and not proof the model runs offline. Disconnecting a disk does not erase a recorded match. The command never calls the Ollama API and never modifies blobs.
 
 Try the offline planning fixture:
 

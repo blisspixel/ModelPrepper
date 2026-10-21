@@ -1,7 +1,11 @@
 use crate::{Config, Error, Inventory, Result, build_plan};
+
+pub use crate::present::{
+    clap_text as clap_error_text, columns as terminal_columns, error_text as app_error_text,
+};
 use clap::{Parser, Subcommand, ValueEnum};
+use serde::Serialize;
 use serde_json::{Value, json};
-use std::collections::BTreeSet;
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -9,30 +13,128 @@ use std::path::{Path, PathBuf};
 #[derive(Debug)]
 pub enum CommandOutput {
     Json(Value),
-    Text(String),
+    Text { body: String, ok: bool },
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct View {
+    pub text: bool,
+    /// Set when `--json` is passed. It wins over `local list --format text`.
+    pub json: bool,
+    pub color: bool,
+    pub stderr_terminal: bool,
+    pub columns: usize,
+}
+
+impl View {
+    pub fn piped() -> Self {
+        Self {
+            text: false,
+            json: false,
+            color: false,
+            stderr_terminal: false,
+            columns: 80,
+        }
+    }
 }
 
 pub fn pretty_output(flag: bool, stdout_is_terminal: bool) -> bool {
     flag || stdout_is_terminal
 }
 
+#[derive(Clone, Copy, Debug, ValueEnum)]
+pub enum ColorMode {
+    Auto,
+    Always,
+    Never,
+}
+
 const MAX_INPUT_BYTES: u64 = 2 * 1024 * 1024;
+
+const AFTER_HELP: &str = "\
+First run:
+  modelprepper config init --output c.toml --catalog catalog --volume models
+  modelprepper init --config c.toml
+  modelprepper resolve --repo <org/model>
+  modelprepper propose --config c.toml --repo <org/model>
+  modelprepper verify-local --repo <org/model> --path <dir>
+  modelprepper adopt --config c.toml --plan <id> --path <dir> --copy";
 
 #[derive(Debug, Parser)]
 #[command(
     version,
-    about = "Model preservation planning and public-source inspection."
+    about = "Keep verified copies of open-weight models on your own disks.",
+    after_help = AFTER_HELP,
+    term_width = 80
 )]
 pub struct Cli {
-    /// Indent JSON. Also used automatically when stdout is a terminal.
+    /// Indent JSON. Also used automatically when stdout is a terminal and JSON is selected.
     #[arg(long, global = true)]
     pub pretty: bool,
+    /// Print JSON even when stdout is a terminal.
+    #[arg(long, global = true)]
+    pub json: bool,
+    /// Suppress progress lines.
+    #[arg(long, global = true)]
+    pub quiet: bool,
+    /// Colorize text verdicts. JSON is never colored.
+    #[arg(long, global = true, value_enum, default_value = "auto")]
+    pub color: ColorMode,
     #[command(subcommand)]
     pub command: Command,
 }
 
 #[derive(Debug, Subcommand)]
+#[command(term_width = 80)]
 pub enum Command {
+    #[command(flatten)]
+    #[command(next_help_heading = "Setup")]
+    Setup(SetupCommand),
+    #[command(flatten)]
+    #[command(next_help_heading = "Review a source")]
+    Review(ReviewCommand),
+    #[command(flatten)]
+    #[command(next_help_heading = "Local copies")]
+    LocalCopies(LocalCopiesCommand),
+    #[command(flatten)]
+    #[command(next_help_heading = "Preview")]
+    Preview(PreviewCommand),
+}
+
+#[derive(Debug, Subcommand)]
+#[command(term_width = 80)]
+pub enum SetupCommand {
+    /// Create or check a vault configuration file.
+    Config {
+        #[command(subcommand)]
+        command: ConfigCommand,
+    },
+    /// Initialize the local catalog and adopt empty storage directories.
+    Init {
+        /// Path to the vault configuration file.
+        #[arg(long)]
+        config: PathBuf,
+    },
+    /// Inspect catalog, preserved copies, and disk identities offline.
+    Status {
+        /// Path to the vault configuration file.
+        #[arg(long)]
+        config: PathBuf,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+#[command(term_width = 80)]
+pub enum ReviewCommand {
+    /// Resolve a public model to a pinned commit and inspect its license evidence.
+    Resolve {
+        /// Hugging Face repository id or official hub URL.
+        #[arg(long)]
+        repo: String,
+        /// Branch, tag, or commit to resolve.
+        #[arg(long, default_value = "main")]
+        revision: String,
+    },
     /// Inspect a public source and persist its exact evidence and destination.
     Propose {
         /// Path to the vault configuration file.
@@ -65,27 +167,11 @@ pub enum Command {
         #[arg(long, value_enum)]
         decision: DecisionChoice,
     },
-    /// Initialize the local catalog and adopt empty storage directories.
-    Init {
-        /// Path to the vault configuration file.
-        #[arg(long)]
-        config: PathBuf,
-    },
-    /// Inspect catalog and disk identities without contacting a publisher.
-    Status {
-        /// Path to the vault configuration file.
-        #[arg(long)]
-        config: PathBuf,
-    },
-    /// Resolve a public model to a pinned commit and inspect its license evidence.
-    Resolve {
-        /// Hugging Face repository id or official hub URL.
-        #[arg(long)]
-        repo: String,
-        /// Branch, tag, or commit to resolve.
-        #[arg(long, default_value = "main")]
-        revision: String,
-    },
+}
+
+#[derive(Debug, Subcommand)]
+#[command(term_width = 80)]
+pub enum LocalCopiesCommand {
     /// Hash a local folder against a resolved commit. Reads only; nothing is copied.
     VerifyLocal {
         /// Vault configuration. Required with --plan so no network access is needed.
@@ -127,11 +213,11 @@ pub enum Command {
         #[command(subcommand)]
         command: LocalCommand,
     },
-    /// Generate or validate configuration without creating a vault.
-    Config {
-        #[command(subcommand)]
-        command: ConfigCommand,
-    },
+}
+
+#[derive(Debug, Subcommand)]
+#[command(term_width = 80)]
+pub enum PreviewCommand {
     /// Preview an untrusted local inventory. Never authorizes model transfers.
     Plan {
         /// Path to the vault configuration file.
@@ -173,9 +259,9 @@ pub enum LocalCommand {
         /// Vault configuration used only to compare preserved content digests.
         #[arg(long)]
         config: Option<PathBuf>,
-        /// text prints the summary; json prints one object.
-        #[arg(long, value_enum, default_value = "json")]
-        format: OutputFormat,
+        /// text or json. Omit to follow the terminal: text on a terminal, JSON in a pipe.
+        #[arg(long, value_enum)]
+        format: Option<OutputFormat>,
     },
 }
 
@@ -196,7 +282,9 @@ fn located_config(path: &Path) -> Result<Config> {
 }
 
 #[derive(Debug, Subcommand)]
+#[command(term_width = 80)]
 pub enum ConfigCommand {
+    /// Create a config file. Does not create the vault.
     Init {
         /// Config file to create. Refuses to overwrite an existing file.
         #[arg(long)]
@@ -208,6 +296,7 @@ pub enum ConfigCommand {
         #[arg(long)]
         volume: PathBuf,
     },
+    /// Check a config file without contacting a publisher.
     Check {
         /// Path to the vault configuration file.
         #[arg(long)]
@@ -216,96 +305,104 @@ pub enum ConfigCommand {
 }
 
 pub fn execute(cli: Cli) -> Result<CommandOutput> {
+    execute_in(cli, View::piped())
+}
+
+pub fn execute_in(cli: Cli, view: View) -> Result<CommandOutput> {
+    let quiet = cli.quiet;
     match cli.command {
-        Command::Propose {
+        Command::Review(ReviewCommand::Propose {
             config,
             repo,
             revision,
-        } => serde_json::to_value(crate::vault::propose(
-            &located_config(&config)?,
-            &repo,
-            &revision,
-        )?)
-        .map_err(|e| Error::new("output_failed", e.to_string()))
-        .map(CommandOutput::Json),
-        Command::Proposals { config, command } => {
+        }) => {
+            let proposal = crate::vault::propose(&located_config(&config)?, &repo, &revision)?;
+            show(&view, &proposal, true, |proposal| {
+                crate::present::render_proposal(proposal, view.color, view.columns)
+            })
+        }
+        Command::Review(ReviewCommand::Proposals { config, command }) => {
             let config = located_config(&config)?;
             match command {
                 ProposalCommand::List { after, limit } => {
-                    serde_json::to_value(crate::vault::proposals(&config, after.as_deref(), limit)?)
+                    let page = crate::vault::proposals(&config, after.as_deref(), limit)?;
+                    show(&view, &page, true, |page| {
+                        crate::present::render_proposals(page, view.color, view.columns)
+                    })
                 }
                 ProposalCommand::Show { plan } => {
-                    serde_json::to_value(crate::vault::show_proposal(&config, &plan)?)
+                    let proposal = crate::vault::show_proposal(&config, &plan)?;
+                    show(&view, &proposal, true, |proposal| {
+                        crate::present::render_proposal(proposal, view.color, view.columns)
+                    })
                 }
             }
-            .map_err(|e| Error::new("output_failed", e.to_string()))
-            .map(CommandOutput::Json)
         }
-        Command::Decide {
+        Command::Review(ReviewCommand::Decide {
             config,
             plan,
             decision,
-        } => {
+        }) => {
             let decision = match decision {
                 DecisionChoice::Approve => crate::vault::Decision::Approved,
                 DecisionChoice::Reject => crate::vault::Decision::Rejected,
             };
-            serde_json::to_value(crate::vault::decide(
-                &located_config(&config)?,
-                &plan,
-                decision,
-            )?)
-            .map_err(|e| Error::new("output_failed", e.to_string()))
-            .map(CommandOutput::Json)
+            let proposal = crate::vault::decide(&located_config(&config)?, &plan, decision)?;
+            show(&view, &proposal, true, |proposal| {
+                crate::present::render_proposal(proposal, view.color, view.columns)
+            })
         }
-        Command::Init { config } => {
+        Command::Setup(SetupCommand::Init { config }) => {
             let loaded = Config::parse(&read_text(&config)?)?;
             let located = crate::vault::locate(&loaded, &config)?;
-            serde_json::to_value(crate::vault::initialize(&located)?)
-                .map(CommandOutput::Json)
-                .map_err(|e| Error::new("output_failed", e.to_string()))
+            let status = crate::vault::initialize(&located)?;
+            show(&view, &status, true, |status| {
+                crate::present::render_status(status, view.color, view.columns)
+            })
         }
-        Command::Status { config } => {
+        Command::Setup(SetupCommand::Status { config }) => {
             let loaded = Config::parse(&read_text(&config)?)?;
             let located = crate::vault::locate(&loaded, &config)?;
-            serde_json::to_value(crate::vault::status(&located)?)
-                .map(CommandOutput::Json)
-                .map_err(|e| Error::new("output_failed", e.to_string()))
+            let status = crate::vault::status(&located)?;
+            show(&view, &status, true, |status| {
+                crate::present::render_status(status, view.color, view.columns)
+            })
         }
-        Command::Resolve { repo, revision } => {
-            serde_json::to_value(crate::hub::resolve(&repo, &revision)?)
-                .map(CommandOutput::Json)
-                .map_err(|e| Error::new("output_failed", e.to_string()))
+        Command::Review(ReviewCommand::Resolve { repo, revision }) => {
+            let resolved = crate::hub::resolve(&repo, &revision)?;
+            show(&view, &resolved, true, |resolved| {
+                crate::present::render_resolution(resolved, view.color, view.columns)
+            })
         }
-        Command::VerifyLocal {
+        Command::LocalCopies(LocalCopiesCommand::VerifyLocal {
             config,
             plan,
             repo,
             revision,
             path,
-        } => verify_local(config, plan, repo, revision, path),
-        Command::Adopt {
+        }) => verify_local(&view, quiet, config, plan, repo, revision, path),
+        Command::LocalCopies(LocalCopiesCommand::Adopt {
             config,
             plan,
             path,
             move_source,
             copy: _,
-        } => adopt_local(&config, &plan, &path, move_source),
-        Command::Local { command } => match command {
+        }) => adopt_local(&view, quiet, &config, &plan, &path, move_source),
+        Command::LocalCopies(LocalCopiesCommand::Local { command }) => match command {
             LocalCommand::List {
                 ollama_dir,
                 config,
                 format,
-            } => list_local(ollama_dir, config, format),
+            } => list_local(&view, ollama_dir, config, format),
         },
-        Command::Config {
+        Command::Setup(SetupCommand::Config {
             command:
                 ConfigCommand::Init {
                     output,
                     catalog,
                     volume,
                 },
-        } => {
+        }) => {
             let config = Config::default_for(catalog, volume);
             config.validate()?;
             let text = toml::to_string_pretty(&config)
@@ -320,50 +417,77 @@ pub fn execute(cli: Cli) -> Result<CommandOutput> {
             file.write_all(text.as_bytes())
                 .and_then(|()| file.sync_all())
                 .map_err(|e| Error::new("config_write_failed", e.to_string()))?;
-            Ok(CommandOutput::Json(
-                json!({"schema_version": 1, "status": "config_created", "path": output, "vault_initialized": false}),
-            ))
+            let body = json!({"schema_version": 1, "status": "config_created", "path": output, "vault_initialized": false});
+            if view.text {
+                Ok(CommandOutput::Text {
+                    body: crate::present::render_config_created(&output, view.color, view.columns),
+                    ok: true,
+                })
+            } else {
+                Ok(CommandOutput::Json(body))
+            }
         }
-        Command::Config {
-            command: ConfigCommand::Check { config },
-        } => {
-            let config = Config::parse(&read_text(&config)?)?;
-            Ok(CommandOutput::Json(
-                json!({"schema_version": 1, "status": "config_valid", "watch_count": config.watches.len(), "volume_count": config.volumes.len()}),
-            ))
+        Command::Setup(SetupCommand::Config {
+            command: ConfigCommand::Check { config: path },
+        }) => {
+            let config = Config::parse(&read_text(&path)?)?;
+            let body = json!({"schema_version": 1, "status": "config_valid", "watch_count": config.watches.len(), "volume_count": config.volumes.len()});
+            if view.text {
+                Ok(CommandOutput::Text {
+                    body: crate::present::render_config_check(
+                        config.watches.len(),
+                        config.volumes.len(),
+                        view.color,
+                        view.columns,
+                    ),
+                    ok: true,
+                })
+            } else {
+                Ok(CommandOutput::Json(body))
+            }
         }
-        Command::Plan {
+        Command::Preview(PreviewCommand::Plan {
             config,
             inventory,
             available_bytes,
-        } => {
+        }) => {
             let config = Config::parse(&read_text(&config)?)?;
             let inventory = Inventory::parse(&read_text(&inventory)?)?;
-            serde_json::to_value(build_plan(&config, &inventory, available_bytes)?)
-                .map(CommandOutput::Json)
-                .map_err(|e| Error::new("output_failed", e.to_string()))
+            let plan = build_plan(&config, &inventory, available_bytes)?;
+            show(&view, &plan, true, |plan| {
+                crate::present::render_plan(plan, view.color, view.columns)
+            })
         }
     }
 }
 
-fn hash_progress() -> impl FnMut(&str, u64, u64) {
-    let mut next = 8 * 1024 * 1024;
-    move |path, done, total| {
-        if done >= next || done == total {
-            let _ = writeln!(std::io::stderr(), "hashing {path}: {done}/{total} bytes");
-            next = done.saturating_add(8 * 1024 * 1024);
-        }
+fn show<T: Serialize>(
+    view: &View,
+    value: &T,
+    ok: bool,
+    render: impl FnOnce(&T) -> String,
+) -> Result<CommandOutput> {
+    if view.text {
+        Ok(CommandOutput::Text {
+            body: render(value),
+            ok,
+        })
+    } else {
+        serde_json::to_value(value)
+            .map(CommandOutput::Json)
+            .map_err(|error| Error::new("output_failed", error.to_string()))
     }
 }
 
 fn verify_local(
+    view: &View,
+    quiet: bool,
     config: Option<PathBuf>,
     plan: Option<String>,
     repo: Option<String>,
     revision: String,
     path: PathBuf,
 ) -> Result<CommandOutput> {
-    let mut progress = hash_progress();
     let inventory = if let Some(plan) = plan {
         let Some(config) = config else {
             return Err(Error::new(
@@ -382,52 +506,84 @@ fn verify_local(
             "verify-local needs --repo or both --config and --plan",
         ));
     };
-    serde_json::to_value(crate::verify::verify_tree(
-        &inventory,
-        &path,
-        &mut progress,
-    )?)
-    .map(CommandOutput::Json)
-    .map_err(|error| Error::new("output_failed", error.to_string()))
+    let mut progress = crate::present::ProgressLine::stderr(
+        view.stderr_terminal,
+        quiet,
+        view.columns,
+        inventory.files.len(),
+    );
+    let report = crate::verify::verify_tree(&inventory, &path, &mut |file, done, total| {
+        progress.update("verifying", file, done, total);
+    })?;
+    show(view, &report, report.ok, |report| {
+        crate::present::render_verification(report, view.color, view.columns)
+    })
 }
 
-fn adopt_local(config: &Path, plan: &str, path: &Path, move_source: bool) -> Result<CommandOutput> {
-    let mut progress = hash_progress();
+fn adopt_local(
+    view: &View,
+    quiet: bool,
+    config: &Path,
+    plan: &str,
+    path: &Path,
+    move_source: bool,
+) -> Result<CommandOutput> {
+    let loaded = located_config(config)?;
+    let expected = crate::vault::show_proposal(&loaded, plan)
+        .map(|proposal| proposal.review.inventory.files.len())
+        .unwrap_or(0);
+    let mut progress =
+        crate::present::ProgressLine::stderr(view.stderr_terminal, quiet, view.columns, expected);
     let outcome = crate::vault::adopt(
-        &located_config(config)?,
+        &loaded,
         plan,
         path,
         move_source,
-        &mut progress,
+        &mut |phase, file, done, total| progress.update(phase, file, done, total),
     )?;
-    let value = match outcome {
-        crate::vault::Outcome::Recorded(adoption) => serde_json::to_value(adoption),
-        crate::vault::Outcome::Mismatch(verification) => serde_json::to_value(verification),
+    match outcome {
+        crate::vault::Outcome::Recorded(adoption) => show(view, &adoption, true, |adoption| {
+            crate::present::render_adoption(adoption, view.color, view.columns)
+        }),
+        crate::vault::Outcome::Mismatch(verification) => {
+            show(view, &verification, verification.ok, |verification| {
+                crate::present::render_verification(verification, view.color, view.columns)
+            })
+        }
     }
-    .map_err(|error| Error::new("output_failed", error.to_string()))?;
-    Ok(CommandOutput::Json(value))
 }
 
 fn list_local(
+    view: &View,
     ollama_dir: Option<PathBuf>,
     config: Option<PathBuf>,
-    format: OutputFormat,
+    format: Option<OutputFormat>,
 ) -> Result<CommandOutput> {
     let preserved = if let Some(config) = config {
-        crate::vault::preserved_digests(&located_config(&config)?)?
+        Some(crate::vault::preserved_digests(&located_config(&config)?)?)
     } else {
-        BTreeSet::new()
+        None
     };
     let dirs = match ollama_dir {
         Some(path) => vec![path],
         None => crate::runtime::default_store_dirs(|key| std::env::var(key).ok()),
     };
-    let report = crate::runtime::inventory(&dirs, &preserved)?;
-    match format {
-        OutputFormat::Json => serde_json::to_value(report)
+    let report = crate::runtime::inventory(&dirs, preserved.as_ref())?;
+    let text = !view.json
+        && match format {
+            Some(OutputFormat::Text) => true,
+            Some(OutputFormat::Json) => false,
+            None => view.text,
+        };
+    if text {
+        Ok(CommandOutput::Text {
+            body: crate::present::render_runtime(&report, view.color, view.columns),
+            ok: true,
+        })
+    } else {
+        serde_json::to_value(report)
             .map(CommandOutput::Json)
-            .map_err(|error| Error::new("output_failed", error.to_string())),
-        OutputFormat::Text => Ok(CommandOutput::Text(report.text())),
+            .map_err(|error| Error::new("output_failed", error.to_string()))
     }
 }
 

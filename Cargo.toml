@@ -2,7 +2,7 @@
 name = "modelprepper"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.96"
+rust-version = "1.99"
 license = "MIT"
 description = "User-owned preservation plans for open-weight models"
 repository = "https://github.com/blisspixel/ModelPrepper"
@@ -10,7 +10,7 @@ readme = "README.md"
 publish = false
 
 [dependencies]
-clap = { version = "4.5", default-features = false, features = ["derive", "std", "help", "usage", "error-context"] }
+clap = { version = "4.5", default-features = false, features = ["derive", "std", "help", "usage", "error-context", "wrap_help"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
