@@ -566,14 +566,40 @@ function applyOutput(session, event) {
     return session
 }
 
+function streamText(value) {
+    return typeof value === "string" ? value : ""
+}
+
+function withinCap(event) {
+    return streamText(event.stdout).length <= OUTPUT_CAP && streamText(event.stderr).length <= OUTPUT_CAP
+}
+
+// Open inspection is the canonical text command. Its stdout is a pipe, so the
+// CLI may return JSON, and a terminal would return text. Either result is a
+// transcript. It is not a new disk projection, and text must not look malformed.
+function inspectFinished(kind, event) {
+    return kind === "inspect"
+        && event
+        && !event.spawnError
+        && typeof event.exitCode === "number"
+        && event.exitCode === 0
+        && withinCap(event)
+}
+
 function noteResult(session, event) {
     var now = event.now
     if (!session.inFlight || session.inFlight.generation !== event.generation) {
         return finish(session, now, null, true)
     }
+    var kind = session.inFlight.kind
     session = cloneSession(session)
     session.inFlight = null
-    session = applyOutput(session, event)
+    if (inspectFinished(kind, event)) {
+        session.failure = null
+        session.transcript = clipTranscript(trim(streamText(event.stdout) || streamText(event.stderr)))
+    } else {
+        session = applyOutput(session, event)
+    }
     if (!session.enabled) {
         session.pendingPoll = false
         session.pendingForce = false
@@ -613,6 +639,7 @@ function cappedFlight(session, generation, now) {
     session.failure = makeFailure("output_capped", "malformed", "status output exceeded the cap", "")
     session.transcript = ""
     session.pendingPoll = false
+    if (session.pendingInspect && session.enabled) return start(session, now, "inspect")
     if (session.pendingForce && session.enabled) return start(session, now, "status")
     return finish(session, now, null, false)
 }

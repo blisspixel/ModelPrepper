@@ -19,6 +19,7 @@ BarWidget {
     failureText: ""
   })
   property int flightToken: 0
+  property int owedGeneration: 0
   property bool sawStart: false
   property var queuedLaunch: null
   property var exitHandler: null
@@ -58,7 +59,18 @@ BarWidget {
   function follow(step) {
     if (!step) return
     root.view = step.view
-    if (step.launch) root.beginFlight(step.launch)
+    if (!step.launch) return
+    // Start after the current exit signal finishes. Connecting the next
+    // handler inside that signal can attribute the old exit to the new flight.
+    // owedGeneration lets a newer launch supersede this one, and destruction
+    // can abandon it if this call never reaches the process.
+    var launch = step.launch
+    root.owedGeneration = launch.generation
+    root.startLater(launch)
+  }
+
+  function startLater(launch) {
+    Qt.callLater(function() { root.beginFlight(launch) })
   }
 
   function syncSettings() {
@@ -79,6 +91,7 @@ BarWidget {
   }
 
   function beginFlight(launch) {
+    if (!launch || root.owedGeneration !== launch.generation) return
     // A dying process and the next launch share one Process. Queue until it
     // has actually stopped so its exit cannot be recorded as the new flight.
     if (statusProcess.running) {
@@ -87,6 +100,12 @@ BarWidget {
     }
     root.queuedLaunch = null
     root.armFlight(launch)
+  }
+
+  function ownedGeneration() {
+    if (root.queuedLaunch && root.queuedLaunch.generation) return root.queuedLaunch.generation
+    if (root.owedGeneration !== 0) return root.owedGeneration
+    return root.flightToken
   }
 
   function dropExitHandler() {
@@ -102,6 +121,7 @@ BarWidget {
     root.dropExitHandler()
     var generation = launch.generation
     root.flightToken = generation
+    root.owedGeneration = 0
     root.sawStart = false
     var handler = function(exitCode) {
       root.dropExitHandler()
@@ -140,6 +160,14 @@ BarWidget {
     }))
   }
 
+  function noteOutput(text) {
+    // Ignore buffers from a process that has not started this flight. A dying
+    // read can still emit after the next exec, and that must not cap the new one.
+    if (!root.sawStart || root.flightToken === 0) return
+    if (text.length <= Model.outputCap()) return
+    root.giveUp(root.flightToken, "cap")
+  }
+
   function giveUp(generation, which) {
     if (root.flightToken !== generation) return
     root.dropExitHandler()
@@ -163,9 +191,11 @@ BarWidget {
 
   Component.onCompleted: root.syncSettings()
   Component.onDestruction: {
-    var generation = root.flightToken
+    var generation = root.ownedGeneration()
     root.dropExitHandler()
     root.flightToken = 0
+    root.owedGeneration = 0
+    root.queuedLaunch = null
     if (generation !== 0) Model.sharedAbandon(generation, Date.now())
   }
 
@@ -206,18 +236,12 @@ BarWidget {
     stdout: StdioCollector {
       id: statusStdout
       waitForEnd: false
-      onDataChanged: {
-        if (statusStdout.text.length <= Model.outputCap()) return
-        root.giveUp(root.flightToken, "cap")
-      }
+      onDataChanged: root.noteOutput(statusStdout.text)
     }
     stderr: StdioCollector {
       id: statusStderr
       waitForEnd: false
-      onDataChanged: {
-        if (statusStderr.text.length <= Model.outputCap()) return
-        root.giveUp(root.flightToken, "cap")
-      }
+      onDataChanged: root.noteOutput(statusStderr.text)
     }
     onStarted: root.sawStart = true
     onRunningChanged: {
@@ -225,7 +249,9 @@ BarWidget {
       if (root.queuedLaunch) {
         var launch = root.queuedLaunch
         root.queuedLaunch = null
-        root.armFlight(launch)
+        // A newer launch may already own the generation. Starting the stale
+        // one would let its exit stand in for the read the model is waiting on.
+        if (root.owedGeneration === launch.generation) root.startLater(launch)
         return
       }
       root.failStart()

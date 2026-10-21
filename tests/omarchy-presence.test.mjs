@@ -476,6 +476,7 @@ test('inspection waits for the current status read and uses the text argv', () =
   assert.deepEqual(args(after.launch.argv), ['modelprepper', 'status', '--config', '/vault/config.toml']);
   assert.equal(after.launch.argv.includes('--json'), false);
   assert.equal(after.launch.argv.includes('--repo'), false);
+  assert.equal(after.view.capturedAt, 150);
   const opened = api.sharedResult({
     generation: after.launch.generation,
     now: 200,
@@ -486,11 +487,50 @@ test('inspection waits for the current status read and uses the text argv', () =
   });
   assert.equal(opened.launch, null);
   assert.equal(opened.view.chip, 'present');
+  assert.equal(opened.view.failureKind, '');
+  assert.equal(opened.view.capturedAt, 150);
   assert.equal(opened.view.transcript.includes('8397c2c3'), true);
 
   const direct = api.sharedInspect(250);
   assert.equal(direct.launch.kind, 'inspect');
   assert.deepEqual(args(direct.launch.argv), args(api.inspectArgv('modelprepper', '/vault/config.toml')));
+  const text = api.sharedResult({
+    generation: direct.launch.generation,
+    now: 300,
+    exitCode: 0,
+    stdout: 'present\nprimary mounted\n',
+    stderr: '',
+    spawnError: '',
+  });
+  assert.equal(text.view.failureKind, '');
+  assert.equal(text.view.chip, 'present');
+  assert.equal(text.view.capturedAt, 150);
+  assert.equal(text.view.transcript.includes('primary mounted'), true);
+});
+
+test('a capped status read still opens a waiting inspection', () => {
+  api.resetShared(0);
+  const first = api.sharedConfigure('modelprepper', '/vault/config.toml', true, 100);
+  const ready = api.sharedResult({
+    generation: first.launch.generation,
+    now: 150,
+    exitCode: 0,
+    stdout: fixture('mounted.json'),
+    stderr: '',
+    spawnError: '',
+  });
+  assert.equal(ready.view.capturedAt, 150);
+  const again = api.sharedTick(200, true);
+  assertStatusLaunch(again.launch, 'modelprepper', '/vault/config.toml');
+  const waiting = api.sharedInspect(210);
+  assert.equal(waiting.launch, null);
+  const capped = api.sharedCapped(again.launch.generation, 220);
+  assert.equal(capped.launch.kind, 'inspect');
+  assert.deepEqual(args(capped.launch.argv), ['modelprepper', 'status', '--config', '/vault/config.toml']);
+  assert.equal(capped.view.failureKind, 'output_capped');
+  assert.equal(capped.view.chip, 'present');
+  assert.equal(capped.view.capturedAt, 150);
+  assert.equal(capped.view.dimmed, true);
 });
 
 test('abandoning a destroyed widget ignores its late exit', () => {
@@ -585,6 +625,14 @@ test('the QML shell only displays the model and does not build a command', () =>
   assert.equal(bar.includes('setting("executable", "modelprepper")'), true);
   assert.equal(bar.includes('setting("config", "")'), true);
   assert.equal(bar.includes('statusProcess.exec(launch.argv)'), true);
+  assert.equal(bar.includes('Qt.callLater(function() { root.beginFlight(launch) })'), true);
+  assert.equal(bar.includes('root.owedGeneration = launch.generation'), true);
+  assert.equal(bar.includes('root.owedGeneration !== launch.generation'), true);
+  assert.equal(bar.includes('function ownedGeneration()'), true);
+  assert.equal(bar.includes('root.ownedGeneration()'), true);
+  assert.equal(bar.includes('if (!root.sawStart || root.flightToken === 0) return'), true);
+  assert.equal(bar.includes('function startLater(launch)'), true);
+  assert.equal(bar.includes('if (root.owedGeneration === launch.generation) root.startLater(launch)'), true);
   assert.equal(bar.includes('exec(['), false);
   assert.equal(bar.includes('sharedTick'), true);
   assert.equal(bar.includes('sharedInspect'), true);

@@ -37,7 +37,13 @@ Copy and Open inspection use:
 <executable> status --config <config>
 ```
 
-Copy writes that list as JSON. It is not a shell command. Under Wayland, Quickshell's clipboard stays empty unless a shell window is focused. Open inspection runs the same list through Quickshell `Process.exec`, which does not invoke a shell. One operation runs at a time. A second monitor, a timer tick, or a click during that operation is coalesced into at most one follow-up. The output cap is 256 KiB. The deadline is 4 seconds. A result from an older config, a disabled widget, a timed-out process, or a destroyed widget is ignored.
+Copy writes that list as JSON. It is not a shell command. Under Wayland, Quickshell's clipboard stays empty unless a shell window is focused.
+
+Open inspection runs the same list through Quickshell `Process.exec`, which does not invoke a shell. Its output is a transcript. It does not replace the last status snapshot, and a text transcript is not treated as malformed status.
+
+One operation runs at a time. A second monitor, a timer tick, or a click during that operation is coalesced into at most one follow-up. A capped or timed-out read still runs a waiting inspection. The next launch waits until the current exit signal has finished, so that exit cannot be recorded as the new read. Destroying the widget abandons a launch that has not reached the process.
+
+The output cap is 256 KiB. The deadline is 4 seconds. A result from an older config, a disabled widget, a timed-out process, or a destroyed widget is ignored.
 
 The last successful snapshot stays on screen when a later read fails or goes stale. It is dimmed and keeps its original time. These stay distinct: unknown, writer busy, missing config, unreadable config, invalid config, offline disk, missing identity marker, replaced disk, malformed status, missing executable, timeout, and stale data.
 
