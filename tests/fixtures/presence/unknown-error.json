@@ -1,0 +1,7 @@
+{
+  "schema_version": 1,
+  "error": {
+    "code": "catalog_failed",
+    "message": "disk I/O error"
+  }
+}

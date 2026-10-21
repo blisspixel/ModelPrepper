@@ -1,0 +1,7 @@
+{
+  "schema_version": 1,
+  "error": {
+    "code": "writer_busy",
+    "message": "another process owns the vault writer lock"
+  }
+}

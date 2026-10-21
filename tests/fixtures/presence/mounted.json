@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "state": "ready",
+  "vault_id": "8397c2c3aaaaaaaaaaaaaaaaaaaaaaaa",
+  "volumes": [
+    {
+      "label": "primary",
+      "volume_id": "11111111-1111-1111-1111-111111111111",
+      "path": "/vault/models",
+      "state": "mounted",
+      "available_bytes": 463856467968
+    }
+  ],
+  "preserved": [
+    {
+      "repo_id": "Qwen/Qwen2.5-0.5B-Instruct",
+      "resolved_revision": "7ae557604adf67be50417f59c2c2f167def9a775",
+      "provenance": "upstream-verified (local source)",
+      "volume_label": "primary"
+    }
+  ]
+}

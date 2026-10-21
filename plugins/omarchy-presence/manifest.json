@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "id": "io.github.blisspixel.modelprepper-presence",
+  "name": "ModelPrepper presence",
+  "version": "0.1.0",
+  "author": "blisspixel",
+  "license": "MIT",
+  "description": "Optional bar chip for ModelPrepper disk presence. It reads status and does not publish, install, or judge model safety.",
+  "kinds": ["bar-widget"],
+  "entryPoints": {
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "ModelPrepper",
+    "category": "System",
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "defaults": {
+      "config": "",
+      "executable": "modelprepper"
+    },
+    "schema": [
+      {
+        "key": "config",
+        "type": "string",
+        "label": "Config path"
+      },
+      {
+        "key": "executable",
+        "type": "string",
+        "label": "Executable"
+      }
+    ]
+  }
+}
