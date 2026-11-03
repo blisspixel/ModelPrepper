@@ -62,7 +62,7 @@ This inventory is synthetic. Every local preview contains local_inventory_untrus
 cargo run --locked --release -- readiness --recipe recipe.json --path ~/Downloads/qwen
 ```
 
-The recipe is local JSON. The directory is the retained files. A missing directory is reported and is not created. The report keeps integrity, capability closure, rights, and readiness separate. Matching small files still leave readiness `untested` until a real network-disabled drill is recorded. A package name or URL is not a retained runtime. See [preservation](preservation.md).
+The recipe is local JSON. The directory is the retained files. A missing directory is reported and is not created. The report keeps integrity, capability closure, rights, and readiness separate. Matching small files still leave readiness `untested` until a real network-disabled drill is recorded. A package name or URL is not a retained runtime. A retained runtime larger than 2 MiB is `unverified`, and a present runtime that does not match its declared bytes is `damaged`. Neither is called missing. See [preservation](preservation.md).
 
 ## Common outcomes
 
