@@ -171,7 +171,7 @@ fn next_for(error: &Error) -> String {
             "choose a catalog directory and a volume directory that do not overlap".into()
         }
         "invalid_config" => "modelprepper config check --config <file>".into(),
-        "invalid_recipe" | "unsupported_profile" => {
+        "invalid_recipe" | "unsupported_profile" | "unsupported_source" => {
             "use a publisher-safetensors-text-v1 recipe; named and remote artifacts are not retained packages".into()
         }
         "unsupported_schema" => "use readiness recipe schema_version 1".into(),
@@ -1201,6 +1201,10 @@ mod tests {
             "destination_conflict",
             "source_remove_failed",
             "selection_changed",
+            "invalid_recipe",
+            "unsupported_profile",
+            "unsupported_source",
+            "unsupported_schema",
         ] {
             let text = error_text(&Error::new(code, "details"), false, 80);
             assert!(text.starts_with("error:"), "{code}: {text}");

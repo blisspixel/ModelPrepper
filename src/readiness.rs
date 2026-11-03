@@ -489,7 +489,6 @@ struct Finding {
     missing: bool,
     damaged: bool,
     unverified: bool,
-    unknown: bool,
     optional_absent: bool,
     reason: String,
 }
@@ -515,10 +514,6 @@ fn capability_report(id: &str, files: &[RecipeFile], findings: &[Finding]) -> Ca
         let finding = findings.iter().find(|finding| finding.path == file.path);
         match finding {
             Some(finding) if finding.optional_absent => excluded.push(file.path.clone()),
-            Some(finding) if finding.unknown => {
-                unknown = true;
-                blocked_by.push(format!("{} {}", file.path, finding.reason));
-            }
             Some(finding) if finding.unverified && file.need == Need::Required => {
                 unverified = true;
                 blocked_by.push(format!("{} unverified", file.path));
@@ -636,6 +631,10 @@ fn next_action(
     if integrity == "damaged" {
         return "a retained file does not match the recipe; do not treat it as ready".into();
     }
+    if runtime_retention == "missing" {
+        return "the retained runtime file is missing; do not treat that locator as a local package"
+            .into();
+    }
     if runtime_retention != "retained" {
         return "the runtime is only named or remote; a lockfile or URL is not a retained package"
             .into();
@@ -690,12 +689,10 @@ fn inspect_retained(
         missing: false,
         damaged: false,
         unverified: false,
-        unknown: false,
         optional_absent: false,
         reason: String::new(),
     };
     if file.need == Need::Unknown {
-        finding.unknown = true;
         finding.reason = "unknown".into();
         return Ok(finding);
     }
@@ -1249,5 +1246,696 @@ mod tests {
             "unsafe_path"
         );
         assert!(fs::read_dir(&target).unwrap().next().is_none());
+    }
+
+    fn reject(edit: impl FnOnce(&mut Recipe), code: &str, fragment: &str) {
+        let mut recipe = recipe(text_files(), &["text-generation"]);
+        edit(&mut recipe);
+        let error = Recipe::parse(&serde_json::to_string(&recipe).unwrap()).unwrap_err();
+        assert_eq!(error.code, code, "{}", error.message);
+        assert!(
+            error.message.contains(fragment),
+            "{} missing from {}",
+            fragment,
+            error.message
+        );
+    }
+
+    fn as_remote(recipe: &mut Recipe, locator: &str) {
+        let file = &mut recipe.model.files[3];
+        file.retention = Retention::Remote;
+        file.size_bytes = None;
+        file.sha256 = None;
+        file.locator = Some(locator.into());
+    }
+
+    fn retained_runtime(recipe: &mut Recipe) {
+        recipe.runtime.artifact = ArtifactDeclaration {
+            retention: Retention::Retained,
+            locator: "runtime.bin".into(),
+            size_bytes: Some(b"runtime".len() as u64),
+            sha256: Some(sha(b"runtime")),
+        };
+    }
+
+    fn other_than(current: &str, left: &str, right: &str) -> String {
+        if current == left { right } else { left }.into()
+    }
+
+    fn matching_drill(recipe: &Recipe, result: DrillResult) -> DrillRecord {
+        DrillRecord {
+            schema_version: 1,
+            recipe_digest: recipe.digest(),
+            result,
+            capability: recipe.capabilities[0].clone(),
+            os: host_os().into(),
+            arch: host_arch().into(),
+            runtime_version: recipe.runtime.version.clone(),
+            network: "disabled".into(),
+            cache: "empty".into(),
+        }
+    }
+
+    fn prepared_runtime() -> (tempfile::TempDir, std::path::PathBuf, Recipe) {
+        let temp = tempfile::TempDir::new().unwrap();
+        let dir = temp.path().join("model");
+        let files = text_files();
+        write_files(&dir, &files);
+        fs::write(dir.join("runtime.bin"), b"runtime").unwrap();
+        let mut recipe = recipe(files, &["text-generation"]);
+        retained_runtime(&mut recipe);
+        (temp, dir, recipe)
+    }
+
+    #[test]
+    fn invalid_recipes_name_the_failing_rule() {
+        assert_eq!(Recipe::parse("{").unwrap_err().code, "invalid_recipe");
+        assert_eq!(
+            Recipe::parse(r#"{"schema_version":1,"unexpected":true}"#)
+                .unwrap_err()
+                .code,
+            "invalid_recipe"
+        );
+        reject(
+            |recipe| recipe.profile = "other".into(),
+            "unsupported_profile",
+            "publisher-safetensors-text-v1",
+        );
+        reject(
+            |recipe| recipe.model.endpoint = "https://example.com".into(),
+            "unsupported_source",
+            "Hugging Face",
+        );
+        reject(
+            |recipe| recipe.model.repo_id = "nope".into(),
+            "invalid_repo",
+            "owner/model",
+        );
+        reject(
+            |recipe| recipe.model.resolved_revision = "abc".into(),
+            "invalid_hash",
+            "40",
+        );
+        reject(
+            |recipe| recipe.capabilities.clear(),
+            "invalid_recipe",
+            "unique",
+        );
+        reject(
+            |recipe| recipe.capabilities = vec![String::new()],
+            "invalid_recipe",
+            "unique",
+        );
+        reject(
+            |recipe| recipe.capabilities.push("text-generation".into()),
+            "invalid_recipe",
+            "unique",
+        );
+        reject(
+            |recipe| recipe.model.files.clear(),
+            "invalid_recipe",
+            "names its files",
+        );
+        reject(
+            |recipe| recipe.model.files.push(recipe.model.files[0].clone()),
+            "path_collision",
+            "duplicate",
+        );
+        reject(
+            |recipe| recipe.model.files[0].path = "..".into(),
+            "unsafe_path",
+            "unsafe",
+        );
+        reject(
+            |recipe| recipe.model.files[0].capability = "other".into(),
+            "invalid_recipe",
+            "selected",
+        );
+        reject(
+            |recipe| recipe.model.files[0].sha256 = None,
+            "invalid_recipe",
+            "sha256",
+        );
+        reject(
+            |recipe| recipe.model.files[0].size_bytes = None,
+            "invalid_recipe",
+            "size",
+        );
+        reject(
+            |recipe| recipe.model.files[0].sha256 = Some("zz".repeat(32)),
+            "invalid_hash",
+            "64",
+        );
+        reject(
+            |recipe| recipe.model.files[0].locator = Some("..".into()),
+            "unsafe_path",
+            "unsafe",
+        );
+        reject(
+            |recipe| {
+                as_remote(recipe, "https://example.com/template");
+                recipe.model.files[3].retention = Retention::Named;
+                recipe.model.files[3].locator = Some("https://example.com/template".into());
+            },
+            "invalid_recipe",
+            "package name",
+        );
+        reject(
+            |recipe| {
+                as_remote(recipe, "ignored");
+                recipe.model.files[3].retention = Retention::Named;
+                recipe.model.files[3].locator = Some("bad name".into());
+            },
+            "invalid_recipe",
+            "package name",
+        );
+        for locator in [
+            "not a url",
+            "http://example.com/template",
+            "https://user@example.com/template",
+            "https://:secret@example.com/template",
+            "https://example.com/template?x=1",
+            "https://example.com/template#frag",
+        ] {
+            let mut recipe = recipe(text_files(), &["text-generation"]);
+            as_remote(&mut recipe, locator);
+            let error = Recipe::parse(&serde_json::to_string(&recipe).unwrap()).unwrap_err();
+            assert_eq!(error.code, "invalid_recipe", "{locator}: {}", error.message);
+            assert!(error.message.contains("https"), "{}", error.message);
+            assert!(!error.message.contains("secret"), "{}", error.message);
+        }
+        reject(
+            |recipe| recipe.runtime.artifact.locator.clear(),
+            "invalid_recipe",
+            "ASCII",
+        );
+        reject(
+            |recipe| recipe.runtime.artifact.locator = "a".repeat(241),
+            "invalid_recipe",
+            "ASCII",
+        );
+        reject(
+            |recipe| recipe.runtime.artifact.locator = "rä".into(),
+            "invalid_recipe",
+            "ASCII",
+        );
+        reject(
+            |recipe| {
+                recipe.model.files[0].base = Some(BasePin {
+                    repo_id: "nope".into(),
+                    resolved_revision: None,
+                });
+            },
+            "invalid_repo",
+            "owner/model",
+        );
+        reject(
+            |recipe| {
+                recipe.model.files[0].base = Some(BasePin {
+                    repo_id: "example/base".into(),
+                    resolved_revision: Some("abc".into()),
+                });
+            },
+            "invalid_hash",
+            "40",
+        );
+        reject(
+            |recipe| {
+                recipe.capabilities.push("embeddings".into());
+                recipe.model.files.push(file(
+                    "vectors.bin",
+                    Role::Other,
+                    "embeddings",
+                    Need::Optional,
+                    Retention::Named,
+                    None,
+                ));
+            },
+            "invalid_recipe",
+            "embeddings",
+        );
+        reject(
+            |recipe| recipe.model.files[3].need = Need::Optional,
+            "invalid_recipe",
+            "text-generation requires",
+        );
+        reject(
+            |recipe| recipe.runtime.os = "freebsd".into(),
+            "invalid_recipe",
+            "os must",
+        );
+        reject(
+            |recipe| recipe.runtime.arch = "wasm32".into(),
+            "invalid_recipe",
+            "arch must",
+        );
+        reject(
+            |recipe| recipe.runtime.name.clear(),
+            "invalid_recipe",
+            "runtime name",
+        );
+        reject(
+            |recipe| recipe.runtime.version.clear(),
+            "invalid_recipe",
+            "runtime name",
+        );
+        reject(
+            |recipe| {
+                recipe.runtime.artifact = ArtifactDeclaration {
+                    retention: Retention::Retained,
+                    locator: "config.json".into(),
+                    size_bytes: Some(2),
+                    sha256: Some(sha(b"{}")),
+                };
+            },
+            "invalid_recipe",
+            "not a model file",
+        );
+        reject(
+            |recipe| recipe.rights.license_id.clear(),
+            "invalid_recipe",
+            "license id",
+        );
+        reject(
+            |recipe| {
+                let mut drill = matching_drill(recipe, DrillResult::Failed);
+                drill.schema_version = 2;
+                recipe.recorded_drill = Some(drill);
+            },
+            "unsupported_schema",
+            "drill",
+        );
+        reject(
+            |recipe| {
+                let mut drill = matching_drill(recipe, DrillResult::Failed);
+                drill.recipe_digest = "ab".into();
+                recipe.recorded_drill = Some(drill);
+            },
+            "invalid_hash",
+            "64",
+        );
+        reject(
+            |recipe| {
+                let mut drill = matching_drill(recipe, DrillResult::Failed);
+                drill.os = "freebsd".into();
+                recipe.recorded_drill = Some(drill);
+            },
+            "invalid_recipe",
+            "os must",
+        );
+        reject(
+            |recipe| {
+                let mut drill = matching_drill(recipe, DrillResult::Failed);
+                drill.capability = "other".into();
+                recipe.recorded_drill = Some(drill);
+            },
+            "invalid_recipe",
+            "selected capability",
+        );
+        reject(
+            |recipe| {
+                let mut drill = matching_drill(recipe, DrillResult::Failed);
+                drill.runtime_version = "0".into();
+                recipe.recorded_drill = Some(drill);
+            },
+            "invalid_recipe",
+            "runtime version",
+        );
+        reject(
+            |recipe| {
+                let mut drill = matching_drill(recipe, DrillResult::Failed);
+                drill.network = "open".into();
+                recipe.recorded_drill = Some(drill);
+            },
+            "invalid_recipe",
+            "network disabled",
+        );
+        reject(
+            |recipe| {
+                let mut drill = matching_drill(recipe, DrillResult::Failed);
+                drill.cache = "warm".into();
+                recipe.recorded_drill = Some(drill);
+            },
+            "invalid_recipe",
+            "cache empty",
+        );
+        assert_eq!(retention_reason(Retention::Retained), "retained");
+        assert_eq!(retention_reason(Retention::Named), "named");
+        assert_eq!(retention_reason(Retention::Remote), "remote");
+    }
+
+    #[test]
+    fn a_recipe_may_declare_a_base_a_drill_and_a_remote_template() {
+        let mut declared = recipe(text_files(), &["text-generation"]);
+        declared.model.files[0].base = Some(BasePin {
+            repo_id: "example/base".into(),
+            resolved_revision: Some(COMMIT.into()),
+        });
+        declared.model.files[1].base = Some(BasePin {
+            repo_id: "example/base".into(),
+            resolved_revision: None,
+        });
+        as_remote(&mut declared, "https://example.com/template");
+        retained_runtime(&mut declared);
+        declared.recorded_drill = Some(matching_drill(&declared, DrillResult::LoadPassed));
+        let parsed = Recipe::parse(&serde_json::to_string(&declared).unwrap()).unwrap();
+        assert_eq!(parsed.digest(), declared.digest());
+
+        let embeddings = recipe(
+            vec![file(
+                "model.safetensors",
+                Role::Weight,
+                "embeddings",
+                Need::Required,
+                Retention::Named,
+                None,
+            )],
+            &["embeddings"],
+        );
+        assert!(Recipe::parse(&serde_json::to_string(&embeddings).unwrap()).is_ok());
+
+        let mut reversed = declared.clone();
+        reversed.model.files.reverse();
+        reversed.capabilities.reverse();
+        reversed.recorded_drill = None;
+        let mut forward = declared.clone();
+        forward.recorded_drill = None;
+        assert_eq!(forward.digest(), reversed.digest());
+    }
+
+    #[test]
+    fn preflight_distinguishes_each_retained_file_failure() {
+        let (_temp, dir, mut declared) = prepared_runtime();
+        declared.model.files.push(file(
+            "README.md",
+            Role::Documentation,
+            "text-generation",
+            Need::Optional,
+            Retention::Retained,
+            Some(b"note"),
+        ));
+        declared.model.files.push(file(
+            "notes.md",
+            Role::Documentation,
+            "text-generation",
+            Need::Unknown,
+            Retention::Retained,
+            Some(b"note"),
+        ));
+        let unknown = preflight(&declared, &dir).unwrap();
+        assert_eq!(unknown.capabilities[0].closure, "unknown");
+        assert!(
+            unknown.capabilities[0]
+                .excluded
+                .iter()
+                .any(|item| item == "README.md")
+        );
+        assert!(unknown.next.contains("unknown"));
+
+        let mut damaged = declared.clone();
+        damaged.model.files.pop();
+        fs::write(dir.join("README.md"), b"NOTE").unwrap();
+        let damaged = preflight(&damaged, &dir).unwrap();
+        assert_eq!(damaged.capabilities[0].closure, "complete");
+        assert_eq!(damaged.integrity, "damaged");
+        assert!(damaged.next.contains("does not match"));
+
+        let mut files = text_files();
+        for file in &mut files {
+            file.retention = Retention::Named;
+            file.size_bytes = None;
+            file.sha256 = None;
+        }
+        let named = preflight(&recipe(files, &["text-generation"]), &dir).unwrap();
+        assert_eq!(named.hashed_files, 0);
+        assert_eq!(named.integrity, "not_checked");
+        assert_eq!(named.capabilities[0].closure, "missing");
+        assert!(
+            named.capabilities[0]
+                .blocked_by
+                .iter()
+                .any(|item| item.contains("named"))
+        );
+
+        fs::write(dir.join("config.json"), b"x").unwrap();
+        let mut sized = declared.clone();
+        sized.model.files.retain(|file| file.need != Need::Unknown);
+        let sized = preflight(&sized, &dir).unwrap();
+        assert!(
+            sized.capabilities[0]
+                .blocked_by
+                .iter()
+                .any(|item| item.contains("size_mismatch"))
+        );
+
+        fs::remove_file(dir.join("tokenizer.json")).unwrap();
+        fs::create_dir(dir.join("tokenizer.json")).unwrap();
+        let directory = preflight(&retained_copy(), &dir).unwrap();
+        assert!(
+            directory.capabilities[0]
+                .blocked_by
+                .iter()
+                .any(|item| item.contains("not_a_file"))
+        );
+
+        let temp = tempfile::TempDir::new().unwrap();
+        let linked = temp.path().join("model");
+        write_files(&linked, &text_files());
+        fs::write(linked.join("runtime.bin"), b"runtime").unwrap();
+        fs::remove_file(linked.join("config.json")).unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(linked.join("tokenizer.json"), linked.join("config.json"))
+            .unwrap();
+        #[cfg(windows)]
+        {
+            let target = temp.path().join("elsewhere");
+            fs::create_dir(&target).unwrap();
+            let status = std::process::Command::new("cmd")
+                .args(["/C", "mklink", "/J"])
+                .arg(linked.join("config.json"))
+                .arg(&target)
+                .status()
+                .unwrap();
+            assert!(status.success());
+        }
+        let unsafe_link = preflight(&retained_copy(), &linked).unwrap();
+        assert!(
+            unsafe_link.capabilities[0]
+                .blocked_by
+                .iter()
+                .any(|item| item.contains("unsafe_link"))
+        );
+    }
+
+    fn retained_copy() -> Recipe {
+        let mut recipe = recipe(text_files(), &["text-generation"]);
+        retained_runtime(&mut recipe);
+        recipe
+    }
+
+    #[test]
+    fn a_missing_or_unreadable_directory_is_not_created() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let missing = temp.path().join("absent");
+        let mut files = text_files();
+        files.push(file(
+            "README.md",
+            Role::Documentation,
+            "text-generation",
+            Need::Optional,
+            Retention::Retained,
+            Some(b"note"),
+        ));
+        files.push(file(
+            "remote.bin",
+            Role::Weight,
+            "text-generation",
+            Need::Required,
+            Retention::Remote,
+            None,
+        ));
+        files.last_mut().unwrap().locator = Some("https://example.com/remote.bin".into());
+        let report = preflight(&recipe(files, &["text-generation"]), &missing).unwrap();
+        assert!(
+            report.capabilities[0]
+                .excluded
+                .iter()
+                .any(|item| item == "README.md")
+        );
+        assert!(
+            report.capabilities[0]
+                .blocked_by
+                .iter()
+                .any(|item| item.contains("remote"))
+        );
+        assert!(!missing.exists());
+
+        let file_path = temp.path().join("file");
+        fs::write(&file_path, b"x").unwrap();
+        assert_eq!(
+            preflight(&recipe(text_files(), &["text-generation"]), &file_path)
+                .unwrap_err()
+                .code,
+            "unsafe_path"
+        );
+        let nested_path = file_path.join("child");
+        let nested = preflight(&recipe(text_files(), &["text-generation"]), &nested_path);
+        #[cfg(unix)]
+        {
+            let error = nested.unwrap_err();
+            assert_eq!(error.code, "input_read_failed", "{}", error.message);
+        }
+        #[cfg(windows)]
+        {
+            let report = nested.unwrap();
+            assert_eq!(report.availability, "unavailable");
+            assert!(!nested_path.exists());
+        }
+    }
+
+    #[test]
+    fn runtime_retention_and_platform_choose_the_next_step() {
+        let (_temp, dir, recipe) = prepared_runtime();
+        fs::remove_file(dir.join("runtime.bin")).unwrap();
+        let missing = preflight(&recipe, &dir).unwrap();
+        assert_eq!(missing.runtime_retention, "missing");
+        assert_eq!(missing.capabilities[0].closure, "complete");
+        assert!(missing.next.contains("missing"));
+
+        let mut remote = recipe.clone();
+        remote.runtime.artifact = ArtifactDeclaration {
+            retention: Retention::Remote,
+            locator: "https://example.com/runtime".into(),
+            size_bytes: None,
+            sha256: None,
+        };
+        fs::write(dir.join("runtime.bin"), b"runtime").unwrap();
+        let remote = preflight(&remote, &dir).unwrap();
+        assert_eq!(remote.runtime_retention, "remote");
+        assert!(remote.next.contains("remote") || remote.next.contains("lockfile"));
+
+        let mut large = recipe.clone();
+        retained_runtime(&mut large);
+        let optional = HASH_LIMIT + 1;
+        large.model.files.push(file(
+            "extra.bin",
+            Role::Other,
+            "text-generation",
+            Need::Optional,
+            Retention::Retained,
+            Some(b"extra"),
+        ));
+        large.model.files.last_mut().unwrap().size_bytes = Some(optional);
+        fs::File::create(dir.join("extra.bin"))
+            .unwrap()
+            .set_len(optional)
+            .unwrap();
+        let large = preflight(&large, &dir).unwrap();
+        assert_eq!(large.capabilities[0].closure, "complete");
+        assert_eq!(large.integrity, "not_checked");
+        assert!(large.next.contains("not hashed"));
+
+        let mut host = recipe.clone();
+        host.runtime.os = host_os().into();
+        host.runtime.arch = "any".into();
+        assert_eq!(preflight(&host, &dir).unwrap().environment, "compatible");
+        host.runtime.os = "any".into();
+        host.runtime.arch = host_arch().into();
+        assert_eq!(preflight(&host, &dir).unwrap().environment, "compatible");
+        host.runtime.arch = other_than(host_arch(), "x86_64", "aarch64");
+        let incompatible = preflight(&host, &dir).unwrap();
+        assert_eq!(incompatible.environment, "incompatible");
+        assert!(
+            incompatible.next.contains("architecture")
+                || incompatible.next.contains("operating system")
+        );
+    }
+
+    #[test]
+    fn a_recorded_drill_applies_only_when_every_condition_matches() {
+        let (_temp, dir, mut recipe) = prepared_runtime();
+        let expect = |recipe: &Recipe, readiness: &str, next: &str| {
+            let report = preflight(recipe, &dir).unwrap();
+            assert_eq!(report.offline_readiness, readiness, "{}", report.next);
+            assert!(report.next.contains(next), "{}", report.next);
+            report
+        };
+
+        recipe.recorded_drill = Some(matching_drill(&recipe, DrillResult::Failed));
+        let failed = expect(&recipe, "failed", "did not run");
+        assert!(crate::present::render_readiness(&failed, true, 40).contains("failed"));
+
+        recipe.recorded_drill.as_mut().unwrap().result = DrillResult::LoadPassed;
+        let loaded = expect(&recipe, "load_passed", "did not run");
+        assert!(crate::present::render_readiness(&loaded, true, 80).contains("load_passed"));
+        assert!(crate::present::render_readiness(&loaded, false, 80).contains("load_passed"));
+
+        let mut stale = recipe.clone();
+        stale.recorded_drill.as_mut().unwrap().os = other_than(host_os(), "windows", "linux");
+        expect(&stale, "stale", "does not apply");
+        stale.recorded_drill.as_mut().unwrap().os = host_os().into();
+        stale.recorded_drill.as_mut().unwrap().arch = other_than(host_arch(), "x86_64", "aarch64");
+        expect(&stale, "stale", "does not apply");
+        stale.recorded_drill.as_mut().unwrap().arch = host_arch().into();
+        stale.recorded_drill.as_mut().unwrap().network = "enabled".into();
+        expect(&stale, "stale", "does not apply");
+        stale.recorded_drill.as_mut().unwrap().network = "disabled".into();
+        stale.recorded_drill.as_mut().unwrap().cache = "warm".into();
+        expect(&stale, "stale", "does not apply");
+
+        let mut rights = recipe.clone();
+        rights.rights.status = RightsStatus::Unreviewed;
+        rights.recorded_drill = Some(matching_drill(&rights, DrillResult::TaskPassed));
+        let rights = expect(&rights, "stale", "license");
+        assert_eq!(rights.rights, "unreviewed");
+
+        let mut platform = recipe.clone();
+        platform.runtime.os = other_than(host_os(), "windows", "linux");
+        platform.recorded_drill = Some(matching_drill(&platform, DrillResult::TaskPassed));
+        let platform = expect(&platform, "stale", "operating system");
+        assert_eq!(platform.environment, "incompatible");
+
+        let mut named = recipe.clone();
+        named.runtime.artifact.retention = Retention::Named;
+        named.runtime.artifact.locator = "transformers==4.55.2".into();
+        named.runtime.artifact.size_bytes = None;
+        named.runtime.artifact.sha256 = None;
+        named.recorded_drill = Some(matching_drill(&named, DrillResult::TaskPassed));
+        expect(&named, "stale", "named");
+
+        let mut other = recipe.clone();
+        other.recorded_drill.as_mut().unwrap().capability = "other".into();
+        expect(&other, "stale", "does not apply");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_unreadable_retained_file_is_an_input_failure() {
+        use std::os::unix::fs::PermissionsExt;
+        let (_temp, dir, recipe) = prepared_runtime();
+        let path = dir.join("config.json");
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o000)).unwrap();
+        let opened = preflight(&recipe, &dir);
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+        let error = opened.unwrap_err();
+        assert_eq!(error.code, "input_read_failed", "{}", error.message);
+
+        let locked = dir.join("locked");
+        fs::create_dir(&locked).unwrap();
+        fs::write(locked.join("hidden.bin"), b"hidden").unwrap();
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
+        let mut hidden = recipe.clone();
+        hidden.model.files.push(file(
+            "locked/hidden.bin",
+            Role::Other,
+            "text-generation",
+            Need::Optional,
+            Retention::Retained,
+            Some(b"hidden"),
+        ));
+        let opened = preflight(&hidden, &dir);
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let error = opened.unwrap_err();
+        assert_eq!(error.code, "input_read_failed", "{}", error.message);
     }
 }
