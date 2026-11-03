@@ -241,14 +241,16 @@ fn resolve_with(http: &Http, base: &str, repo: &str, revision: &str) -> Result<R
         .filter(|e| inventory.license.paths.contains(&e.path))
         .collect::<Vec<_>>();
     if !license_texts.is_empty() {
-        inventory.license.status = if license_texts
+        let texts_match = license_texts
             .iter()
-            .all(|e| licenses::matches(&inventory.license.license_id, &e.text))
-            && !evidence.iter().any(|e| classify(&e.path) == Role::Notice)
-        {
-            EvidenceStatus::Matched
-        } else {
+            .all(|e| licenses::matches(&inventory.license.license_id, &e.text));
+        let notice_present = evidence.iter().any(|e| classify(&e.path) == Role::Notice);
+        inventory.license.status = if !texts_match {
             EvidenceStatus::Conflicting
+        } else if notice_present {
+            EvidenceStatus::NoticePresent
+        } else {
+            EvidenceStatus::Matched
         };
     }
     if supported_layout(http, base, &inventory)? {

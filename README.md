@@ -53,7 +53,7 @@ Inspect a public model without downloading weights:
 
     cargo run --locked --release -- resolve --repo Qwen/Qwen2.5-0.5B-Instruct --revision main
 
-Review the resolved commit and original license evidence. A license tag alone is insufficient. Source inspection always reports transfer_authorized=false. A terminal prints a short text verdict and one next step. A pipe, or `--json`, prints compact JSON; `--pretty` indents that JSON. `--json` also wins over `local list --format text`. Color is `--color auto|always|never`, and `NO_COLOR` or `TERM=dumb` turns it off. JSON is never colored. A missing repository is `repository_not_found_or_private` (Hugging Face uses HTTP 401 for both), and a missing revision is `revision_not_found`.
+Review the resolved commit and original license evidence. A license tag alone is insufficient. A NOTICE file beside matching license text is `notice_present`: the notice is captured, it is not called a conflict, and it is not a match. Source inspection always reports transfer_authorized=false. A terminal prints a short text verdict and one next step. A pipe, or `--json`, prints compact JSON; `--pretty` indents that JSON. `--json` also wins over `local list --format text`. Color is `--color auto|always|never`, and `NO_COLOR` or `TERM=dumb` turns it off. JSON is never colored. A missing repository is `repository_not_found_or_private` (Hugging Face uses HTTP 401 for both), and a missing revision is `revision_not_found`.
 
 On a terminal, a failure is one `error:` line and one `next:` line. Piped failures stay a JSON object with `error.code` and `error.message`. Argument errors exit 2. Application errors exit 1. A closed pipe exits 0.
 

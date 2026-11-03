@@ -52,7 +52,7 @@ The transfer spike must prove ordinary Git files, LFS, Xet, cancellation, and re
 
 ## Rights and file selection
 
-License tags are discovery hints. Capture license and notice files at the pinned revision. Check recognized text and modifications; a header alone is insufficient. Unknown, missing, conflicting, or mixed evidence blocks automatic approval.
+License tags are discovery hints. Capture license and notice files at the pinned revision. Check recognized text and modifications; a header alone is insufficient. Unknown, missing, conflicting, or mixed evidence blocks automatic approval. A NOTICE beside matching license text is `notice_present`. That status keeps the notice and still blocks automatic approval.
 
 Explicit selection still passes the same rights gate. Record rights for included components and any base dependencies. Preserve original files, not a generated paraphrase.
 
