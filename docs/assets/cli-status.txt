@@ -1,5 +1,5 @@
 ready  vault 8397c2c3
-  primary  mounted  412.9 GB (384.5 GiB) free
+  primary  mounted  412.2 GB (383.9 GiB) free
   path  \\?\C:\GitHub\ModelPrepper\target\docs-capture\models
   preserved  none yet
 next: modelprepper resolve --repo <org/model>

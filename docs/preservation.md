@@ -98,13 +98,31 @@ Reports do not collapse these into one green status. Cached file size/mtime chec
 
 The core utility does not execute arbitrary runtime commands from manifests. Early drills are documented manual procedures. A later isolated helper may automate supported runtimes with explicit consent.
 
-A load test establishes that the specific environment worked at that time, not general model quality. Re-run after a major runtime or platform change.
+A load test establishes that the specific environment worked at that time, not general model quality. Re-run after a major runtime or platform change. `readiness` never records that result. A drill note stored in a recipe is evidence from a previous procedure. It applies only when the recipe digest, runtime version, OS, architecture, disabled network, and empty cache still match, and the selected capability's retained files still hash. Any other recorded pass is stale. Fixture evidence is not a completed drill.
+
+## Runtime recipe
+
+`readiness --recipe <file> --path <dir>` reads one versioned JSON recipe and the local directory. Schema version 1 is the only accepted recipe. Unknown fields and unknown schema versions are rejected. The only profile is `publisher-safetensors-text-v1`. For the `text-generation` capability it declares required config, tokenizer, weight, and chat-template files. Another selected capability, such as a transcription model, is closed on its own files. A missing file blocks that capability. An unknown need or an adapter whose base commit is absent stays unknown. It is not reported as complete.
+
+Each file and the runtime artifact says whether it is `retained`, `named`, or `remote`. A retained file has a size and SHA-256. Ordinary preflight hashes a retained file only when its declared size is at most 2 MiB. A larger file can match in length and still be unverified. A package name or an HTTPS URL is not a retained artifact and cannot make the closure complete. Rights are echoed from the recipe as a declaration. This command does not re-check the publisher, so provenance stays `declared_only`.
+
+The report keeps integrity, capability closure, rights, disk availability, environment, runtime retention, and offline readiness separate. There is no single ready badge. A missing directory is `unavailable` and is not created. A symlink or Windows reparse point used as the directory is `unsafe_path` and is not followed. The command does not contact a network, execute a model or runtime, or write a vault.
+
+The manual drill remains:
+
+1. Restore the selected files and, when one was retained, the runtime artifact to a clean directory.
+2. Disable network access for the runtime and start with an empty model and package cache.
+3. Assemble only from retained files. Record host drivers and libraries the recipe cannot supply.
+4. Load the model and run one small task for the selected capability. Record the recipe digest, runtime version, OS, architecture, hardware, and the result.
+5. Keep that record with the recipe. A later `readiness` reading can show it only while it still applies. It does not run the task again.
+
+No catalog-independent restore is claimed. That remains the restoration milestone.
 
 ## Runtime kits
 
-A later optional kit may preserve compatible runtime binaries, build recipes, dependency lockfiles, and redistributable packages. Keep platform-specific kits distinct from model bundles.
+A later optional kit may preserve compatible runtime binaries, build recipes, dependency lockfiles, and redistributable packages. Keep platform-specific kits distinct from model bundles. The recipe above can name those pieces. Naming them does not package them.
 
-A container image alone does not guarantee an offline GPU driver, compatible kernel, or portability across all OSes. A source checkout alone does not preserve all build dependencies.
+A container image alone does not guarantee an offline GPU driver, compatible kernel, or portability across all OSes. A source checkout alone does not preserve all build dependencies. A lockfile alone is not a package cache.
 
 Runtime kits are opt-in and never a runtime dependency of ModelPrepper itself.
 

@@ -22,6 +22,7 @@ Local custody, portable data, and user control are central. The project rejects 
 | verify-local / adopt | Compare a local folder with a resolved commit, then copy or move the matched file set. Absent optional files are excluded. |
 | local list | Read Ollama manifests and say whether each tag was checked against the catalog. Nothing in the store is changed. |
 | plan | Preview untrusted local inventory with selected files, costs, exclusions, and blockers. |
+| readiness | Read a local runtime recipe and report capability closure, rights, disk presence, and recorded readiness. It does not download, execute, or change a vault. |
 
 See [implementation status](docs/implementation-status.md) for observed evidence and limitations, and the [roadmap](docs/roadmap.md) for delivery gates.
 

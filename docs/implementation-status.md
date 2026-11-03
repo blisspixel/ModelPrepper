@@ -1,6 +1,6 @@
 # Implementation status
 
-This records executable behavior and evidence as of November 2, 2026. It does not mark the preservation roadmap complete.
+This records executable behavior and evidence as of November 3, 2026. It does not mark the preservation roadmap complete.
 
 ## Executable features
 
@@ -14,6 +14,7 @@ This records executable behavior and evidence as of November 2, 2026. It does no
 | local list | Read-only Ollama manifest inventory. Coverage is unchecked, none, partial, or fully recorded. Symlinks and Windows reparse points are skipped. | A catalog match is historical byte identity, not a fresh hash or an offline run. Does not import blobs or call the Ollama API. |
 | propose / proposals / decide | Durable evidence/volume binding, paginated offline inspection, idempotent rejection, schema-1 migration. | Approval is blocked until transfer bounds and accounting qualify. |
 | plan | Canonical preview from local inventory, file selection and blockers. | Always untrusted, never persisted or authorized. |
+| readiness | Read-only recipe preflight for `publisher-safetensors-text-v1`. Reports capability closure, declared rights, disk presence, and whether a recorded drill still applies. | Not a download, not a runtime execution, and not a new drill. A named package or URL is not a retained runtime. |
 | Integrity library | Bounded-memory Git blob/LFS verification plus local SHA-256. | Transfer writer and durable manifest integration are next. |
 | Transfer library experiment | Identity-bound prefix checkpoints, strict byte ranges, segment rollback, full-file upstream verification, offline uncommitted-tail recovery, exclusive SQLite checkpoint sessions. Each segment allowance is charged before the request and kept when a tail is discarded. The checkpoint database and its rollback journal are each capped at 1 MiB. A redirected 401 or 403 is refreshed once from the original URL; the rejected location is not retried or stored, even when the refresh names it again. An encoded 401 or 403 stays a rejection, and identity content encoding matches in any letter case. A plaintext loopback fixture counts the request and response bytes for that attempt. | That cap is not `workspace_bytes`. Those plaintext counts are not TLS buffers or kernel socket buffers. Approval, vault reservations, and publication remain open. |
 
@@ -33,7 +34,7 @@ An optional Omarchy presence chip in [plugins/omarchy-presence](../plugins/omarc
 - Live source inspection pins SmolLM2-135M-Instruct at 12fd25f77366fa6b3b4b768ec3050bf629380bac. Configuration bytes verify; missing license text remains unreviewed despite the Apache tag. No weights were fetched.
 - A second release inspection pins Qwen2.5-0.5B-Instruct at 7ae557604adf67be50417f59c2c2f167def9a775. License/config/tokenizer configuration bytes verify, and the Apache template with its filled appendix copyright matches. Transfer authorization remains false; no weights were fetched.
 
-Local Windows validation passes 119 Rust tests and 30 documentation-tool tests. Formatting and Clippy with warnings denied pass on Rust 1.99.1. Markdown lint and local links pass. The documentation link library measures 100% line and branch coverage. The CI coverage gate requires at least 80% of owned Rust lines and a real branch measurement; a new local percentage is not claimed until that job measures this tree. CLI captures are regenerated from the release executable. Dependency audit and license checks run in CI against the current lockfile. Offline installer fixtures run from the release binary. A release smoke test creates an empty vault and reports its mounted disk without contacting a publisher. Current artifact sizes are observations, not distribution guarantees.
+Local Windows validation passes 131 Rust tests and 30 documentation-tool tests. Formatting and Clippy with warnings denied pass on Rust 1.99.1. Markdown lint and local links pass. The documentation link library measures 100% line and branch coverage. The CI coverage gate requires at least 80% of owned Rust lines and a real branch measurement; a new local percentage is not claimed until that job measures this tree. CLI captures are regenerated from the release executable. Dependency audit and license checks run in CI against the current lockfile. Offline installer fixtures run from the release binary. A release smoke test creates an empty vault and reports its mounted disk without contacting a publisher. Current artifact sizes are observations, not distribution guarantees.
 
 Live source state can change. These checks are observations, not permanently pinned model recommendations. Use resolve to inspect a current source and retain the exact commit/evidence before later approval.
 

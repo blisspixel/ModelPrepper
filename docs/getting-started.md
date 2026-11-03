@@ -56,6 +56,14 @@ cargo run --locked --release -- plan --config examples/config.toml --inventory t
 
 This inventory is synthetic. Every local preview contains local_inventory_untrusted and transfer_authorized=false. Available bytes are a supplied observation, not a reservation. See [contracts](contracts.md).
 
+## Check offline readiness
+
+```text
+cargo run --locked --release -- readiness --recipe recipe.json --path ~/Downloads/qwen
+```
+
+The recipe is local JSON. The directory is the retained files. A missing directory is reported and is not created. The report keeps integrity, capability closure, rights, and readiness separate. Matching small files still leave readiness `untested` until a real network-disabled drill is recorded. A package name or URL is not a retained runtime. See [preservation](preservation.md).
+
 ## Common outcomes
 
 To retain pinned source evidence and record rejection, use the [source review workflow](source-reviews.md). For category portfolios, original precision, and NAS budget planning, read [archival policies](archive-policy.md). Native release installers and their publication limits are in [installation](installation.md).
