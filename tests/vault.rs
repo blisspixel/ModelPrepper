@@ -74,6 +74,32 @@ fn config_relative_paths_are_resolved_against_the_config_file() {
 }
 
 #[test]
+fn resolved_relative_paths_overlap_plain_absolute_aliases() {
+    let dir = TempDir::new().unwrap();
+    let file = dir.path().join("config.toml");
+    fs::write(&file, b"placeholder").unwrap();
+    let parent = fs::canonicalize(&file).unwrap();
+    let parent = parent.parent().unwrap();
+    let plain = |path: &std::path::Path| {
+        let text = path.to_string_lossy();
+        std::path::PathBuf::from(text.strip_prefix(r"\\?\").unwrap_or(text.as_ref()))
+    };
+    let mut config = Config::default_for("catalog".into(), "models".into());
+    config.volumes[0].path = plain(&parent.join("catalog"));
+    assert_eq!(
+        locate(&config, &file).unwrap_err().code,
+        "overlapping_vault_paths"
+    );
+    config.volumes[0].path = plain(&parent.join("catalog").join("nested"));
+    assert_eq!(
+        locate(&config, &file).unwrap_err().code,
+        "overlapping_vault_paths"
+    );
+    config.volumes[0].path = plain(&parent.join("volumes"));
+    assert!(locate(&config, &file).is_ok());
+}
+
+#[test]
 fn empty_setup_never_adopts_user_data_or_overlapping_paths() {
     let (_dir, config) = configured();
     assert_eq!(status(&config).unwrap_err().code, "vault_not_initialized");

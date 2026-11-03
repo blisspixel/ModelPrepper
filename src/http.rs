@@ -1,6 +1,9 @@
 //! Blocking, bounded HTTP with explicit redirect trust and no credential handling.
 //! A redirected location that returns 401 or 403 is abandoned. The original URL
-//! is requested once more, and the rejected location is not retried or stored.
+//! is requested once more. That rejected location is not requested again, even
+//! when the refreshed request redirects to it. A 401 or 403 is classified before
+//! content encoding. A body that may be stored must use identity encoding,
+//! matched in any letter case.
 use crate::{Error, Result};
 use std::{io::Read, time::Duration};
 use url::Url;
@@ -27,7 +30,7 @@ impl Default for Http {
 
 impl Http {
     pub fn get(&self, url: &Url, limit: u64) -> Result<Vec<u8>> {
-        let mut response = self.open(url, None)?;
+        let mut response = self.open(url, None).map_err(source_status_for_rejected)?;
         let status = response.status().as_u16();
         if status != 200 {
             return Err(Error::new(
@@ -46,6 +49,7 @@ impl Http {
         let mut current = url.clone();
         let mut redirects = 0u8;
         let mut refreshed = false;
+        let mut rejected: Option<Url> = None;
         loop {
             validate_url(&current, self.test_origin.as_deref())?;
             let mut request = self
@@ -76,24 +80,34 @@ impl Http {
                     .ok_or_else(|| {
                         Error::new("invalid_redirect", "redirect has no valid Location header")
                     })?;
-                current = current
+                let next = current
                     .join(location)
                     .map_err(|_| Error::new("invalid_redirect", "invalid redirect destination"))?;
+                if rejected.as_ref().is_some_and(|seen| seen == &next) {
+                    return Err(rejected_redirect());
+                }
+                current = next;
                 redirects += 1;
                 continue;
             }
             // A rejected redirect location is not retried. One new request goes
             // back to the caller's original URL so a signed query is not reused.
+            // Classify this status before content encoding so a compressed
+            // error page remains a rejection.
             if matches!(status, 401 | 403) && &current != url && !refreshed {
+                rejected = Some(current.clone());
                 refreshed = true;
                 redirects = 0;
                 current = url.clone();
                 continue;
             }
+            if matches!(status, 401 | 403) {
+                return Ok(response);
+            }
             if response
                 .headers()
                 .get("content-encoding")
-                .is_some_and(|v| v != "identity")
+                .is_some_and(|value| !identity_encoding(value))
             {
                 return Err(Error::new(
                     "unexpected_encoding",
@@ -134,6 +148,33 @@ pub(crate) fn read_body(
         ));
     }
     Ok(bytes)
+}
+
+pub(crate) fn rejected_redirect() -> Error {
+    Error::new(
+        "rejected_redirect",
+        "a rejected redirect location was not requested again",
+    )
+}
+
+pub(crate) fn source_status_for_rejected(error: Error) -> Error {
+    if error.code == "rejected_redirect" {
+        Error::new(
+            "source_status",
+            "a rejected redirect location was not requested again",
+        )
+    } else {
+        error
+    }
+}
+
+fn identity_encoding(value: &ureq::http::HeaderValue) -> bool {
+    value.to_str().is_ok_and(|text| {
+        !text.is_empty()
+            && text
+                .split(',')
+                .all(|part| part.trim().eq_ignore_ascii_case("identity"))
+    })
 }
 
 fn validate_url(url: &Url, test_origin: Option<&str>) -> Result<()> {

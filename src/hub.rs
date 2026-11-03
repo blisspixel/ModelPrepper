@@ -82,7 +82,9 @@ fn metadata(http: &Http, base: &str, repo: &str, revision: &str) -> Result<Metad
         .expect("HTTP origin")
         .extend(["api", "models", owner, name, "revision", revision]);
     url.set_query(Some("blobs=true"));
-    let mut response = http.open(&url, None)?;
+    let mut response = http
+        .open(&url, None)
+        .map_err(crate::http::source_status_for_rejected)?;
     let status = response.status().as_u16();
     if status != 200 {
         return Err(metadata_status(status));

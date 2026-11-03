@@ -141,10 +141,8 @@ fn validate_locations(config: &Config) -> Result<()> {
     }
     for (index, path) in paths.iter().enumerate() {
         for other in &paths[index + 1..] {
-            // Reject case aliases conservatively on every OS for portability.
-            let left = PathBuf::from(path.to_string_lossy().to_lowercase());
-            let right = PathBuf::from(other.to_string_lossy().to_lowercase());
-            if left.starts_with(&right) || right.starts_with(&left) {
+            // Case and a Windows verbatim prefix name the same directory.
+            if crate::config::paths_overlap(path, other) {
                 return Err(Error::new(
                     "overlapping_vault_paths",
                     "catalog and volumes need separate, non-overlapping directories",

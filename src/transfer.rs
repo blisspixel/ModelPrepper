@@ -1,7 +1,8 @@
 //! Restart-focused transport experiment. No approval or publication.
 //! The staging journal charges a segment allowance before the request and does
 //! not refund it when an uncommitted tail is discarded. A rejected redirect
-//! location is refreshed once from the original URL and does not change identity.
+//! location is refreshed once from the original URL. A later redirect back to
+//! that location is not requested, and the refresh does not change identity.
 use crate::{
     Error, Result,
     http::Http,
@@ -207,7 +208,16 @@ fn stage_with(
             .extend(repo.split('/'))
             .extend(["resolve", &source.resolved_revision])
             .extend(expected.path.split('/'));
-        let mut response = http.open(&url, Some((offset, end)))?;
+        let mut response = http.open(&url, Some((offset, end))).map_err(|error| {
+            if error.code == "rejected_redirect" {
+                Error::new(
+                    "payload_location_rejected",
+                    "payload location was rejected without disclosing its address",
+                )
+            } else {
+                error
+            }
+        })?;
         let status = response.status().as_u16();
         if matches!(status, 401 | 403) {
             return Err(Error::new(

@@ -4,7 +4,7 @@ use crate::{
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -206,11 +206,19 @@ impl Config {
         }
         let mut locations = vec![self.catalog_path.clone()];
         locations.extend(self.volumes.iter().map(|volume| volume.path.clone()));
+        if locations.iter().any(|path| {
+            path.to_string_lossy()
+                .split(['/', '\\'])
+                .any(|part| matches!(part, "." | ".."))
+        }) {
+            return Err(Error::new(
+                "unsafe_vault_path",
+                "vault paths cannot contain dot segments",
+            ));
+        }
         for (index, path) in locations.iter().enumerate() {
             for other in &locations[index + 1..] {
-                let left = PathBuf::from(path.to_string_lossy().to_lowercase());
-                let right = PathBuf::from(other.to_string_lossy().to_lowercase());
-                if left.starts_with(&right) || right.starts_with(&left) {
+                if paths_overlap(path, other) {
                     return Err(Error::new(
                         "overlapping_vault_paths",
                         "catalog and volumes need separate, non-overlapping directories",
@@ -234,5 +242,94 @@ impl Config {
             .watches
             .sort_by(|a, b| (&a.repo_id, &a.revision).cmp(&(&b.repo_id, &b.revision)));
         serde_json::to_vec(&normalized).map_err(|e| Error::new("invalid_config", e.to_string()))
+    }
+}
+
+/// True when either path is the other path or a path inside it.
+///
+/// Comparison is by component. ASCII case does not distinguish two paths.
+/// On Windows, a verbatim `\\?\` prefix does not distinguish a path from the
+/// same path without that prefix.
+pub(crate) fn paths_overlap(left: &Path, right: &Path) -> bool {
+    let left = comparable_path(left);
+    let right = comparable_path(right);
+    left.starts_with(&right) || right.starts_with(&left)
+}
+
+fn comparable_path(path: &Path) -> PathBuf {
+    let mut text = String::new();
+    for component in path.components() {
+        match component {
+            std::path::Component::Prefix(prefix) => text.push_str(&prefix_text(&prefix)),
+            std::path::Component::RootDir => text.push(std::path::MAIN_SEPARATOR),
+            std::path::Component::CurDir => text.push('.'),
+            std::path::Component::ParentDir => {
+                if !text.is_empty() && !text.ends_with(std::path::MAIN_SEPARATOR) {
+                    text.push(std::path::MAIN_SEPARATOR);
+                }
+                text.push_str("..");
+            }
+            std::path::Component::Normal(part) => {
+                if !text.is_empty() && !text.ends_with(std::path::MAIN_SEPARATOR) {
+                    text.push(std::path::MAIN_SEPARATOR);
+                }
+                text.push_str(&part.to_string_lossy().to_lowercase());
+            }
+        }
+    }
+    PathBuf::from(text)
+}
+
+#[cfg(windows)]
+fn prefix_text(prefix: &std::path::PrefixComponent<'_>) -> String {
+    use std::path::Prefix;
+    match prefix.kind() {
+        Prefix::VerbatimDisk(disk) | Prefix::Disk(disk) => {
+            format!("{}:", (disk as char).to_ascii_lowercase())
+        }
+        Prefix::VerbatimUNC(server, share) | Prefix::UNC(server, share) => format!(
+            r"\\{}\{}",
+            server.to_string_lossy().to_lowercase(),
+            share.to_string_lossy().to_lowercase()
+        ),
+        Prefix::Verbatim(value) | Prefix::DeviceNS(value) => value.to_string_lossy().to_lowercase(),
+    }
+}
+
+#[cfg(not(windows))]
+fn prefix_text(prefix: &std::path::PrefixComponent<'_>) -> String {
+    prefix.as_os_str().to_string_lossy().to_lowercase()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn distinct_directory_names_do_not_overlap() {
+        let root = if cfg!(windows) { r"C:\vault" } else { "/vault" };
+        let catalog = PathBuf::from(root).join("catalog");
+        let catalog_sibling = PathBuf::from(root).join("catalog2");
+        let models = PathBuf::from(root).join("models");
+        assert!(paths_overlap(&catalog, &catalog));
+        assert!(paths_overlap(&catalog, &catalog.join("nested")));
+        assert!(!paths_overlap(&catalog, &catalog_sibling));
+        assert!(!paths_overlap(&catalog, &models));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn verbatim_prefix_and_ascii_case_name_the_same_directory() {
+        let plain = PathBuf::from(r"C:\Vault\Catalog");
+        let verbatim = PathBuf::from(r"\\?\c:\vault\catalog");
+        let nested = PathBuf::from(r"C:\vault\catalog\nested");
+        let sibling = PathBuf::from(r"\\?\C:\vault\catalog2");
+        assert!(paths_overlap(&plain, &verbatim));
+        assert!(paths_overlap(&verbatim, &nested));
+        assert!(!paths_overlap(&verbatim, &sibling));
+        assert!(paths_overlap(
+            &PathBuf::from(r"\\?\UNC\Server\Share\catalog"),
+            &PathBuf::from(r"\\server\share\catalog\nested")
+        ));
     }
 }

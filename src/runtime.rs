@@ -286,7 +286,34 @@ fn read_store(
     ))
 }
 
+fn link_or_reparse(meta: &fs::Metadata) -> bool {
+    let linked = meta.file_type().is_symlink();
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        linked || meta.file_attributes() & 0x400 != 0
+    }
+    #[cfg(not(windows))]
+    linked
+}
+
 fn collect_files(dir: &Path, files: &mut Vec<PathBuf>, notes: &mut Vec<String>) -> Result<()> {
+    // read_dir follows a directory junction. Refuse the directory itself before
+    // listing, including when the manifests directory is the link.
+    let dir_meta = match fs::symlink_metadata(dir) {
+        Ok(meta) => meta,
+        Err(error) => {
+            notes.push(format!("could not read {}: {error}", dir.display()));
+            return Ok(());
+        }
+    };
+    if link_or_reparse(&dir_meta) {
+        notes.push(format!(
+            "skipped symlink or reparse point {}",
+            dir.display()
+        ));
+        return Ok(());
+    }
     let entries = match fs::read_dir(dir) {
         Ok(entries) => entries,
         Err(error) => {
@@ -313,8 +340,11 @@ fn collect_files(dir: &Path, files: &mut Vec<PathBuf>, notes: &mut Vec<String>) 
                 continue;
             }
         };
-        if meta.file_type().is_symlink() {
-            notes.push(format!("skipped symlink {}", path.display()));
+        if link_or_reparse(&meta) {
+            notes.push(format!(
+                "skipped symlink or reparse point {}",
+                path.display()
+            ));
         } else if meta.is_dir() {
             collect_files(&path, files, notes)?;
         } else if meta.is_file() {
@@ -444,7 +474,9 @@ fn apply_coverage(model: &mut RuntimeModel, preserved: Option<&BTreeSet<String>>
     let matched = preserved
         .map(|set| valid.iter().filter(|hex| set.contains(*hex)).count() as u32)
         .unwrap_or(0);
-    let total = valid.len() as u32 + malformed;
+    // Counts are distinct usable digests. An unusable component still blocks
+    // all_components_recorded below; it is not another digest.
+    let total = valid.len() as u32;
     model.matched_digests = if preserved.is_none() { 0 } else { matched };
     model.total_digests = total;
     model.missing_roles = if preserved.is_none() {
@@ -719,6 +751,8 @@ mod tests {
         );
         assert_ne!(broken.coverage, "all_components_recorded");
         assert_eq!(broken.preserved, Some(false));
+        assert_eq!(broken.matched_digests, 2);
+        assert_eq!(broken.total_digests, 2);
         assert!(
             broken
                 .missing_roles
@@ -736,5 +770,66 @@ mod tests {
         assert!(partial.missing_roles.iter().any(|role| role == "template"));
         assert!(reread.text().contains("missing template"));
         assert!(!reread.text().contains("\u{1b}"));
+    }
+
+    fn point_directory(link: &Path, target: &Path) {
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(target, link).unwrap();
+        #[cfg(windows)]
+        {
+            let status = std::process::Command::new("cmd")
+                .args(["/C", "mklink", "/J"])
+                .arg(link)
+                .arg(target)
+                .status()
+                .unwrap();
+            assert!(status.success(), "junction creation failed");
+        }
+    }
+
+    #[test]
+    fn manifest_discovery_does_not_follow_directory_links() {
+        let root = tempfile::TempDir::new().unwrap();
+        let store = root.path().join("models");
+        let manifests = store.join("manifests");
+        fs::create_dir_all(&manifests).unwrap();
+        let outside = root.path().join("outside");
+        let hidden = outside.join("registry.ollama.ai/library/hidden");
+        fs::create_dir_all(&hidden).unwrap();
+        fs::write(
+            hidden.join("latest"),
+            manifest(&"c".repeat(64), false, false),
+        )
+        .unwrap();
+        point_directory(&manifests.join("escape"), &outside);
+        let report = inventory(std::slice::from_ref(&store), None).unwrap();
+        assert!(
+            report
+                .models
+                .iter()
+                .all(|model| !model.name.contains("hidden"))
+        );
+        assert!(report.message.contains("escape"));
+        assert!(!fs::read(hidden.join("latest")).unwrap().is_empty());
+    }
+
+    #[test]
+    fn manifests_directory_link_is_not_listed() {
+        let root = tempfile::TempDir::new().unwrap();
+        let store = root.path().join("models");
+        fs::create_dir_all(&store).unwrap();
+        let outside = root.path().join("outside");
+        let hidden = outside.join("registry.ollama.ai/library/hidden");
+        fs::create_dir_all(&hidden).unwrap();
+        fs::write(
+            hidden.join("latest"),
+            manifest(&"d".repeat(64), false, false),
+        )
+        .unwrap();
+        point_directory(&store.join("manifests"), &outside);
+        let report = inventory(std::slice::from_ref(&store), None).unwrap();
+        assert!(report.models.is_empty(), "{report:?}");
+        assert!(report.message.contains("manifests"));
+        assert!(!fs::read(hidden.join("latest")).unwrap().is_empty());
     }
 }

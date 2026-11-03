@@ -99,6 +99,11 @@ pub(crate) fn adopt_stopping(
     let staging_root = volume_path.join(".modelprepper-adopt");
     let staging = staging_root.join(plan_id);
     let journal = staging_root.join(format!("{plan_id}.json"));
+    // create_dir_all and rename follow a directory junction. Reject one at
+    // preserved or the staging directory before either call can leave the volume.
+    check_path(&published)?;
+    check_path(&staging)?;
+    check_path(&journal)?;
     let source = checked_source(config, source)?;
 
     if published.exists() {
@@ -115,15 +120,24 @@ pub(crate) fn adopt_stopping(
         }
         let chosen = verify::selected_sources(&inventory, &check)?;
         let manifest = manifest_from_tree(&published, &chosen)?;
-        record(
-            &catalog,
-            plan_id,
-            &repo,
-            &revision,
-            &volume_label,
-            &relative_dir(&repo, &revision),
-            &manifest,
-        )?;
+        match recorded_manifest(&catalog, plan_id)? {
+            Some(stored) if stored != manifest => {
+                return Err(Error::new(
+                    "destination_conflict",
+                    "published copy does not match its recorded custody manifest",
+                ));
+            }
+            Some(_) => {}
+            None => record(
+                &catalog,
+                plan_id,
+                &repo,
+                &revision,
+                &volume_label,
+                &relative_dir(&repo, &revision),
+                &manifest,
+            )?,
+        }
         let _ = fs::remove_dir_all(&staging);
         let _ = fs::remove_file(&journal);
         if move_source {
@@ -211,6 +225,9 @@ pub(crate) fn adopt_stopping(
             "the verified file set changed before publication",
         ));
     }
+    // A leftover partial is an extra. Publishing the staging directory would
+    // keep it. Regular extras are removed; a link is left in place and rejected.
+    discard_staging_extras(&staging, &staged)?;
     if let Some(parent) = published.parent() {
         fs::create_dir_all(parent).map_err(io)?;
         sync_dir(parent)?;
@@ -410,6 +427,41 @@ fn manifest_from_tree(root: &Path, files: &[SourceFile]) -> Result<String> {
     serde_json::to_string(&entries).map_err(|error| Error::new("output_failed", error.to_string()))
 }
 
+fn recorded_manifest(catalog: &super::Catalog, plan_id: &str) -> Result<Option<String>> {
+    use rusqlite::OptionalExtension;
+    catalog
+        .db
+        .query_row(
+            "SELECT manifest FROM custody WHERE plan_id = ?1",
+            [plan_id],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(db)
+}
+
+fn discard_staging_extras(staging: &Path, report: &Verification) -> Result<()> {
+    for file in &report.files {
+        if file.status != "extra" {
+            continue;
+        }
+        let Some(meta) = verify::metadata_nofollow(staging, &file.path)? else {
+            return Err(Error::new(
+                "unsafe_path",
+                format!("{} is not a regular staging file", file.path),
+            ));
+        };
+        if !meta.is_file() {
+            return Err(Error::new(
+                "unsafe_path",
+                format!("{} is not a regular staging file", file.path),
+            ));
+        }
+        fs::remove_file(verify::local_path(staging, &file.path)).map_err(io)?;
+    }
+    Ok(())
+}
+
 fn record(
     catalog: &super::Catalog,
     plan_id: &str,
@@ -455,18 +507,17 @@ fn checked_source(config: &Config, source: &Path) -> Result<PathBuf> {
     let source = fs::canonicalize(source)
         .map_err(|error| Error::new("path_not_found", format!("{}: {error}", source.display())))?;
     check_path(&source)?;
-    let source_alias = PathBuf::from(source.to_string_lossy().to_lowercase());
     for managed in
         std::iter::once(&config.catalog_path).chain(config.volumes.iter().map(|v| &v.path))
     {
-        // Offline volumes still reserve their configured paths.
+        // Offline volumes still reserve their configured paths. A missing path
+        // cannot be canonicalized, so compare it in the form the config stores.
         let managed = match fs::canonicalize(managed) {
             Ok(path) => path,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => managed.clone(),
             Err(error) => return Err(io(error)),
         };
-        let managed_alias = PathBuf::from(managed.to_string_lossy().to_lowercase());
-        if source_alias.starts_with(&managed_alias) || managed_alias.starts_with(&source_alias) {
+        if crate::config::paths_overlap(&source, &managed) {
             return Err(Error::new(
                 "overlapping_vault_paths",
                 "local source must be outside the catalog and every vault volume",

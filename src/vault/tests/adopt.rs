@@ -420,6 +420,25 @@ fn source_must_not_overlap_any_managed_root() {
 }
 
 #[test]
+fn missing_managed_directory_inside_the_source_still_overlaps() {
+    let (dir, mut config) = setup();
+    let root = fs::canonicalize(dir.path()).unwrap();
+    let source = root.join("incoming");
+    fs::create_dir(&source).unwrap();
+    let missing = source.join("offline-volume");
+    assert!(!missing.exists());
+    let text = missing.to_string_lossy();
+    config.volumes.push(crate::config::Volume {
+        label: "offline".into(),
+        path: std::path::PathBuf::from(text.strip_prefix(r"\\?\").unwrap_or(text.as_ref())),
+    });
+    assert_eq!(
+        super::checked_source(&config, &source).unwrap_err().code,
+        "overlapping_vault_paths"
+    );
+}
+
+#[test]
 fn oversized_and_corrupt_license_evidence_is_rejected() {
     let (_dir, config) = setup();
     let sample = sample(true);
@@ -572,6 +591,21 @@ fn with_optional(sample: &mut Sample, path: &str, bytes: &[u8], present: bool) {
     sample.inventory.files.push(file);
 }
 
+fn point_directory(link: &std::path::Path, target: &std::path::Path) {
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(target, link).unwrap();
+    #[cfg(windows)]
+    {
+        let status = std::process::Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(link)
+            .arg(target)
+            .status()
+            .unwrap();
+        assert!(status.success(), "junction creation failed");
+    }
+}
+
 fn manifest_for(config: &Config, plan: &str) -> String {
     let catalog = super::super::open_catalog(config, false).unwrap();
     catalog
@@ -698,6 +732,14 @@ fn present_optional_files_are_copied_and_damage_does_not_publish() {
     );
     assert!(manifest_for(&config, &plan).contains("README.md"));
 
+    fs::remove_file(adopted.path.join("README.md")).unwrap();
+    let error = adopt(&config, &plan, &sample.download, true, &mut |_, _, _, _| {}).unwrap_err();
+    assert_eq!(error.code, "destination_conflict");
+    assert!(error.message.contains("recorded custody manifest"));
+    assert!(sample.download.join("README.md").exists());
+    assert!(sample.download.join("model.safetensors").exists());
+    assert!(manifest_for(&config, &plan).contains("README.md"));
+
     let (_dir, config) = setup();
     let mut sample = self::sample(true);
     with_optional(&mut sample, "README.md", b"optional readme", true);
@@ -736,6 +778,62 @@ fn present_optional_files_are_copied_and_damage_does_not_publish() {
     };
     assert!(report.message.contains("model.safetensors missing"));
     assert!(!publish_dir(&config.volumes[0].path, "example/model", COMMIT).exists());
+}
+
+#[test]
+fn preserved_directory_link_is_not_published() {
+    let (dir, config) = setup();
+    let sample = sample(true);
+    let plan = stored(&config, &sample);
+    let outside = dir.path().join("outside");
+    fs::create_dir_all(&outside).unwrap();
+    point_directory(&config.volumes[0].path.join("preserved"), &outside);
+    let error = adopt(&config, &plan, &sample.download, true, &mut |_, _, _, _| {}).unwrap_err();
+    assert_eq!(error.code, "unsafe_vault_path");
+    assert!(sample.download.join("model.safetensors").exists());
+    assert!(sample.download.join("LICENSE").exists());
+    assert_eq!(fs::read_dir(&outside).unwrap().count(), 0);
+}
+
+#[test]
+fn leftover_partial_is_not_published() {
+    let (_dir, config) = setup();
+    let mut sample = sample(true);
+    with_optional(&mut sample, "README.md", b"optional readme", true);
+    let plan = stored(&config, &sample);
+    let volume = config.volumes[0].path.clone();
+    let error = adopt_stopping(
+        &config,
+        &plan,
+        &sample.download,
+        false,
+        &mut |_, _, _, _| {},
+        Some(1),
+    )
+    .unwrap_err();
+    assert_eq!(error.code, "adopt_interrupted");
+    let staging = volume.join(".modelprepper-adopt").join(&plan);
+    fs::write(staging.join("README.md.partial"), b"partial-bytes").unwrap();
+    fs::remove_file(sample.download.join("README.md")).unwrap();
+    let Outcome::Recorded(adopted) = adopt(
+        &config,
+        &plan,
+        &sample.download,
+        false,
+        &mut |_, _, _, _| {},
+    )
+    .unwrap() else {
+        panic!("resume should publish the frozen set without the partial");
+    };
+    assert!(!adopted.path.join("README.md").exists());
+    assert!(!adopted.path.join("README.md.partial").exists());
+    assert_eq!(
+        fs::read(adopted.path.join("model.safetensors")).unwrap(),
+        b"weights"
+    );
+    let manifest = manifest_for(&config, &plan);
+    assert!(!manifest.contains("partial"));
+    assert!(!manifest.contains("README.md"));
 }
 
 #[test]

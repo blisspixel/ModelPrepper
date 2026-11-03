@@ -40,7 +40,7 @@ pub fn verify_tree(
     inventory.validate()?;
     let root_meta = fs::symlink_metadata(root)
         .map_err(|error| Error::new("path_not_found", format!("{}: {error}", root.display())))?;
-    if root_meta.file_type().is_symlink() || !root_meta.is_dir() {
+    if link_or_reparse(&root_meta) || !root_meta.is_dir() {
         return Err(Error::new(
             "unsafe_path",
             "local model path must be a real directory",
@@ -162,6 +162,17 @@ pub(crate) fn file_status(
     })
 }
 
+fn link_or_reparse(meta: &fs::Metadata) -> bool {
+    let linked = meta.file_type().is_symlink();
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        linked || meta.file_attributes() & 0x400 != 0
+    }
+    #[cfg(not(windows))]
+    linked
+}
+
 pub(crate) fn local_path(root: &Path, rel: &str) -> std::path::PathBuf {
     rel.split('/')
         .fold(root.to_path_buf(), |path, part| path.join(part))
@@ -179,13 +190,7 @@ pub(crate) fn metadata_nofollow(root: &Path, rel: &str) -> Result<Option<fs::Met
                 return Err(Error::new("input_read_failed", format!("{rel}: {error}")));
             }
         };
-        let linked = meta.file_type().is_symlink();
-        #[cfg(windows)]
-        let linked = {
-            use std::os::windows::fs::MetadataExt;
-            linked || meta.file_attributes() & 0x400 != 0
-        };
-        if linked {
+        if link_or_reparse(&meta) {
             return Err(Error::new(
                 "unsafe_path",
                 format!("{rel} is a symlink or reparse point and was not followed"),
@@ -221,7 +226,9 @@ fn walk(root: &Path, dir: &Path, files: &mut Vec<String>) -> Result<()> {
             .map(|component| component.as_os_str().to_string_lossy())
             .collect::<Vec<_>>()
             .join("/");
-        if meta.file_type().is_symlink() || meta.is_file() {
+        // A directory junction is a directory and a reparse point. Record the
+        // link itself and do not list the tree it points at.
+        if link_or_reparse(&meta) || meta.is_file() {
             files.push(rel);
         } else if meta.is_dir() {
             walk(root, &path, files)?;
@@ -392,6 +399,61 @@ mod tests {
         assert!(seen.len() >= 2);
         assert_eq!(*seen.last().unwrap(), data.len() as u64);
         assert_eq!(hashed.sha256.len(), 64);
+    }
+
+    fn point_directory(link: &std::path::Path, target: &std::path::Path) {
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(target, link).unwrap();
+        #[cfg(windows)]
+        {
+            let status = std::process::Command::new("cmd")
+                .args(["/C", "mklink", "/J"])
+                .arg(link)
+                .arg(target)
+                .status()
+                .unwrap();
+            assert!(status.success(), "junction creation failed");
+        }
+    }
+
+    #[test]
+    fn directory_links_are_not_walked_or_accepted_as_the_root() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().join("model");
+        let outside = tmp.path().join("outside");
+        fs::create_dir_all(&root).unwrap();
+        fs::create_dir_all(&outside).unwrap();
+        fs::write(outside.join("secret.txt"), b"secret").unwrap();
+        fs::write(root.join("model.safetensors"), b"weights").unwrap();
+        fs::write(root.join("LICENSE"), b"license").unwrap();
+        point_directory(&root.join("escape"), &outside);
+        let good = inventory(vec![
+            file("model.safetensors", b"weights", HashAlgorithm::Sha256, true),
+            file("LICENSE", b"license", HashAlgorithm::GitSha1, true),
+        ]);
+        let report = verify_tree(&good, &root, &mut |_, _, _| {}).unwrap();
+        assert!(report.ok, "{report:?}");
+        assert!(
+            report
+                .files
+                .iter()
+                .all(|item| !item.path.contains("secret"))
+        );
+        assert!(
+            report
+                .files
+                .iter()
+                .any(|item| item.path == "escape" && item.status == "extra")
+        );
+        let linked_root = tmp.path().join("linked-root");
+        point_directory(&linked_root, &root);
+        assert_eq!(
+            verify_tree(&good, &linked_root, &mut |_, _, _| {})
+                .unwrap_err()
+                .code,
+            "unsafe_path"
+        );
+        assert_eq!(fs::read(outside.join("secret.txt")).unwrap(), b"secret");
     }
 
     struct ChunkWatch<'a> {

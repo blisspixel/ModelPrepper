@@ -70,6 +70,16 @@ fn http_errors_do_not_disclose_signed_urls() {
             3,
             "unexpected_encoding",
         ),
+        (
+            response(403, "Content-Encoding: gzip\r\n", b"secret"),
+            10,
+            "source_status",
+        ),
+        (
+            response(200, "Content-Encoding: Identity\r\n", b"abc"),
+            3,
+            "ok",
+        ),
         (response(302, "", b""), 3, "invalid_redirect"),
         (
             response(302, "Location: https://evil.example/?secret=token\r\n", b""),
@@ -90,9 +100,15 @@ fn http_errors_do_not_disclose_signed_urls() {
     ] {
         let server = Server::new(vec![reply]);
         let url = Url::parse(&format!("{}/?secret=token", server.origin)).unwrap();
-        let error = Http::fixture(&server.origin).get(&url, limit).unwrap_err();
-        assert_eq!(error.code, code);
-        assert!(!error.message.contains("token"));
+        let result = Http::fixture(&server.origin).get(&url, limit);
+        if code == "ok" {
+            assert_eq!(result.unwrap(), b"abc");
+        } else {
+            let error = result.unwrap_err();
+            assert_eq!(error.code, code);
+            assert!(!error.message.contains("token"));
+            assert!(!error.message.contains("secret"));
+        }
         server.finish();
     }
     let server = Server::new(vec![response(302, "Location: /again\r\n", b""); 6]);
@@ -227,4 +243,24 @@ fn expired_redirect_locations_are_refreshed_from_the_original_url_once() {
     assert_eq!(error.code, "redirect_limit");
     assert!(!error.message.contains("sig"));
     assert_eq!(server.finish().len(), 8);
+
+    let server = Server::new(vec![
+        response(302, "Location: /cdn?sig=same-secret\r\n", b""),
+        response(403, "Content-Encoding: gzip\r\n", b"sig=same-secret"),
+        response(302, "Location: /cdn?sig=same-secret\r\n", b""),
+    ]);
+    let url = Url::parse(&format!("{}{path}", server.origin)).unwrap();
+    let error = Http::fixture(&server.origin).get(&url, 3).unwrap_err();
+    assert_eq!(error.code, "source_status");
+    assert!(!error.message.contains("sig"));
+    let requests = server.finish();
+    assert_eq!(requests.len(), 3);
+    assert_eq!(
+        requests
+            .iter()
+            .filter(|request| request.contains("sig=same-secret"))
+            .count(),
+        1
+    );
+    assert_no_credentials(&requests);
 }

@@ -575,6 +575,44 @@ fn expired_payload_location_refreshes_once_without_changing_identity_or_charge()
 }
 
 #[test]
+fn repeated_rejected_location_is_not_requested_or_stored() {
+    let (_temp, path) = root();
+    let mut session = StagingSession::create(&path, &source(), &expected()).unwrap();
+    let identity = session.checkpoint().unwrap().identity.clone();
+    let server = Server::new(vec![
+        response(302, "Location: /cdn?sig=same-secret\r\n", b""),
+        response(403, "Content-Encoding: gzip\r\n", b"sig=same-secret"),
+        response(302, "Location: /cdn?sig=same-secret\r\n", b""),
+    ]);
+    let error = session
+        .stage_with(&Http::fixture(&server.origin), &server.origin, 6)
+        .unwrap_err();
+    assert_eq!(error.code, "payload_location_rejected");
+    assert!(!error.message.contains("sig"));
+    let requests: Vec<String> = server
+        .finish_measured()
+        .into_iter()
+        .map(|exchange| exchange.request)
+        .collect();
+    assert_eq!(requests.len(), 3);
+    assert_eq!(
+        requests
+            .iter()
+            .filter(|request| request.contains("sig=same-secret"))
+            .count(),
+        1
+    );
+    assert_eq!(session.spent_bytes().unwrap(), 6);
+    assert_eq!(session.checkpoint().unwrap().identity, identity);
+    assert_eq!(session.checkpoint().unwrap().bytes, 0);
+    assert!(contents(&mut session.file).is_empty());
+    assert!(
+        !String::from_utf8_lossy(&fs::read(path.join("checkpoint.sqlite3")).unwrap())
+            .contains("sig=")
+    );
+}
+
+#[test]
 fn rejected_or_substituted_refresh_keeps_the_charge_and_the_pinned_identity() {
     let canonical = canonical_path();
     for (replies, code) in [
