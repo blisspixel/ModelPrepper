@@ -22,6 +22,7 @@ fn native_cli_reports_version_help_and_argument_failures() {
         vec!["--help"],
         vec!["config", "--help"],
         vec!["plan", "--help"],
+        vec!["readiness", "--help"],
         vec!["resolve", "--help"],
         vec!["init", "--help"],
         vec!["status", "--help"],
@@ -584,4 +585,89 @@ fn offline_text_view_names_a_verdict_for_each_local_command() {
             CommandOutput::Json(value) => panic!("{value}"),
         }
     }
+}
+
+#[test]
+fn readiness_text_and_json_agree_and_do_not_create_or_execute() {
+    let dir = TempDir::new().unwrap();
+    let model = dir.path().join("model");
+    fs::create_dir(&model).unwrap();
+    for (name, bytes) in [
+        ("config.json", b"{}".as_slice()),
+        ("tokenizer.json", br#"{"v":1}"#.as_slice()),
+        ("model.safetensors", b"weights".as_slice()),
+        ("chat_template.jinja", b"{{ content }}".as_slice()),
+    ] {
+        fs::write(model.join(name), bytes).unwrap();
+    }
+    let recipe = dir.path().join("recipe.json");
+    fs::write(
+        &recipe,
+        r#"{
+  "schema_version": 1,
+  "profile": "publisher-safetensors-text-v1",
+  "model": {
+    "endpoint": "https://huggingface.co",
+    "repo_id": "example/model",
+    "resolved_revision": "0123456789abcdef0123456789abcdef01234567",
+    "files": [
+      {"path": "config.json", "role": "config", "capability": "text-generation", "need": "required", "retention": "retained", "size_bytes": 2, "sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"},
+      {"path": "tokenizer.json", "role": "tokenizer", "capability": "text-generation", "need": "required", "retention": "retained", "size_bytes": 7, "sha256": "afbf9d0f3560b0fd7795e81c42a0a79ee6b6fc67e064f77826aee642cad28d91"},
+      {"path": "model.safetensors", "role": "weight", "capability": "text-generation", "need": "required", "retention": "retained", "size_bytes": 7, "sha256": "9a129038d9a00aed0cf6a7ea059ca50a813449061ab87848cf1a13eafdf33b2c"},
+      {"path": "chat_template.jinja", "role": "template", "capability": "text-generation", "need": "required", "retention": "retained", "size_bytes": 13, "sha256": "52ed09e8448c395a40c52b4d91dc1818070d481a6afd2354b2653956dbf2dfc5"}
+    ]
+  },
+  "capabilities": ["text-generation"],
+  "runtime": {"name": "transformers", "version": "4.55.2", "os": "any", "arch": "any", "artifact": {"retention": "named", "locator": "transformers==4.55.2"}},
+  "rights": {"status": "matched", "license_id": "apache-2.0"}
+}"#,
+    )
+    .unwrap();
+    let before = fs::read_dir(&model).unwrap().count();
+    let json = binary(&[
+        "readiness",
+        "--recipe",
+        recipe.to_str().unwrap(),
+        "--path",
+        model.to_str().unwrap(),
+    ]);
+    assert!(json.status.success(), "{json:?}");
+    let value: serde_json::Value = serde_json::from_slice(&json.stdout).unwrap();
+    assert_eq!(value["mode"], "offline-preflight");
+    assert_eq!(value["offline_readiness"], "untested");
+    assert_eq!(value["integrity"], "matched");
+    assert_eq!(value["runtime_retention"], "named");
+    assert_eq!(value["network_contact"], false);
+    assert_eq!(value["executed"], false);
+    assert_eq!(value["vault_mutated"], false);
+    assert_eq!(value["transfer_authorized"], false);
+    let text = Command::new(env!("CARGO_BIN_EXE_modelprepper"))
+        .env("MODELPREPPER_TEXT", "1")
+        .args([
+            "readiness",
+            "--recipe",
+            recipe.to_str().unwrap(),
+            "--path",
+            model.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(text.status.success(), "{text:?}");
+    let body = String::from_utf8(text.stdout).unwrap();
+    for needle in ["untested", "matched", "named", "declared_matched", "next:"] {
+        assert!(body.contains(needle), "{needle} missing from {body}");
+    }
+    assert_eq!(fs::read_dir(&model).unwrap().count(), before);
+    let absent = dir.path().join("absent");
+    let missing = binary(&[
+        "readiness",
+        "--recipe",
+        recipe.to_str().unwrap(),
+        "--path",
+        absent.to_str().unwrap(),
+    ]);
+    assert!(missing.status.success(), "{missing:?}");
+    let missing: serde_json::Value = serde_json::from_slice(&missing.stdout).unwrap();
+    assert_eq!(missing["availability"], "unavailable");
+    assert!(!absent.exists());
 }

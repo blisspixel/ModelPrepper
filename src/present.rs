@@ -171,6 +171,10 @@ fn next_for(error: &Error) -> String {
             "choose a catalog directory and a volume directory that do not overlap".into()
         }
         "invalid_config" => "modelprepper config check --config <file>".into(),
+        "invalid_recipe" | "unsupported_profile" | "unsupported_source" => {
+            "use a publisher-safetensors-text-v1 recipe; named and remote artifacts are not retained packages".into()
+        }
+        "unsupported_schema" => "use readiness recipe schema_version 1".into(),
         "invalid_usage" => "modelprepper --help".into(),
         "license_needs_review" => "review the license text, then propose the commit again".into(),
         "proposal_not_pending" | "invalid_proposal" => {
@@ -510,6 +514,39 @@ pub fn render_plan(plan: &crate::plan::Plan, color: bool, columns: usize) -> Str
         ),
         field(columns, "blockers", &blockers),
         next_line(color, columns, "this preview cannot authorize a transfer"),
+    ]
+    .join("\n")
+}
+
+pub fn render_readiness(report: &crate::readiness::Report, color: bool, columns: usize) -> String {
+    let code = match report.offline_readiness {
+        "failed" => RED,
+        "load_passed" | "task_passed" => GREEN,
+        _ => YELLOW,
+    };
+    let files = report
+        .capabilities
+        .iter()
+        .map(|capability| format!("{} {}", capability.id, capability.closure))
+        .collect::<Vec<_>>()
+        .join(", ");
+    [
+        verdict(color, columns, code, report.offline_readiness, ""),
+        field(
+            columns,
+            "repo",
+            &format!(
+                "{} @ {}",
+                report.repo_id,
+                short_id(&report.resolved_revision)
+            ),
+        ),
+        field(columns, "integrity", report.integrity),
+        field(columns, "files", &files),
+        field(columns, "runtime", report.runtime_retention),
+        field(columns, "rights", report.rights),
+        field(columns, "disk", report.availability),
+        next_line(color, columns, &report.next),
     ]
     .join("\n")
 }
@@ -1164,6 +1201,10 @@ mod tests {
             "destination_conflict",
             "source_remove_failed",
             "selection_changed",
+            "invalid_recipe",
+            "unsupported_profile",
+            "unsupported_source",
+            "unsupported_schema",
         ] {
             let text = error_text(&Error::new(code, "details"), false, 80);
             assert!(text.starts_with("error:"), "{code}: {text}");

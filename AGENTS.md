@@ -28,7 +28,7 @@ Work in this repository may come from several agent tools, and a session can end
 
 ## Invariants
 
-Keep these states distinct: an untrusted preview, a source review, transfer authorization, an upstream-verified local adoption, a downloaded seal, and demonstrated offline usability. Adoption provenance `upstream-verified (local source)` is not a downloaded seal and does not prove a model runs offline.
+Keep these states distinct: an untrusted preview, a source review, transfer authorization, an upstream-verified local adoption, a downloaded seal, and demonstrated offline usability. Adoption provenance `upstream-verified (local source)` is not a downloaded seal and does not prove a model runs offline. `readiness` reports a local recipe. It does not run a model, and a drill note in that recipe is prior evidence, not a new demonstration.
 
 Keep the source directory outside the catalog and every vault volume. A changed source must not be deleted. Move and retry checks are documented in [contracts](docs/contracts.md); they are not an atomic multi-file transaction.
 

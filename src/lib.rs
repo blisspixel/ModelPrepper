@@ -10,6 +10,7 @@ pub mod inventory;
 pub mod licenses;
 pub mod plan;
 mod present;
+mod readiness;
 mod runtime;
 pub mod transfer;
 pub mod validation;

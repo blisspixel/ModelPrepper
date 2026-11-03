@@ -230,6 +230,15 @@ pub enum PreviewCommand {
         #[arg(long)]
         available_bytes: u64,
     },
+    /// Read a local recipe and report offline readiness.
+    Readiness {
+        /// Versioned runtime recipe JSON. Unknown schema versions are rejected.
+        #[arg(long)]
+        recipe: PathBuf,
+        /// Directory of retained model files. A missing directory is reported and not created.
+        #[arg(long)]
+        path: PathBuf,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -456,6 +465,13 @@ pub fn execute_in(cli: Cli, view: View) -> Result<CommandOutput> {
             let plan = build_plan(&config, &inventory, available_bytes)?;
             show(&view, &plan, true, |plan| {
                 crate::present::render_plan(plan, view.color, view.columns)
+            })
+        }
+        Command::Preview(PreviewCommand::Readiness { recipe, path }) => {
+            let recipe = crate::readiness::Recipe::parse(&read_text(&recipe)?)?;
+            let report = crate::readiness::preflight(&recipe, &path)?;
+            show(&view, &report, true, |report| {
+                crate::present::render_readiness(report, view.color, view.columns)
             })
         }
     }
