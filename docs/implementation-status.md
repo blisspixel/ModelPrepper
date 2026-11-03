@@ -1,6 +1,6 @@
 # Implementation status
 
-This records executable behavior and evidence as of October 21, 2026. It does not mark the preservation roadmap complete.
+This records executable behavior and evidence as of November 2, 2026. It does not mark the preservation roadmap complete.
 
 ## Executable features
 
@@ -11,7 +11,7 @@ This records executable behavior and evidence as of October 21, 2026. It does no
 | status | Offline catalog and mounted identity check, actual free bytes, and preserved local copies. | No downloaded bundles, jobs, reservations, replicas, or relocation yet. |
 | resolve | Moving ref followed by pinned metadata; verified license/config/index bytes. GGUF-only repos report layout `gguf-v1`. | Public ungated models only; no payload download or approval. |
 | verify-local / adopt | Read-only hash against a resolved commit, then copy or move the frozen matched set. Absent optional files are exclusions. Provenance is `upstream-verified (local source)`. | Not a download and not a local-baseline import. License evidence must already match. |
-| local list | Read-only Ollama manifest inventory. Coverage is unchecked, none, partial, or fully recorded. | A catalog match is historical byte identity, not a fresh hash or an offline run. Does not import blobs or call the Ollama API. |
+| local list | Read-only Ollama manifest inventory. Coverage is unchecked, none, partial, or fully recorded. Symlinks and Windows reparse points are skipped. | A catalog match is historical byte identity, not a fresh hash or an offline run. Does not import blobs or call the Ollama API. |
 | propose / proposals / decide | Durable evidence/volume binding, paginated offline inspection, idempotent rejection, schema-1 migration. | Approval is blocked until transfer bounds and accounting qualify. |
 | plan | Canonical preview from local inventory, file selection and blockers. | Always untrusted, never persisted or authorized. |
 | Integrity library | Bounded-memory Git blob/LFS verification plus local SHA-256. | Transfer writer and durable manifest integration are next. |
@@ -29,7 +29,7 @@ An optional Omarchy presence chip in [plugins/omarchy-presence](../plugins/omarc
 - Vault fixtures exercise competing writer ownership, stable IDs, unrelated data rejection, all-volume preflight, interrupted marker publication, missing/substituted disks, schema/configuration drift, and Windows junctions.
 - Source-review fixtures cover restart persistence, policy changes, exact decisions, offline disks, corruption, pagination, and identity-preserving migration. Native installer fixtures cover verification, version mismatch, archive path rejection, retained configuration, and upgrades.
 - A Windows release builds with bundled SQLite and Rust TLS. Import inspection finds only OS DLLs.
-- Offline fixtures for the optional Omarchy presence projection cover mounted, offline, missing, and replaced disks, writer contention, invalid and malformed status, missing executables, hostile paths, timeouts, stale snapshots, a changed config, a capped read that still opens a waiting inspection, and an inspection transcript that does not replace the snapshot. They check the launched arguments. They do not run `qmllint` or an Omarchy session.
+- Offline fixtures for the optional Omarchy presence projection cover mounted, offline, missing, and replaced disks, writer contention, invalid and malformed status, missing executables, hostile paths, timeouts, stale snapshots, a changed config, a capped read that still opens a waiting inspection, and an inspection transcript, timeout, or output cap that does not replace the snapshot or clear a failed status. They check the launched arguments. They do not run `qmllint` or an Omarchy session.
 - Live source inspection pins SmolLM2-135M-Instruct at 12fd25f77366fa6b3b4b768ec3050bf629380bac. Configuration bytes verify; missing license text remains unreviewed despite the Apache tag. No weights were fetched.
 - A second release inspection pins Qwen2.5-0.5B-Instruct at 7ae557604adf67be50417f59c2c2f167def9a775. License/config/tokenizer configuration bytes verify, and the Apache template with its filled appendix copyright matches. Transfer authorization remains false; no weights were fetched.
 

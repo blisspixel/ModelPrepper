@@ -125,14 +125,19 @@ pub fn clap_text(message: &str, color: bool, columns: usize) -> String {
     )
 }
 
+fn reported_path(message: &str) -> &str {
+    // The separator is ": " after the path. A drive letter has no space after
+    // its colon, so the first colon is not the end of a Windows path.
+    message
+        .rsplit_once(": ")
+        .map(|(path, _)| path)
+        .unwrap_or(message)
+        .trim()
+}
+
 fn friendly(error: &Error) -> String {
     if error.code == "input_read_failed" && is_missing(&error.message) {
-        let path = error
-            .message
-            .split(':')
-            .next()
-            .unwrap_or(error.message.as_str())
-            .trim();
+        let path = reported_path(&error.message);
         return format!("cannot read {path} (file not found)");
     }
     error
@@ -155,12 +160,8 @@ fn is_missing(message: &str) -> bool {
 fn next_for(error: &Error) -> String {
     match error.code {
         "input_read_failed" if is_missing(&error.message) => {
-            let path = error
-                .message
-                .split(':')
-                .next()
-                .unwrap_or("config.toml")
-                .trim();
+            let path = reported_path(&error.message);
+            let path = if path.is_empty() { "config.toml" } else { path };
             format!("modelprepper config init --output {path} --catalog <dir> --volume <dir>")
         }
         "config_write_failed" => {
@@ -540,7 +541,7 @@ pub fn render_runtime(report: &RuntimeInventory, color: bool, columns: usize) ->
     lines.join("\n")
 }
 
-pub struct ProgressLine<W> {
+pub struct ProgressLine<W: Write> {
     out: W,
     terminal: bool,
     quiet: bool,
@@ -552,6 +553,8 @@ pub struct ProgressLine<W> {
     last_paint: Option<Instant>,
     file_started: Instant,
     active: String,
+    /// A terminal live line was written with a carriage return and no newline.
+    open_line: bool,
 }
 
 impl ProgressLine<io::Stderr> {
@@ -574,6 +577,7 @@ impl<W: Write> ProgressLine<W> {
             last_paint: None,
             file_started: Instant::now(),
             active: String::new(),
+            open_line: false,
         }
     }
 
@@ -618,10 +622,12 @@ impl<W: Write> ProgressLine<W> {
             self.last_paint = Some(now);
             let line = self.live_line(path, done, total, now);
             let _ = write!(self.out, "\r{line}\x1b[K");
+            self.open_line = true;
             if finished {
                 let name = shorten_middle(file_name(path), 30);
                 let result = clip(&format!("ok  {name}  {}", human_pair(total)), self.columns);
                 let _ = write!(self.out, "\r{result}\x1b[K\n");
+                self.open_line = false;
             }
             let _ = self.out.flush();
             return;
@@ -686,9 +692,21 @@ impl<W: Write> ProgressLine<W> {
     fn emit_plain(&mut self, line: &str, cr: bool) {
         if cr {
             let _ = write!(self.out, "\r{line}\x1b[K\n");
+            self.open_line = false;
         } else {
             let _ = writeln!(self.out, "{line}");
         }
+        let _ = self.out.flush();
+    }
+}
+
+impl<W: Write> Drop for ProgressLine<W> {
+    fn drop(&mut self) {
+        if !self.open_line {
+            return;
+        }
+        self.open_line = false;
+        let _ = writeln!(self.out);
         let _ = self.out.flush();
     }
 }
@@ -741,6 +759,20 @@ mod tests {
         assert!(text.contains("next: modelprepper config init --output nope.toml"));
         assert!(!text.contains("os error"));
         assert!(!text.contains('\u{1b}'));
+        let windows = Error::new(
+            "input_read_failed",
+            r"C:\missing.toml: The system cannot find the file specified. (os error 2)",
+        );
+        let windows_text = error_text(&windows, false, 120);
+        assert!(
+            windows_text.contains(r"cannot read C:\missing.toml (file not found)"),
+            "{windows_text}"
+        );
+        assert!(
+            windows_text.contains(r"next: modelprepper config init --output C:\missing.toml"),
+            "{windows_text}"
+        );
+        assert!(!windows_text.contains("cannot read C "), "{windows_text}");
         let colored = error_text(&error, true, 80);
         assert!(colored.contains("\u{1b}[31merror\u{1b}[0m"));
     }
@@ -767,7 +799,7 @@ mod tests {
                 100,
             );
         }
-        let text = String::from_utf8(terminal.out).unwrap();
+        let text = String::from_utf8(terminal.out.clone()).unwrap();
         assert_eq!(text.matches("ok  ").count(), 4, "{text}");
         assert!(text.contains('\r'), "{text}");
         for line in text.split(['\n', '\r']) {
@@ -784,7 +816,7 @@ mod tests {
             log.render(start, "copying", "weights.bin", step, 100);
         }
         log.render(start, "recording", "catalog", 1, 1);
-        let log_text = String::from_utf8(log.out).unwrap();
+        let log_text = String::from_utf8(log.out.clone()).unwrap();
         assert!(!log_text.contains('\r'), "{log_text}");
         assert!(log_text.contains("recording  catalog"));
         let hashing = log_text
@@ -792,6 +824,32 @@ mod tests {
             .filter(|line| !line.starts_with("recording"))
             .count();
         assert!(hashing <= 11, "{hashing}");
+    }
+
+    #[test]
+    fn unfinished_terminal_progress_closes_before_the_next_line() {
+        #[derive(Clone)]
+        struct Shared(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
+        impl Write for Shared {
+            fn write(&mut self, data: &[u8]) -> io::Result<usize> {
+                self.0
+                    .lock()
+                    .expect("progress buffer")
+                    .extend_from_slice(data);
+                Ok(data.len())
+            }
+            fn flush(&mut self) -> io::Result<()> {
+                Ok(())
+            }
+        }
+        let buffer = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let mut line = ProgressLine::new(Shared(buffer.clone()), true, false, 80, 1);
+        line.render(Instant::now(), "verifying", "weights.bin", 40, 100);
+        drop(line);
+        let text = String::from_utf8(buffer.lock().expect("progress buffer").clone()).unwrap();
+        assert!(text.contains('\r'), "{text}");
+        assert!(text.ends_with('\n'), "{text:?}");
+        assert!(!text.contains("ok  "), "{text}");
     }
 
     #[test]
@@ -1136,7 +1194,7 @@ mod tests {
         );
         let mut terminal = ProgressLine::new(Vec::<u8>::new(), true, false, 80, 1);
         terminal.render(start, "recording", "catalog", 1, 1);
-        let shown = String::from_utf8(terminal.out).unwrap();
+        let shown = String::from_utf8(terminal.out.clone()).unwrap();
         assert!(shown.contains("recording  catalog"), "{shown}");
         assert!(shown.contains('\r'), "{shown}");
     }

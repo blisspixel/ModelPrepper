@@ -206,6 +206,16 @@ impl Config {
         }
         let mut locations = vec![self.catalog_path.clone()];
         locations.extend(self.volumes.iter().map(|volume| volume.path.clone()));
+        if locations.iter().any(|path| {
+            path.to_string_lossy()
+                .split(['/', '\\'])
+                .any(|part| matches!(part, "." | ".."))
+        }) {
+            return Err(Error::new(
+                "unsafe_vault_path",
+                "vault paths cannot contain dot segments",
+            ));
+        }
         for (index, path) in locations.iter().enumerate() {
             for other in &locations[index + 1..] {
                 let left = PathBuf::from(path.to_string_lossy().to_lowercase());

@@ -570,20 +570,19 @@ function streamText(value) {
     return typeof value === "string" ? value : ""
 }
 
-function withinCap(event) {
-    return streamText(event.stdout).length <= OUTPUT_CAP && streamText(event.stderr).length <= OUTPUT_CAP
-}
-
 // Open inspection is the canonical text command. Its stdout is a pipe, so the
 // CLI may return JSON, and a terminal would return text. Either result is a
 // transcript. It is not a new disk projection, and text must not look malformed.
-function inspectFinished(kind, event) {
-    return kind === "inspect"
-        && event
-        && !event.spawnError
-        && typeof event.exitCode === "number"
-        && event.exitCode === 0
-        && withinCap(event)
+// A transcript also must not clear or replace the status failure that dimmed
+// the last snapshot.
+function noteInspect(session, event) {
+    var stdout = streamText(event.stdout)
+    var stderr = streamText(event.stderr)
+    var text = stdout.length > OUTPUT_CAP || stderr.length > OUTPUT_CAP
+        ? "status output exceeded the cap"
+        : trim(stdout || stderr)
+    session.transcript = clipTranscript(text)
+    return session
 }
 
 function noteResult(session, event) {
@@ -594,12 +593,8 @@ function noteResult(session, event) {
     var kind = session.inFlight.kind
     session = cloneSession(session)
     session.inFlight = null
-    if (inspectFinished(kind, event)) {
-        session.failure = null
-        session.transcript = clipTranscript(trim(streamText(event.stdout) || streamText(event.stderr)))
-    } else {
-        session = applyOutput(session, event)
-    }
+    if (kind === "inspect" && !event.spawnError) session = noteInspect(session, event)
+    else session = applyOutput(session, event)
     if (!session.enabled) {
         session.pendingPoll = false
         session.pendingForce = false
@@ -615,30 +610,42 @@ function noteResult(session, event) {
     return finish(session, now, null, false)
 }
 
-function timeoutFlight(session, generation, now) {
-    if (!session.inFlight || session.inFlight.generation !== generation) {
-        return finish(session, now, null, true)
-    }
+function stopFlight(session, generation, now) {
+    if (!session.inFlight || session.inFlight.generation !== generation) return null
+    var kind = session.inFlight.kind
     session = cloneSession(session)
     session.inFlight = null
     session.generation = session.generation + 1
-    session.failure = makeFailure("timeout", "timeout", "status did not finish before the deadline", "")
     session.pendingPoll = false
+    return { session: session, kind: kind }
+}
+
+function timeoutFlight(session, generation, now) {
+    var stopped = stopFlight(session, generation, now)
+    if (!stopped) return finish(session, now, null, true)
+    session = stopped.session
+    // The inspection deadline is not a status result. Keep the snapshot and
+    // any failure that already dimmed it.
+    if (stopped.kind === "inspect") {
+        session.transcript = clipTranscript("inspection did not finish before the deadline")
+    } else {
+        session.failure = makeFailure("timeout", "timeout", "status did not finish before the deadline", "")
+    }
     if (session.pendingInspect && session.enabled) return start(session, now, "inspect")
     if (session.pendingForce && session.enabled) return start(session, now, "status")
     return finish(session, now, null, false)
 }
 
 function cappedFlight(session, generation, now) {
-    if (!session.inFlight || session.inFlight.generation !== generation) {
-        return finish(session, now, null, true)
+    var stopped = stopFlight(session, generation, now)
+    if (!stopped) return finish(session, now, null, true)
+    session = stopped.session
+    if (stopped.kind === "inspect") {
+        session.transcript = clipTranscript("status output exceeded the cap")
+    } else {
+        session.failure = makeFailure("output_capped", "malformed", "status output exceeded the cap", "")
+        session.transcript = ""
     }
-    session = cloneSession(session)
-    session.inFlight = null
-    session.generation = session.generation + 1
-    session.failure = makeFailure("output_capped", "malformed", "status output exceeded the cap", "")
-    session.transcript = ""
-    session.pendingPoll = false
     if (session.pendingInspect && session.enabled) return start(session, now, "inspect")
     if (session.pendingForce && session.enabled) return start(session, now, "status")
     return finish(session, now, null, false)

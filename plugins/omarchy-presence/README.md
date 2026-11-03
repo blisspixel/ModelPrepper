@@ -39,7 +39,7 @@ Copy and Open inspection use:
 
 Copy writes that list as JSON. It is not a shell command. Under Wayland, Quickshell's clipboard stays empty unless a shell window is focused.
 
-Open inspection runs the same list through Quickshell `Process.exec`, which does not invoke a shell. Its output is a transcript. It does not replace the last status snapshot, and a text transcript is not treated as malformed status.
+Open inspection runs the same list through Quickshell `Process.exec`, which does not invoke a shell. Its output is a transcript. It does not replace the last status snapshot, it does not clear a failed status, and a text transcript is not treated as malformed status. An inspection that hits the deadline or the output cap also leaves the snapshot and its failure in place.
 
 One operation runs at a time. A second monitor, a timer tick, or a click during that operation is coalesced into at most one follow-up. A capped or timed-out read still runs a waiting inspection. The next launch waits until the current exit signal has finished, so that exit cannot be recorded as the new read. Destroying the widget abandons a launch that has not reached the process.
 

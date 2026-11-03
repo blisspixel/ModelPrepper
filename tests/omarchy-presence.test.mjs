@@ -508,6 +508,126 @@ test('inspection waits for the current status read and uses the text argv', () =
   assert.equal(text.view.transcript.includes('primary mounted'), true);
 });
 
+test('inspection does not clear a failed status or parse its transcript as one', () => {
+  api.resetShared(0);
+  const first = api.sharedConfigure('modelprepper', '/vault/config.toml', true, 100);
+  const mounted = api.sharedResult({
+    generation: first.launch.generation,
+    now: 150,
+    exitCode: 0,
+    stdout: fixture('mounted.json'),
+    stderr: '',
+    spawnError: '',
+  });
+  const again = api.sharedTick(200, true);
+  const busy = api.sharedResult({
+    generation: again.launch.generation,
+    now: 250,
+    exitCode: 1,
+    stdout: '',
+    stderr: fixture('writer-busy.json'),
+    spawnError: '',
+  });
+  const opened = api.sharedInspect(260);
+  assert.equal(opened.launch.kind, 'inspect');
+  const transcript = api.sharedResult({
+    generation: opened.launch.generation,
+    now: 300,
+    exitCode: 0,
+    stdout: 'present\nprimary mounted\n',
+    stderr: '',
+    spawnError: '',
+  });
+  assert.equal(transcript.view.failureKind, 'writer_busy');
+  assert.equal(transcript.view.dimmed, true);
+  assert.equal(transcript.view.phase, 'failed');
+  assert.equal(transcript.view.chip, 'present');
+  assert.equal(transcript.view.capturedAt, 150);
+  assert.equal(transcript.view.transcript.includes('primary mounted'), true);
+
+  const direct = api.sharedInspect(320);
+  const text = api.sharedResult({
+    generation: direct.launch.generation,
+    now: 340,
+    exitCode: 1,
+    stdout: 'error: disk offline\nnext: modelprepper status --config /vault/config.toml\n',
+    stderr: '',
+    spawnError: '',
+  });
+  assert.equal(text.view.failureKind, 'writer_busy');
+  assert.equal(text.view.chip, 'present');
+  assert.equal(text.view.capturedAt, 150);
+  assert.equal(text.view.transcript.includes('disk offline'), true);
+  assert.equal(text.launch, null);
+
+  api.resetShared(0);
+  const clean = api.sharedConfigure('modelprepper', '/vault/config.toml', true, 400);
+  api.sharedResult({
+    generation: clean.launch.generation,
+    now: 450,
+    exitCode: 0,
+    stdout: fixture('mounted.json'),
+    stderr: '',
+    spawnError: '',
+  });
+  const inspect = api.sharedInspect(460);
+  const messy = api.sharedResult({
+    generation: inspect.launch.generation,
+    now: 470,
+    exitCode: 1,
+    stdout: 'error: disk offline\n',
+    stderr: '',
+    spawnError: '',
+  });
+  assert.equal(messy.view.failureKind, '');
+  assert.equal(messy.view.dimmed, false);
+  assert.equal(messy.view.chip, 'present');
+  assert.equal(messy.view.capturedAt, 450);
+  assert.equal(messy.view.transcript.includes('disk offline'), true);
+});
+
+test('inspection timeout and output cap leave the status failure in place', () => {
+  api.resetShared(0);
+  const first = api.sharedConfigure('modelprepper', '/vault/config.toml', true, 100);
+  api.sharedResult({
+    generation: first.launch.generation,
+    now: 150,
+    exitCode: 0,
+    stdout: fixture('mounted.json'),
+    stderr: '',
+    spawnError: '',
+  });
+  const again = api.sharedTick(200, true);
+  const busy = api.sharedResult({
+    generation: again.launch.generation,
+    now: 250,
+    exitCode: 1,
+    stdout: '',
+    stderr: fixture('writer-busy.json'),
+    spawnError: '',
+  });
+  assert.equal(busy.view.failureKind, 'writer_busy');
+  const opened = api.sharedInspect(260);
+  assert.equal(opened.launch.kind, 'inspect');
+  const timed = api.sharedTimeout(opened.launch.generation, 4_260);
+  assert.equal(timed.view.failureKind, 'writer_busy');
+  assert.equal(timed.view.chip, 'present');
+  assert.equal(timed.view.dimmed, true);
+  assert.equal(timed.view.phase, 'failed');
+  assert.equal(timed.view.capturedAt, 150);
+  assert.equal(timed.view.transcript.includes('deadline'), true);
+  assert.equal(timed.launch, null);
+
+  const reopen = api.sharedInspect(4_300);
+  const capped = api.sharedCapped(reopen.launch.generation, 4_400);
+  assert.equal(capped.view.failureKind, 'writer_busy');
+  assert.equal(capped.view.chip, 'present');
+  assert.equal(capped.view.capturedAt, 150);
+  assert.equal(capped.view.transcript.includes('exceeded the cap'), true);
+  assert.equal(capped.view.transcript.length > 0, true);
+  assert.equal(capped.launch, null);
+});
+
 test('a capped status read still opens a waiting inspection', () => {
   api.resetShared(0);
   const first = api.sharedConfigure('modelprepper', '/vault/config.toml', true, 100);

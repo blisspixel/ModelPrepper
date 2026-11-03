@@ -350,6 +350,23 @@ fn overlapping_paths_fail_at_config_generation_and_check() {
         serde_json::from_slice::<serde_json::Value>(&check.stderr).unwrap()["error"]["code"],
         "overlapping_vault_paths"
     );
+    let dotted = dir.path().join("dotted.toml");
+    let created = binary(&[
+        "config",
+        "init",
+        "--output",
+        dotted.to_str().unwrap(),
+        "--catalog",
+        "./models",
+        "--volume",
+        "models",
+    ]);
+    assert!(!created.status.success(), "{created:?}");
+    assert!(!dotted.exists());
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&created.stderr).unwrap()["error"]["code"],
+        "unsafe_vault_path"
+    );
 }
 
 #[test]
