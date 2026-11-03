@@ -420,6 +420,25 @@ fn source_must_not_overlap_any_managed_root() {
 }
 
 #[test]
+fn missing_managed_directory_inside_the_source_still_overlaps() {
+    let (dir, mut config) = setup();
+    let root = fs::canonicalize(dir.path()).unwrap();
+    let source = root.join("incoming");
+    fs::create_dir(&source).unwrap();
+    let missing = source.join("offline-volume");
+    assert!(!missing.exists());
+    let text = missing.to_string_lossy();
+    config.volumes.push(crate::config::Volume {
+        label: "offline".into(),
+        path: std::path::PathBuf::from(text.strip_prefix(r"\\?\").unwrap_or(text.as_ref())),
+    });
+    assert_eq!(
+        super::checked_source(&config, &source).unwrap_err().code,
+        "overlapping_vault_paths"
+    );
+}
+
+#[test]
 fn oversized_and_corrupt_license_evidence_is_rejected() {
     let (_dir, config) = setup();
     let sample = sample(true);

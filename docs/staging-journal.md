@@ -21,7 +21,7 @@ For each segment:
 1. Read and validate the last committed checkpoint and its cumulative charge.
 2. Verify the committed prefix and reconcile any uncommitted tail using [staged recovery](staged-recovery.md). Discarding that tail does not reduce the charge.
 3. Add this segment's allowance to the journaled charge and commit that update before any payload request. A journal that cannot record the charge makes no request.
-4. Request a bounded range from the pinned resolve URL. If a redirect location returns 401 or 403, abandon that location and request the same original URL once more. A second rejection fails without writing a payload or disclosing the location. The allowance charged in step 3 covers the whole attempt, including that refresh. Write the accepted payload, sync it, and verify a complete file against its upstream identity. A refreshed body that does not match the pinned hash is rolled back and does not change the transfer-file identity.
+4. Request a bounded range from the pinned resolve URL. If a redirect location returns 401 or 403, abandon that location and request the same original URL once more. A later redirect back to that same location is not requested. A second rejection fails without writing a payload or disclosing the location. An encoded 401 or 403 remains a rejection. The allowance charged in step 3 covers the whole attempt, including that refresh. Write the accepted payload, sync it, and verify a complete file against its upstream identity. A refreshed body that does not match the pinned hash is rolled back and does not change the transfer-file identity.
 5. Transactionally commit the new length and prefix SHA-256. This update does not change the charge.
 6. Return success only after that checkpoint commit succeeds.
 

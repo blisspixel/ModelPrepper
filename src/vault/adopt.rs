@@ -507,18 +507,17 @@ fn checked_source(config: &Config, source: &Path) -> Result<PathBuf> {
     let source = fs::canonicalize(source)
         .map_err(|error| Error::new("path_not_found", format!("{}: {error}", source.display())))?;
     check_path(&source)?;
-    let source_alias = PathBuf::from(source.to_string_lossy().to_lowercase());
     for managed in
         std::iter::once(&config.catalog_path).chain(config.volumes.iter().map(|v| &v.path))
     {
-        // Offline volumes still reserve their configured paths.
+        // Offline volumes still reserve their configured paths. A missing path
+        // cannot be canonicalized, so compare it in the form the config stores.
         let managed = match fs::canonicalize(managed) {
             Ok(path) => path,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => managed.clone(),
             Err(error) => return Err(io(error)),
         };
-        let managed_alias = PathBuf::from(managed.to_string_lossy().to_lowercase());
-        if source_alias.starts_with(&managed_alias) || managed_alias.starts_with(&source_alias) {
+        if crate::config::paths_overlap(&source, &managed) {
             return Err(Error::new(
                 "overlapping_vault_paths",
                 "local source must be outside the catalog and every vault volume",
