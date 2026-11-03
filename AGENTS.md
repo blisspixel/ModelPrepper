@@ -6,6 +6,18 @@ This file routes work to the canonical documents. It does not replace them.
 
 Read [README](README.md) and [implementation status](docs/implementation-status.md) first, then [contracts](docs/contracts.md) and the matching gate in the [roadmap](docs/roadmap.md). Planned downloads, granted approvals, sealed bundles, replicas, and unattended maintenance are not implemented. Do not describe them as current behavior.
 
+## Start tidy, stop tidy
+
+Work in this repository may come from several agent tools, and a session can end partway through a task.
+
+- Check first. Before starting new work, run `git fetch --prune` and check `git worktree list`, local and remote branches, and open pull requests. Finish, merge, or park leftover work instead of starting a parallel attempt. Squash merges hide merged work from ancestry, so check pull request state, not only `git branch --merged`.
+- Checkpoint and hand off. Commit and push at meaningful checkpoints. Before stopping, leave a short handoff note in the pull request or commit message saying what is done and what is next.
+- Keep the tree clean. Test fixtures, scratch scripts, logs, and generated output go only in the designated test or temp locations, or in the gitignored `.agents/` directory. Do not leave throwaway files elsewhere in the tree. Remove scratch artifacts before finishing.
+- Keep branches short-lived. Merge promptly and delete branches after merge. Keep GitHub current: push finished work, update or close pull requests, and close finished issues.
+- Goal state. One `main` with CI passing. Do not leave `main` red, and do not leave work stranded on a side branch.
+- Remove only with evidence. Remove a worktree or branch only once its work is merged, contained in `main`, or pushed to the remote. Use a normal remove, never `--force`. Report anything uncertain instead of deleting it. Run `git worktree prune` for entries whose directories are gone.
+- Ask when unclear. If it is unclear whether leftover work should be finished, kept, or removed, or what the intended state is, stop and ask instead of guessing.
+
 ## Canonical code
 
 - Bounded publisher requests live in [src/http.rs](src/http.rs).
