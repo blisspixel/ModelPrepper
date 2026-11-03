@@ -427,10 +427,18 @@ pub fn preflight(recipe: &Recipe, path: &Path) -> Result<Report> {
     };
     let runtime_retention = match recipe.runtime.artifact.retention {
         Retention::Retained => {
-            let matched = findings.iter().any(|finding| {
-                finding.path == recipe.runtime.artifact.locator && finding.satisfied
-            });
-            if matched { "retained" } else { "missing" }
+            // The runtime finding is recorded after the model files. A shared
+            // path must use that later finding, not the model file's result.
+            match findings
+                .iter()
+                .rev()
+                .find(|finding| finding.path == recipe.runtime.artifact.locator)
+            {
+                Some(finding) if finding.satisfied => "retained",
+                Some(finding) if finding.unverified => "unverified",
+                Some(finding) if finding.damaged => "damaged",
+                _ => "missing",
+            }
         }
         Retention::Named => "named",
         Retention::Remote => "remote",
@@ -633,6 +641,10 @@ fn next_action(
     }
     if runtime_retention == "missing" {
         return "the retained runtime file is missing; do not treat that locator as a local package"
+            .into();
+    }
+    if runtime_retention == "unverified" {
+        return "the retained runtime file is larger than the ordinary hash limit and was not hashed"
             .into();
     }
     if runtime_retention != "retained" {
@@ -1849,6 +1861,37 @@ mod tests {
             incompatible.next.contains("architecture")
                 || incompatible.next.contains("operating system")
         );
+    }
+
+    #[test]
+    fn a_present_runtime_is_not_reported_missing() {
+        let (_temp, dir, mut recipe) = prepared_runtime();
+        let large = HASH_LIMIT + 1;
+        recipe.runtime.artifact.size_bytes = Some(large);
+        recipe.runtime.artifact.sha256 = Some("ab".repeat(32));
+        fs::File::create(dir.join("runtime.bin"))
+            .unwrap()
+            .set_len(large)
+            .unwrap();
+        let oversized = preflight(&recipe, &dir).unwrap();
+        assert_eq!(oversized.runtime_retention, "unverified");
+        assert_eq!(oversized.integrity, "not_checked");
+        assert_eq!(oversized.unverified_files, 1);
+        assert_eq!(oversized.capabilities[0].closure, "complete");
+        assert!(oversized.next.contains("not hashed"), "{}", oversized.next);
+        assert!(!oversized.next.contains("missing"), "{}", oversized.next);
+        recipe.recorded_drill = Some(matching_drill(&recipe, DrillResult::TaskPassed));
+        let drilled = preflight(&recipe, &dir).unwrap();
+        assert_eq!(drilled.runtime_retention, "unverified");
+        assert_eq!(drilled.offline_readiness, "stale");
+
+        let (_temp, dir, recipe) = prepared_runtime();
+        fs::write(dir.join("runtime.bin"), b"changed").unwrap();
+        let damaged = preflight(&recipe, &dir).unwrap();
+        assert_eq!(damaged.runtime_retention, "damaged");
+        assert_eq!(damaged.integrity, "damaged");
+        assert!(damaged.next.contains("does not match"), "{}", damaged.next);
+        assert!(!damaged.next.contains("missing"), "{}", damaged.next);
     }
 
     #[test]
