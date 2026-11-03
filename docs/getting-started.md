@@ -81,6 +81,7 @@ To retain pinned source evidence and record rejection, use the [source review wo
 | license_needs_review | Adoption will not store a commit whose license evidence did not match. |
 | access_restricted | Choose an authorized public source supported by this prototype. |
 | unreviewed or conflicting license | Inspect the original evidence. A tag alone cannot clear it. |
+| notice_present | The license text matched and a NOTICE file was captured. Read that file. It is not a match and not a conflict. |
 | invalid_range or invalid_checkpoint | The library experiment rejected inconsistent bytes/identity. No CLI download workflow uses it yet. |
 | transfer_backend_unqualified | A saved source review cannot be approved yet; durable transfer/accounting gates remain open. |
 | stale_policy | Propose a new review using the current configuration. |

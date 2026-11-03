@@ -41,6 +41,9 @@ pub enum EvidenceStatus {
     Unreviewed,
     Matched,
     Conflicting,
+    /// License text matched and a NOTICE file was captured. The notice prose
+    /// is not interpreted, so this is not a match and not a conflict.
+    NoticePresent,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]

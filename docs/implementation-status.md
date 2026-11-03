@@ -9,7 +9,7 @@ This records executable behavior and evidence as of November 3, 2026. It does no
 | config init/check | Exclusive config creation and strict validation. | No automatic configuration migration. |
 | init | Bundled local SQLite, writer lock, stable vault/disk UUIDs, empty-directory adoption. | Full power-loss recovery and filesystem qualification remain open. |
 | status | Offline catalog and mounted identity check, actual free bytes, and preserved local copies. | No downloaded bundles, jobs, reservations, replicas, or relocation yet. |
-| resolve | Moving ref followed by pinned metadata; verified license/config/index bytes. GGUF-only repos report layout `gguf-v1`. | Public ungated models only; no payload download or approval. |
+| resolve | Moving ref followed by pinned metadata; verified license/config/index bytes. GGUF-only repos report layout `gguf-v1`. A NOTICE beside matching license text is `notice_present`, not a conflict and not a match. | Public ungated models only; no payload download or approval. Notice prose is not interpreted. |
 | verify-local / adopt | Read-only hash against a resolved commit, then copy or move the frozen matched set. Absent optional files are exclusions. Provenance is `upstream-verified (local source)`. | Not a download and not a local-baseline import. License evidence must already match. |
 | local list | Read-only Ollama manifest inventory. Coverage is unchecked, none, partial, or fully recorded. Symlinks and Windows reparse points are skipped. | A catalog match is historical byte identity, not a fresh hash or an offline run. Does not import blobs or call the Ollama API. |
 | propose / proposals / decide | Durable evidence/volume binding, paginated offline inspection, idempotent rejection, schema-1 migration. | Approval is blocked until transfer bounds and accounting qualify. |
@@ -26,7 +26,7 @@ An optional Omarchy presence chip in [plugins/omarchy-presence](../plugins/omarc
 
 - Native Windows unit, CLI, contract, HTTP, integrity, and vault tests pass. Additional [validation drills](validation-drills.md) exercise abrupt process termination, the live NTFS test vault, and durable pinned-source decisions.
 - HTTP fixtures exercise bounded reads, interruptions, redirect trust, signed-URL redaction, bad status/encoding, access restrictions, source changes, and metadata disagreement.
-- Rights fixtures reject missing, changed, conflicting, and excessive evidence. Shard fixtures require exact index closure over selected weights.
+- Rights fixtures reject missing, changed, conflicting, and excessive evidence. A matching license beside a NOTICE is `notice_present` and is not adopted. Shard fixtures require exact index closure over selected weights.
 - Vault fixtures exercise competing writer ownership, stable IDs, unrelated data rejection, all-volume preflight, interrupted marker publication, missing/substituted disks, schema/configuration drift, Windows junctions, and verbatim path aliases.
 - Source-review fixtures cover restart persistence, policy changes, exact decisions, offline disks, corruption, pagination, and identity-preserving migration. Native installer fixtures cover verification, version mismatch, archive path rejection, retained configuration, and upgrades.
 - A Windows release builds with bundled SQLite and Rust TLS. Import inspection finds only OS DLLs.

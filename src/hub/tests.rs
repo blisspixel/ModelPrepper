@@ -187,14 +187,62 @@ fn missing_changed_or_conflicting_licenses_never_match() {
         .as_array_mut()
         .unwrap()
         .push(sibling("NOTICE", b"notice"));
+    let captured = inspect(
+        &notice,
+        vec![
+            licenses::MIT.as_bytes().to_vec(),
+            b"notice".to_vec(),
+            config.clone(),
+        ],
+    )
+    .unwrap();
+    assert_eq!(
+        captured.inventory.license.status,
+        EvidenceStatus::NoticePresent
+    );
+    assert!(captured.evidence.iter().any(|item| {
+        item.path == "NOTICE" && item.text == "notice" && item.sha256 == digest(b"notice")
+    }));
+    let restrictive = b"Copyright 2020 Example\nAdditional terms: no commercial use.\n";
+    let mut restricted_notice = meta.clone();
+    restricted_notice["siblings"]
+        .as_array_mut()
+        .unwrap()
+        .push(sibling("NOTICE.txt", restrictive));
+    let restricted_notice = inspect(
+        &restricted_notice,
+        vec![
+            licenses::MIT.as_bytes().to_vec(),
+            restrictive.to_vec(),
+            config.clone(),
+        ],
+    )
+    .unwrap();
+    assert_eq!(
+        restricted_notice.inventory.license.status,
+        EvidenceStatus::NoticePresent
+    );
+    assert_ne!(
+        restricted_notice.inventory.license.status,
+        EvidenceStatus::Matched
+    );
+    assert!(
+        restricted_notice
+            .evidence
+            .iter()
+            .any(|item| item.path == "NOTICE.txt" && item.text.contains("no commercial use"))
+    );
+    let mut mismatched = meta.clone();
+    let altered = format!("{}\nNo commercial use.", licenses::MIT).into_bytes();
+    mismatched["siblings"][0] = sibling("LICENSE", &altered);
+    mismatched["siblings"]
+        .as_array_mut()
+        .unwrap()
+        .push(sibling("NOTICE.txt", b"attribution"));
     assert_eq!(
         inspect(
-            &notice,
-            vec![
-                licenses::MIT.as_bytes().to_vec(),
-                b"notice".to_vec(),
-                config.clone()
-            ]
+            &mismatched,
+            vec![altered, b"attribution".to_vec(), config.clone()],
         )
         .unwrap()
         .inventory
@@ -202,6 +250,31 @@ fn missing_changed_or_conflicting_licenses_never_match() {
         .status,
         EvidenceStatus::Conflicting
     );
+    let mut apache = meta.clone();
+    apache["cardData"]["license"] = json!("apache-2.0");
+    apache["siblings"][0] = sibling("LICENSE", licenses::APACHE.as_bytes());
+    apache["siblings"]
+        .as_array_mut()
+        .unwrap()
+        .push(sibling("NOTICE.txt", b"Copyright 2024 Example"));
+    let apache = inspect(
+        &apache,
+        vec![
+            licenses::APACHE.as_bytes().to_vec(),
+            b"Copyright 2024 Example".to_vec(),
+            config.clone(),
+        ],
+    )
+    .unwrap();
+    assert_eq!(
+        apache.inventory.license.status,
+        EvidenceStatus::NoticePresent
+    );
+    let shown = crate::present::render_resolution(&apache, false, 80);
+    assert!(shown.starts_with("notice_present"), "{shown}");
+    assert!(shown.contains("apache-2.0  notice_present"), "{shown}");
+    let json = serde_json::to_value(&apache).unwrap();
+    assert_eq!(json["inventory"]["license"]["status"], "notice_present");
     assert_eq!(
         inspect(&meta, vec![vec![b'a'; licenses::MIT.len()]])
             .unwrap_err()

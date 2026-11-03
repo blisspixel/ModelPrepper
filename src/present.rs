@@ -277,9 +277,11 @@ pub fn render_config_check(watches: usize, volumes: usize, color: bool, columns:
 }
 
 pub fn render_resolution(resolved: &crate::hub::Resolution, color: bool, columns: usize) -> String {
-    let matched = resolved.inventory.license.status == crate::inventory::EvidenceStatus::Matched;
-    let (code, word) = if matched {
+    let status = resolved.inventory.license.status;
+    let (code, word) = if status == crate::inventory::EvidenceStatus::Matched {
         (GREEN, "pinned")
+    } else if status == crate::inventory::EvidenceStatus::NoticePresent {
+        (YELLOW, "notice_present")
     } else {
         (YELLOW, "unreviewed")
     };
@@ -753,6 +755,7 @@ fn evidence_name(status: crate::inventory::EvidenceStatus) -> &'static str {
         crate::inventory::EvidenceStatus::Matched => "matched",
         crate::inventory::EvidenceStatus::Unreviewed => "unreviewed",
         crate::inventory::EvidenceStatus::Conflicting => "conflicting",
+        crate::inventory::EvidenceStatus::NoticePresent => "notice_present",
     }
 }
 
@@ -1000,6 +1003,7 @@ mod tests {
                 EvidenceStatus::Matched,
                 EvidenceStatus::Unreviewed,
                 EvidenceStatus::Conflicting,
+                EvidenceStatus::NoticePresent,
             ] {
                 let text = render_resolution(
                     &crate::hub::Resolution {
@@ -1013,6 +1017,7 @@ mod tests {
                     columns,
                 );
                 assert!(text.contains("next:"), "{text}");
+                assert!(text.contains(evidence_name(status)), "{text}");
             }
             for (ok, excluded) in [(true, Vec::new()), (false, vec!["README.md".into()])] {
                 let text = render_verification(

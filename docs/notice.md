@@ -6,7 +6,7 @@ ModelPrepper preserves files obtained through authorized access on media you con
 
 The project's MIT license covers its own code and docs. Models and other preserved artifacts retain their publishers' licenses.
 
-The default allowlist is MIT and Apache-2.0 with captured evidence at the selected revision. Mixed, missing, unknown, or conflicting evidence needs review. A card tag is not enough.
+The default allowlist is MIT and Apache-2.0 with captured evidence at the selected revision. Mixed, missing, unknown, or conflicting evidence needs review. A NOTICE file beside matching license text is `notice_present`: the file is kept and still needs a person to read it. A card tag is not enough.
 
 Possession, redistribution, modification, and use can have different conditions. Exporting files does not automatically establish redistribution rights for every dependency. Keep applicable licenses and notices.
 
