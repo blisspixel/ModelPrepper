@@ -1,4 +1,4 @@
-use crate::{Config, Error, Inventory, Result, build_plan};
+use crate::{Config, Error, Inventory, Result};
 
 pub use crate::present::{
     clap_text as clap_error_text, columns as terminal_columns, error_text as app_error_text,
@@ -229,6 +229,27 @@ pub enum PreviewCommand {
         /// Observed free bytes, excluding unknown transfer workspace.
         #[arg(long)]
         available_bytes: u64,
+        /// GGUF path to keep. Repeat for each file. Requires profile selected-gguf-v1.
+        #[arg(long = "select")]
+        select: Vec<String>,
+    },
+    /// Compare pinned candidate sizes with the storage ceiling. Nothing is reserved.
+    Budget {
+        /// Path to the vault configuration file.
+        #[arg(long)]
+        config: PathBuf,
+        /// Budget request JSON. Unknown schema versions are reported and not rewritten.
+        #[arg(long)]
+        request: PathBuf,
+    },
+    /// Report a data-only kit. Slots stay empty until a person names a pick.
+    Kit {
+        /// Path to the vault configuration file.
+        #[arg(long)]
+        config: PathBuf,
+        /// Kit TOML. Unknown schema versions are reported and not rewritten.
+        #[arg(long)]
+        kit: PathBuf,
     },
     /// Read a local recipe and report offline readiness.
     Readiness {
@@ -459,12 +480,31 @@ pub fn execute_in(cli: Cli, view: View) -> Result<CommandOutput> {
             config,
             inventory,
             available_bytes,
+            select,
         }) => {
             let config = Config::parse(&read_text(&config)?)?;
             let inventory = Inventory::parse(&read_text(&inventory)?)?;
-            let plan = build_plan(&config, &inventory, available_bytes)?;
+            let plan = crate::build_plan_selecting(&config, &inventory, available_bytes, &select)?;
             show(&view, &plan, true, |plan| {
                 crate::present::render_plan(plan, view.color, view.columns)
+            })
+        }
+        Command::Preview(PreviewCommand::Budget { config, request }) => {
+            let config = Config::parse(&read_text(&config)?)?;
+            let report = crate::budget::report_json(&config, &read_text(&request)?)?;
+            show(&view, &report, true, |report| {
+                crate::present::render_budget(report, view.color, view.columns)
+            })
+        }
+        Command::Preview(PreviewCommand::Kit { config, kit }) => {
+            let config = Config::parse(&read_text(&config)?)?;
+            let text = read_text(&kit)?;
+            let parsed = crate::kit::parse(&text)?;
+            let kit_dir = kit.parent().unwrap_or_else(|| Path::new("."));
+            let report =
+                crate::kit::report(&config, &parsed, &|path| load_kit_evidence(kit_dir, path))?;
+            show(&view, &report, true, |report| {
+                crate::present::render_kit(report, view.color, view.columns)
             })
         }
         Command::Preview(PreviewCommand::Readiness { recipe, path }) => {
@@ -600,6 +640,17 @@ fn list_local(
         serde_json::to_value(report)
             .map(CommandOutput::Json)
             .map_err(|error| Error::new("output_failed", error.to_string()))
+    }
+}
+
+fn load_kit_evidence(kit_dir: &Path, path: &str) -> crate::kit::EvidenceLoad {
+    let full = kit_dir.join(path);
+    match read_text(&full) {
+        Ok(text) => {
+            crate::kit::EvidenceLoad::Loaded(Box::new(crate::kit::load_evidence_text(&text)))
+        }
+        Err(error) if error.code == "input_read_failed" => crate::kit::EvidenceLoad::Missing,
+        Err(error) => crate::kit::EvidenceLoad::Unreadable(error.message),
     }
 }
 

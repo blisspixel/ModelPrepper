@@ -1,0 +1,10 @@
+# Data-only kit. The tool does not fill a slot or recommend a model.
+# See docs/contracts.md for the schema. Evidence paths are relative to this file.
+schema_version = 1
+hardware_tier = "operator note; the tool does not recommend a model"
+
+[[text]]
+repo_id = "example/model"
+revision = "unpinned"
+representation = "original"
+note = "replace with a pinned revision and a saved review before treating a size as known"

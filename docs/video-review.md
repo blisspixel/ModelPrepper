@@ -64,7 +64,7 @@ The video is mostly about one host and one policy conversation. A vault also has
 
 ## What ModelPrepper takes from the video
 
-- Pin a revision and store the whole runnable repo, not a lone GGUF.
+- Pin a revision and store the whole runnable repo, not a lone GGUF. The default profile still previews that safetensors set. `selected-gguf-v1` is a separate explicit policy: the operator names a derivative bundle, such as one quant and a projector, and that preview is not the whole runnable repository and does not authorize a transfer.
 - Budget disks with the 2-bytes-per-parameter rule, and check the dtype the repo actually published.
 - Expect hosts and publishers to delete or gate things that are public today.
 - Prefer two hard disks over a specialty optical format for the bytes.

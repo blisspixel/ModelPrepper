@@ -154,13 +154,19 @@ impl Config {
                 "only utc-week periods and manual approval are implemented",
             ));
         }
-        if self.files.profile != "publisher-safetensors-v1"
-            || self.files.include_repo_code
-            || self.files.include_gguf
-        {
+        if self.files.include_repo_code || self.files.include_gguf {
             return Err(Error::new(
                 "unsupported_policy",
-                "only publisher-safetensors-v1 without code or GGUF is implemented",
+                "include_repo_code and include_gguf stay rejected; name GGUF files under selected-gguf-v1",
+            ));
+        }
+        if !matches!(
+            self.files.profile.as_str(),
+            "publisher-safetensors-v1" | "selected-gguf-v1"
+        ) {
+            return Err(Error::new(
+                "unsupported_policy",
+                "only publisher-safetensors-v1 and selected-gguf-v1 are implemented",
             ));
         }
         let mut labels = BTreeSet::new();

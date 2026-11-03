@@ -4,7 +4,8 @@ use crate::{
     http::Http,
     integrity::verify_reader,
     inventory::{
-        EvidenceStatus, HashAlgorithm, LicenseEvidence, Role, Source, SourceFile, UpstreamHash,
+        BaseDependency, EvidenceStatus, HashAlgorithm, LicenseEvidence, Role, Source, SourceFile,
+        UpstreamHash,
     },
     licenses,
     plan::digest,
@@ -154,7 +155,8 @@ fn resolve_with(http: &Http, base: &str, repo: &str, revision: &str) -> Result<R
             }
         };
         let role = classify(&sibling.rfilename);
-        // GGUF weights are labeled, not selected, until a GGUF-only layout is recognized.
+        // A GGUF weight is not part of the safetensors profile. A projector is never
+        // required until a selected-derivative plan names it.
         let gguf_weight =
             role == Role::Weight && sibling.rfilename.to_ascii_lowercase().ends_with(".gguf");
         files.push(SourceFile {
@@ -193,6 +195,7 @@ fn resolve_with(http: &Http, base: &str, repo: &str, revision: &str) -> Result<R
             paths,
         },
         files,
+        base: declared_base(&pinned.card_data),
     };
     inventory.validate()?;
     if inventory
@@ -293,6 +296,23 @@ fn fetch_file(http: &Http, base: &str, source: &Source, file: &SourceFile) -> Re
     Ok(bytes)
 }
 
+/// Records the card's declared base repository. It does not resolve that repository
+/// or fetch its license. A second publisher resolution stays outside this command.
+fn declared_base(card: &Option<Value>) -> Option<BaseDependency> {
+    let value = card.as_ref()?.get("base_model")?;
+    let text = value
+        .as_str()
+        .or_else(|| value.as_array().and_then(|items| items.first())?.as_str())?;
+    let repo_id = normalize_repo(text).ok()?;
+    Some(BaseDependency {
+        repo_id,
+        revision: None,
+        license_id: String::new(),
+        license_status: None,
+        license_paths: Vec::new(),
+    })
+}
+
 fn classify(path: &str) -> Role {
     let name = path
         .rsplit('/')
@@ -326,6 +346,7 @@ fn classify(path: &str) -> Role {
         "readme.md" => Role::Documentation,
         "model.safetensors" => Role::Weight,
         _ if name.starts_with("model-") && name.ends_with(".safetensors") => Role::Weight,
+        _ if name.ends_with(".gguf") && name.contains("mmproj") => Role::Projector,
         _ if name.ends_with(".gguf") => Role::Weight,
         _ => Role::Other,
     }

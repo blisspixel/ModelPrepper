@@ -22,6 +22,8 @@ fn native_cli_reports_version_help_and_argument_failures() {
         vec!["--help"],
         vec!["config", "--help"],
         vec!["plan", "--help"],
+        vec!["budget", "--help"],
+        vec!["kit", "--help"],
         vec!["readiness", "--help"],
         vec!["resolve", "--help"],
         vec!["init", "--help"],
@@ -670,4 +672,176 @@ fn readiness_text_and_json_agree_and_do_not_create_or_execute() {
     let missing: serde_json::Value = serde_json::from_slice(&missing.stdout).unwrap();
     assert_eq!(missing["availability"], "unavailable");
     assert!(!absent.exists());
+}
+
+#[test]
+fn selecting_files_requires_the_gguf_profile_and_stays_unauthorized() {
+    let rejected = binary(&[
+        "plan",
+        "--config",
+        "examples/config.toml",
+        "--inventory",
+        "tests/fixtures/inventory.json",
+        "--available-bytes",
+        "500000000000",
+        "--select",
+        "model.safetensors",
+    ]);
+    assert!(!rejected.status.success());
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&rejected.stderr).unwrap()["error"]["code"],
+        "invalid_usage"
+    );
+    let dir = TempDir::new().unwrap();
+    let mut config =
+        modelprepper::Config::default_for(dir.path().join("catalog"), dir.path().join("models"));
+    config.files.profile = "selected-gguf-v1".into();
+    let config_path = dir.path().join("config.toml");
+    fs::write(&config_path, toml::to_string(&config).unwrap()).unwrap();
+    let inventory = dir.path().join("inventory.json");
+    fs::write(
+        &inventory,
+        r#"{
+  "schema_version": 1,
+  "source": {
+    "endpoint": "https://huggingface.co",
+    "repo_type": "model",
+    "repo_id": "example/gguf",
+    "requested_revision": "main",
+    "resolved_revision": "0123456789abcdef0123456789abcdef01234567",
+    "gated": false,
+    "private": false
+  },
+  "complete": true,
+  "layout": "gguf-v1",
+  "license": {"license_id": "", "status": "unreviewed", "paths": []},
+  "files": [
+    {"path": "a-Q4_K_M.gguf", "size_bytes": 3, "upstream_hash": {"algorithm": "sha256", "value": "abababababababababababababababababababababababababababababababab"}, "role": "weight", "required": true},
+    {"path": "b-Q8_0.gguf", "size_bytes": 4, "upstream_hash": {"algorithm": "sha256", "value": "abababababababababababababababababababababababababababababababab"}, "role": "weight", "required": true}
+  ]
+}"#,
+    )
+    .unwrap();
+    let selected = binary(&[
+        "plan",
+        "--config",
+        config_path.to_str().unwrap(),
+        "--inventory",
+        inventory.to_str().unwrap(),
+        "--available-bytes",
+        "100",
+        "--select",
+        "a-Q4_K_M.gguf",
+    ]);
+    assert!(selected.status.success(), "{selected:?}");
+    let plan: serde_json::Value = serde_json::from_slice(&selected.stdout).unwrap();
+    assert_eq!(plan["payload_bytes"], 3);
+    assert_eq!(plan["representation"], "derivative");
+    assert_eq!(plan["transfer_authorized"], false);
+    assert_eq!(plan["quantization_label"], "Q4_K_M");
+}
+
+#[test]
+fn budget_and_kit_compare_pinned_sizes_without_rewriting_or_reserving() {
+    let dir = TempDir::new().unwrap();
+    let config = dir.path().join("config.toml");
+    fs::write(
+        &config,
+        toml::to_string(&modelprepper::Config::default_for(
+            dir.path().join("catalog"),
+            dir.path().join("models"),
+        ))
+        .unwrap(),
+    )
+    .unwrap();
+    let inventory: serde_json::Value =
+        serde_json::from_str(include_str!("fixtures/inventory.json")).unwrap();
+    let request = dir.path().join("budget.json");
+    fs::write(
+        &request,
+        serde_json::json!({
+            "schema_version": 1,
+            "candidates": [{
+                "name": "fixture",
+                "representation": "original",
+                "inventory": inventory
+            }]
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let before = fs::read(&request).unwrap();
+    let budget = binary(&[
+        "budget",
+        "--config",
+        config.to_str().unwrap(),
+        "--request",
+        request.to_str().unwrap(),
+    ]);
+    assert!(budget.status.success(), "{budget:?}");
+    let body: serde_json::Value = serde_json::from_slice(&budget.stdout).unwrap();
+    assert_eq!(body["rows"][0]["required_bytes"], 5504);
+    assert_eq!(body["transfer_authorized"], false);
+    assert_eq!(body["workspace_bytes"], serde_json::Value::Null);
+    assert_eq!(body["rewritten"], false);
+    assert_eq!(fs::read(&request).unwrap(), before);
+    let unknown = dir.path().join("unknown.json");
+    fs::write(&unknown, "{\"schema_version\":2}\n").unwrap();
+    let unknown_before = fs::read(&unknown).unwrap();
+    let reported = binary(&[
+        "budget",
+        "--config",
+        config.to_str().unwrap(),
+        "--request",
+        unknown.to_str().unwrap(),
+    ]);
+    assert!(reported.status.success(), "{reported:?}");
+    let reported: serde_json::Value = serde_json::from_slice(&reported.stdout).unwrap();
+    assert_eq!(reported["supported"], false);
+    assert_eq!(
+        reported["blockers"],
+        serde_json::json!(["unsupported_schema"])
+    );
+    assert_eq!(fs::read(&unknown).unwrap(), unknown_before);
+
+    let kit = dir.path().join("kit.toml");
+    fs::write(
+        &kit,
+        "schema_version = 1\nhardware_tier = \"a note\"\n\n[[text]]\nrepo_id = \"example/model\"\nrevision = \"unpinned\"\nrepresentation = \"original\"\n",
+    )
+    .unwrap();
+    let kit_before = fs::read(&kit).unwrap();
+    let kit_out = Command::new(env!("CARGO_BIN_EXE_modelprepper"))
+        .env("MODELPREPPER_TEXT", "1")
+        .args([
+            "kit",
+            "--config",
+            config.to_str().unwrap(),
+            "--kit",
+            kit.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(kit_out.status.success(), "{kit_out:?}");
+    let text = String::from_utf8(kit_out.stdout).unwrap();
+    assert!(text.contains("empty"), "{text}");
+    assert!(text.contains("recommendation"), "{text}");
+    assert!(text.contains("unpinned"), "{text}");
+    assert_eq!(fs::read(&kit).unwrap(), kit_before);
+    let stale = dir.path().join("stale.toml");
+    fs::write(&stale, "schema_version = 2\n").unwrap();
+    let stale_before = fs::read(&stale).unwrap();
+    let stale_out = binary(&[
+        "kit",
+        "--config",
+        config.to_str().unwrap(),
+        "--kit",
+        stale.to_str().unwrap(),
+    ]);
+    assert!(stale_out.status.success(), "{stale_out:?}");
+    let stale_body: serde_json::Value = serde_json::from_slice(&stale_out.stdout).unwrap();
+    assert_eq!(stale_body["supported"], false);
+    assert_eq!(stale_body["network_contact"], false);
+    assert_eq!(stale_body["vault_mutated"], false);
+    assert_eq!(fs::read(&stale).unwrap(), stale_before);
 }

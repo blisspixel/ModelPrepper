@@ -28,7 +28,7 @@ Document stable reason codes and exit semantics in M0. Expected no-work conditio
 
 ## Configuration sketch
 
-Illustrative future configuration. The current validator accepts only the subset in [examples/config.toml](../examples/config.toml); discovery and worries below are not implemented:
+Illustrative future configuration. The current validator accepts only the subset in [examples/config.toml](../examples/config.toml). The implemented file profiles are `publisher-safetensors-v1` and `selected-gguf-v1`, and `include_gguf` stays false. Discovery and worries below are not implemented:
 
 ```toml
 schema_version = 1

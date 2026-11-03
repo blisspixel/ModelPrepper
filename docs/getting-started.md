@@ -23,7 +23,7 @@ On macOS, some system paths such as /var and /tmp are symlink aliases. Relative 
 
 Use a local catalog filesystem and separate storage directories. First initialization adopts empty directories; existing collection import is a future explicit operation. The identity marker connects each storage directory to this vault.
 
-Storage/transfer limits are configuration, not preallocated space. Init stays offline even with configured watches. Status reports free bytes for a matching mounted volume; future job accounting is not implemented yet.
+Storage/transfer limits are configuration, not preallocated space. Init stays offline even with configured watches. Status reports free bytes for a matching mounted volume. `budget` and `kit` compare pinned sizes and do not reserve space or account for jobs.
 
 ## Inspect a source
 
@@ -54,7 +54,12 @@ cargo run --locked --release -- adopt --config config.local.toml --plan <plan_id
 cargo run --locked --release -- plan --config examples/config.toml --inventory tests/fixtures/inventory.json --available-bytes 500000000000
 ```
 
-This inventory is synthetic. Every local preview contains local_inventory_untrusted and transfer_authorized=false. Available bytes are a supplied observation, not a reservation. See [contracts](contracts.md).
+This inventory is synthetic. Every local preview contains local_inventory_untrusted and transfer_authorized=false. Available bytes are a supplied observation, not a reservation. A GGUF derivative preview requires profile `selected-gguf-v1` and one `--select` path per file. `budget` and `kit` compare pinned sizes with the storage ceiling. Neither command contacts a publisher, reserves bytes, or authorizes a transfer. See [contracts](contracts.md).
+
+```text
+cargo run --locked --release -- budget --config examples/config.toml --request budget.json
+cargo run --locked --release -- kit --config examples/config.toml --kit examples/kit.toml
+```
 
 ## Check offline readiness
 
