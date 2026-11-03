@@ -93,6 +93,7 @@ fn sample(matched: bool) -> Sample {
                 HashAlgorithm::Sha256,
             ),
         ],
+        base: None,
     };
     let evidence = vec![CapturedEvidence {
         path: "LICENSE".into(),

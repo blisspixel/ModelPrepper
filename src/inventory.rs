@@ -13,6 +13,10 @@ pub struct Inventory {
     pub layout: String,
     pub license: LicenseEvidence,
     pub files: Vec<SourceFile>,
+    /// Present only for a derivative inventory. Omitted from identity bytes when absent,
+    /// so publisher-safetensors previews keep their existing plan id.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base: Option<BaseDependency>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -33,6 +37,23 @@ pub struct LicenseEvidence {
     pub license_id: String,
     pub status: EvidenceStatus,
     pub paths: Vec<String>,
+}
+
+/// Declared base of a derivative. A missing revision means the pin is not established.
+/// License fields are evidence already captured for that base. They do not change the
+/// derivative repository's own license status.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct BaseDependency {
+    pub repo_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub revision: Option<String>,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub license_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub license_status: Option<EvidenceStatus>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub license_paths: Vec<String>,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -81,6 +102,8 @@ pub enum Role {
     Template,
     Documentation,
     Other,
+    /// Vision projector named beside a GGUF quant. It is not a main weight.
+    Projector,
 }
 
 impl Inventory {
@@ -127,6 +150,23 @@ impl Inventory {
                 return Err(Error::new(
                     "invalid_inventory",
                     format!("license evidence path is not a license or notice file: {path:?}"),
+                ));
+            }
+        }
+        if let Some(base) = &self.base {
+            normalize_repo(&base.repo_id)?;
+            if let Some(revision) = &base.revision {
+                validate_hex(revision, 40)?;
+            }
+            unique_paths(base.license_paths.iter().map(String::as_str))?;
+            if matches!(
+                base.license_status,
+                Some(EvidenceStatus::Matched | EvidenceStatus::NoticePresent)
+            ) && (base.license_id.is_empty() || base.license_paths.is_empty())
+            {
+                return Err(Error::new(
+                    "invalid_inventory",
+                    "a captured base license needs an id and a path",
                 ));
             }
         }

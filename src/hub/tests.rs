@@ -513,6 +513,64 @@ fn gguf_only_repositories_report_layout_and_roles() {
 }
 
 #[test]
+fn a_projector_is_not_a_weight_and_the_declared_base_is_not_resolved() {
+    let quant_bytes = b"quant";
+    let projector_bytes = b"proj";
+    let mut quant = sibling("model-UD-Q4_K_M.gguf", quant_bytes);
+    quant["lfs"] = json!({"sha256": digest(quant_bytes), "size": quant_bytes.len()});
+    let mut projector = sibling("mmproj-BF16.gguf", projector_bytes);
+    projector["lfs"] = json!({"sha256": digest(projector_bytes), "size": projector_bytes.len()});
+    let meta = json!({
+        "id": "owner/model",
+        "sha": COMMIT,
+        "private": false,
+        "gated": false,
+        "cardData": {"license": "mit", "base_model": ["Qwen/Qwen3.8-27B", "ignored/second"]},
+        "siblings": [sibling("LICENSE", licenses::MIT.as_bytes()), quant, projector, sibling("nested/mmproj-F16.gguf", b"no")]
+    });
+    let resolved = inspect(&meta, vec![licenses::MIT.as_bytes().to_vec()]).unwrap();
+    let projector = resolved
+        .inventory
+        .files
+        .iter()
+        .find(|file| file.path == "mmproj-BF16.gguf")
+        .unwrap();
+    assert_eq!(projector.role, Role::Projector);
+    assert!(!projector.required);
+    let quant = resolved
+        .inventory
+        .files
+        .iter()
+        .find(|file| file.path == "model-UD-Q4_K_M.gguf")
+        .unwrap();
+    assert_eq!(quant.role, Role::Weight);
+    assert!(quant.required);
+    assert_eq!(
+        resolved
+            .inventory
+            .files
+            .iter()
+            .find(|file| file.path == "nested/mmproj-F16.gguf")
+            .unwrap()
+            .role,
+        Role::Other
+    );
+    let base = resolved.inventory.base.as_ref().unwrap();
+    assert_eq!(base.repo_id, "Qwen/Qwen3.8-27B");
+    assert!(base.revision.is_none());
+    assert!(base.license_id.is_empty());
+
+    let mut ignored = meta.clone();
+    ignored["cardData"]["base_model"] = json!("not a repository");
+    let without = inspect(&ignored, vec![licenses::MIT.as_bytes().to_vec()]).unwrap();
+    assert!(without.inventory.base.is_none());
+    let mut named = meta.clone();
+    named["cardData"]["base_model"] = json!("https://huggingface.co/Qwen/Qwen3.8-27B");
+    let declared = inspect(&named, vec![licenses::MIT.as_bytes().to_vec()]).unwrap();
+    assert_eq!(declared.inventory.base.unwrap().repo_id, "Qwen/Qwen3.8-27B");
+}
+
+#[test]
 fn role_selection_is_narrow_and_all_license_paths_are_evidence() {
     for (path, role) in [
         ("LICENSE.md", Role::License),
@@ -527,6 +585,9 @@ fn role_selection_is_narrow_and_all_license_paths_are_evidence() {
         ("adapter_model.safetensors", Role::Other),
         ("onnx/model.safetensors", Role::Other),
         ("pytorch_model.bin", Role::Other),
+        ("mmproj-BF16.gguf", Role::Projector),
+        ("model-Q4_K_M.gguf", Role::Weight),
+        ("nested/mmproj-BF16.gguf", Role::Other),
     ] {
         assert_eq!(classify(path), role);
     }

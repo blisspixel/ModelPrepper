@@ -8,7 +8,7 @@ The executable accepts the subset in [examples/config.toml](../examples/config.t
 
 Nested structures reject unknown fields. Budgets must be positive. Parallel file count is bounded to 1 through 8. Volume labels and configured paths must be unique, and the default volume must exist.
 
-Only manual approval, UTC weeks, MIT/Apache-2.0, public Hugging Face model sources, propose updates, and publisher-safetensors-v1 are implemented. Discovery, automatic rules, repository code, GGUF, and extended licenses remain unsupported. Do not add the future discovery/worries sections to a config passed to the current validator.
+Only manual approval, UTC weeks, MIT/Apache-2.0, public Hugging Face model sources, propose updates, `publisher-safetensors-v1`, and `selected-gguf-v1` are implemented. The default profile remains `publisher-safetensors-v1`. Discovery, automatic rules, repository code, and extended licenses remain unsupported. `include_repo_code` and `include_gguf` stay rejected. A GGUF preview names each file with `--select` under `selected-gguf-v1`. Do not add the future discovery/worries sections to a config passed to the current validator.
 
 Offline previews record catalog and volume paths as provided. Vault commands resolve relative paths against the canonical configuration file's directory. Overlap is compared after that resolution. ASCII case and a Windows verbatim prefix do not make one directory into two, including when a configured path does not exist yet. Init creates bundled SQLite and volume identities; status measures free space only for a matching mounted volume. Neither command mounts disks.
 
@@ -46,6 +46,10 @@ Blockers are stable snake_case identifiers:
 | revision_too_large | Payload exceeds the configured total storage ceiling. |
 | transfer_budget_exceeded | Payload exceeds the standalone period transfer allowance. |
 | insufficient_space | Payload plus minimum reserve exceeds the supplied free-space observation. |
+| ambiguous_gguf_selection | A multi-file GGUF inventory has no named selection. Candidates and sizes are reported. |
+| missing_gguf_selection | `selected-gguf-v1` was given no file name, including when the inventory has one GGUF. |
+| unknown_gguf_selection | A named path is not a root weight or projector GGUF in the inventory. |
+| incomplete_gguf_set | A split named `-NNNNN-of-MMMMM.gguf` is missing a shard. That set is left out of the payload. |
 
 Byte arithmetic is checked for overflow. The current budget checks are standalone lower bounds. They do not account for existing archive occupancy, reservations, transfer history, or workspace. The single-file staging experiment caps its checkpoint database and rollback journal at 1 MiB each. A plaintext loopback fixture measured that request and response bytes for one refreshed segment exceed the allowance charged for that payload. That measurement is not a TLS buffer, a kernel socket buffer, or a plan workspace bound: `workspace_bytes` stays null until a bound also covers every selected file, TLS buffers, and kernel socket buffers.
 
@@ -55,7 +59,7 @@ Policy identity is SHA-256 of compact JSON serialized from the version-one Confi
 
 Preview identity hashes a compact JSON object whose declaration order is domain, policy_digest, source, inventory. The domain is modelprepper.offline-plan.v1. Normalize official repository URLs to ids, sort inventory files by path, and sort license evidence paths.
 
-Source identity and the complete file inventory, including exclusions and license assertions, are bound to the preview. File size, hash, required flag, evidence, configured placement, or policy changes alter identity. Current free-space observations are not identity.
+Source identity and the complete file inventory, including exclusions and license assertions, are bound to the preview. File size, hash, required flag, evidence, configured placement, or policy changes alter identity. Current free-space observations are not identity. When `selected-gguf-v1` resolves a non-empty file set, identity also binds those sorted paths, so naming one shard of a complete set matches naming every shard. A named request that resolves no files binds the sorted request. An empty selection omits the field. An absent inventory `base` is omitted. The publisher-safetensors fixture id below stays in place.
 
 This format is a project-specific canonical encoding, not a claim of compliance with a separate JSON canonicalization standard. It is frozen by the regression vector below and tests of order invariance.
 
@@ -94,7 +98,7 @@ Adoption requires a real source directory outside the catalog and every configur
 
 Before `--move` removes any remaining source files, it checks all of them against their upstream identities and preserved copies, then repeats each check before removing that file. Changed or unsafe files fail cleanup without deleting earlier files during preflight. Files already absent after partial cleanup are allowed on retry; unrelated extra files are retained, and the source directory must still exist. These checks do not provide handle-relative protection against hostile concurrent directory replacement or an atomic multi-file deletion transaction.
 
-Clap argument errors exit 2. Help and version are ordinary text. Successful offline preview exits 0 even when blockers are present: it completed a preview rather than a transfer.
+Clap argument errors exit 2. Help and version are ordinary text. Successful offline preview, budget, and kit reports exit 0 even when blockers are present: they completed a report rather than a transfer.
 
 Local metadata reads are capped at 2 MiB and require UTF-8, with optional leading BOM. Parser errors avoid echoing a full TOML source excerpt. `resolve`, `propose`, and `verify-local --repo` make publisher requests. `verify-local --config --plan` reads the saved review and does not contact a publisher. Proposal listing, inspection, and rejection remain offline.
 
@@ -104,7 +108,31 @@ config init creates only a config file using exclusive creation. It does not ini
 
 resolve accepts a repository id or official hub URL and a bounded revision. It reads the moving revision, then reads its exact 40-character commit. Repository identity, pin, access flags, file paths, sizes, and upstream identities are checked before evidence is fetched. Only public, ungated model repositories are supported.
 
-The complete pinned inventory remains in the output, including excluded alternatives. Root publisher safetensors, conventional configuration/tokenizer files, templates, README, licenses, and notices receive explicit roles. Root `.gguf` files are weights. A repository whose weights are GGUF files and not safetensors is labeled `gguf-v1` instead of `unsupported`, so it can be reviewed. That label does not select GGUF into the safetensors profile, and `include_gguf` stays rejected. Nested weight variants, adapters, repository code, and pickle weights are not selected by this profile.
+The complete pinned inventory remains in the output, including excluded alternatives. Root publisher safetensors, conventional configuration/tokenizer files, templates, README, licenses, and notices receive explicit roles. A root `.gguf` whose name contains `mmproj` is a projector. Other root `.gguf` files are weights. Nested paths stay `other`. A repository whose weights are GGUF files and not safetensors is labeled `gguf-v1` instead of `unsupported`, so it can be reviewed. That label does not select GGUF into the safetensors profile, and `include_gguf` stays rejected. `resolve` copies `cardData.base_model`, a string or the first array element, into `inventory.base.repo_id` when it is an official repository id. The base revision and license stay unset, and resolve does not fetch the base. Nested weight variants, adapters, repository code, and pickle weights are not selected by the safetensors profile.
+
+## Selected GGUF preview
+
+`selected-gguf-v1` is opt-in. The preview still carries `local_inventory_untrusted`, and `transfer_authorized` stays false. The operator names each file with repeatable `--select`. The profile does not choose a file on its own. A multi-file inventory with no names is `ambiguous_gguf_selection`. One unnamed file is `missing_gguf_selection`.
+
+A filename matching `-NNNNN-of-MMMMM.gguf` is a split. Selecting any shard of a complete set puts every shard in the plan. An incomplete set is excluded and blocked with `incomplete_gguf_set`. A projector is required only when it is selected. A selection with no weight is `missing_required_role`. License and notice files stay evidence. This profile does not raise `required_file_excluded` for the files it leaves out.
+
+The quantization label is the rightmost filename token. A longer token that ends at the same place wins, so `UD-Q4_K_M` stays intact. Unmatched names are `unlabeled`. Selected labels are joined in path order. The plan records representation `derivative`, the declared base repository or `not declared`, the base revision or `not established`, and the note that a quantization cannot restore the original weights' precision. The label comes from the filename. The plan does not read a GGUF header or execute a file.
+
+A GGUF repository with no matching license file stays unreviewed on its own evidence. The preview may use a base license only when `base.revision` is a 40-character pin and `base.license_status` is `matched` with an id and paths. `license_evidence_source` is then `inherited`, and `license_id` is that base id. A disallowed inherited id is `license_not_allowed` without also adding `license_needs_review`. Otherwise the source is `absent` and the blocker is `license_needs_review`. The inventory status is unchanged. Adoption still requires `matched` evidence, so an inherited preview cannot be adopted on that status.
+
+This named derivative bundle is the explicit exception to the whole-repository rule in [video-review.md](video-review.md). The default profile still previews the safetensors set.
+
+## Offline budget
+
+`budget` reads schema 1 JSON. Each candidate has `name`, and may have `inventory`, `select`, `representation` (`original` or `derivative`), and `size_known`. An unknown `schema_version` returns `supported: false`, blocker `unsupported_schema`, and `rewritten: false`. The request file is left unchanged.
+
+A row reports pinned required bytes, remaining bytes against `max_stored_bytes` as if that row were stored alone, the shortfall, and blockers. `workspace_bytes` is null. `size_known: false`, a missing inventory, or an ambiguous, missing, incomplete, or unknown GGUF selection is `unknown_size` and is not added as zero. An unsupported layout keeps the pinned required-file sizes and blocker `unsupported_layout`. A required size equal to the ceiling is at-ceiling with shortfall 0. A larger size is `revision_too_large`. The combined total counts each `repo@revision:representation:select-key` once. `select-key` is empty unless the representation is `derivative`. When a row size is unknown and the known sum is within the ceiling, combined remaining is null. When the known sum already exceeds the ceiling, the shortfall is a lower bound. `transfer_authorized` stays false. The comparison does not reserve space.
+
+## Kit report
+
+`kit` reads schema 1 TOML, as in [examples/kit.toml](../examples/kit.toml). Slots, in order, are `text`, `coding`, `vision`, `image_generation`, `video_generation`, `speech_to_text`, `text_to_speech`, `embeddings`, and `reference`. Each slot is an array of picks: `repo_id`, `revision` (40 lowercase hex or `unpinned`), `representation` (`original` or `selected-derivative`), optional `note`, optional `select`, and optional `evidence` path relative to the kit file. The tool does not fill a slot. An absent known slot is reported empty. An unknown top-level key is an extra slot with reason `unsupported_slot`. Unknown pick fields stay visible as `invalid_pick`. An unknown schema version, or a non-string `hardware_tier`, is `supported: false` with `unsupported_schema`. The file is not rewritten.
+
+Evidence is schema 1 JSON. It may carry `verified_local`, an inventory, or a summary with `source_kind`, `layout`, `license_id`, `gated`, `private`, and `required_bytes`. `verified_local` is that flag. The command does not hash a disk or open a vault. A missing file is `no_saved_review`. A non-Hugging Face summary is `unsupported_source`. Diffusers, video, and audio layouts are `unsupported_layout` and stay visible. A gated or private inventory is `access_restricted`. A license outside the allowlist is `license_not_allowed`. An unpinned revision adds `unpinned` and can still show bytes when the evidence has them. Slot attributed bytes may count one model in several categories. The physical total counts `repo|revision|representation|select-key` once, and `select-key` is present only for `selected-derivative`. `hardware_tier` is echoed and is not a recommendation. `network_contact`, `vault_mutated`, `rewritten`, and `transfer_authorized` are false. `workspace_bytes` stays null.
 
 Repository metadata HTTP 401 is `repository_not_found_or_private`. HTTP 404 on that metadata request is `revision_not_found`. Other file-fetch statuses stay `source_status`.
 

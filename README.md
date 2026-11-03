@@ -10,7 +10,7 @@ Local custody, portable data, and user control are central. The project rejects 
 
 ## Project status
 
-**Experimental prototype.** Vault setup, disk identities, offline status, public-source inspection, durable source reviews, and local inventory previews work today. `verify-local` and `adopt` can check a folder you already downloaded and store it as an upstream-verified local copy. The streaming transfer library is an experiment. Approved downloads, budget accounting, sealed bundles, replicas, and unattended maintenance are still being built. No current command downloads a model into the vault.
+**Experimental prototype.** Vault setup, disk identities, offline status, public-source inspection, durable source reviews, and local inventory previews work today. `verify-local` and `adopt` can check a folder you already downloaded and store it as an upstream-verified local copy. The streaming transfer library is an experiment. `budget` and `kit` compare pinned sizes with the storage ceiling and do not reserve space. Approved downloads, sealed bundles, replicas, and unattended maintenance are still being built. No current command downloads a model into the vault.
 
 | Available now | Behavior |
 | --- | --- |
@@ -21,7 +21,9 @@ Local custody, portable data, and user control are central. The project rejects 
 | propose / proposals / decide | Save exact source reviews, browse offline, and record rejection. Approval remains blocked. |
 | verify-local / adopt | Compare a local folder with a resolved commit, then copy or move the matched file set. Absent optional files are excluded. |
 | local list | Read Ollama manifests and say whether each tag was checked against the catalog. Nothing in the store is changed. |
-| plan | Preview untrusted local inventory with selected files, costs, exclusions, and blockers. |
+| plan | Preview untrusted local inventory with selected files, costs, exclusions, and blockers. `selected-gguf-v1` names GGUF files with `--select`. |
+| budget | Compare pinned candidate sizes with the storage ceiling. Nothing is reserved or transferred. |
+| kit | Report a person-written slot list from saved evidence. Empty slots stay empty. One model counts once in the physical total. |
 | readiness | Read a local runtime recipe and report capability closure, rights, disk presence, and recorded readiness. It does not download, execute, or change a vault. |
 
 See [implementation status](docs/implementation-status.md) for observed evidence and limitations, and the [roadmap](docs/roadmap.md) for delivery gates.

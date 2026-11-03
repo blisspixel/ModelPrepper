@@ -93,6 +93,13 @@ fn next_line(color: bool, columns: usize, command: &str) -> String {
     }
 }
 
+fn role_word(role: crate::inventory::Role) -> String {
+    serde_json::to_value(role)
+        .ok()
+        .and_then(|value| value.as_str().map(str::to_owned))
+        .unwrap_or_else(|| "other".into())
+}
+
 fn field(columns: usize, label: &str, value: &str) -> String {
     let prefix = format!("  {label}  ");
     let room = columns.saturating_sub(prefix.chars().count()).max(1);
@@ -176,6 +183,8 @@ fn next_for(error: &Error) -> String {
         }
         "unsupported_schema" => "use readiness recipe schema_version 1".into(),
         "invalid_usage" => "modelprepper --help".into(),
+        "invalid_budget" => "modelprepper budget --config <file> --request <file>".into(),
+        "invalid_kit" => "modelprepper kit --config <file> --kit <file>".into(),
         "license_needs_review" => "review the license text, then propose the commit again".into(),
         "proposal_not_pending" | "invalid_proposal" => {
             "modelprepper proposals list --config <file>".into()
@@ -286,7 +295,7 @@ pub fn render_resolution(resolved: &crate::hub::Resolution, color: bool, columns
         (YELLOW, "unreviewed")
     };
     let source = &resolved.inventory.source;
-    [
+    let mut lines = vec![
         verdict(
             color,
             columns,
@@ -307,17 +316,39 @@ pub fn render_resolution(resolved: &crate::hub::Resolution, color: bool, columns
                 evidence_name(resolved.inventory.license.status)
             ),
         ),
-        "  transfer not authorized".into(),
-        next_line(
-            color,
+    ];
+    let projectors = resolved
+        .inventory
+        .files
+        .iter()
+        .filter(|file| file.role == crate::inventory::Role::Projector)
+        .map(|file| file.path.as_str())
+        .collect::<Vec<_>>()
+        .join(", ");
+    if !projectors.is_empty() {
+        lines.push(field(columns, "projector", &projectors));
+    }
+    if let Some(base) = &resolved.inventory.base {
+        lines.push(field(
             columns,
+            "base",
             &format!(
-                "modelprepper propose --config <file> --repo {}",
-                source.repo_id
+                "{} @ {}",
+                base.repo_id,
+                base.revision.as_deref().unwrap_or("not established")
             ),
+        ));
+    }
+    lines.push("  transfer not authorized".into());
+    lines.push(next_line(
+        color,
+        columns,
+        &format!(
+            "modelprepper propose --config <file> --repo {}",
+            source.repo_id
         ),
-    ]
-    .join("\n")
+    ));
+    lines.join("\n")
 }
 
 pub fn render_verification(
@@ -494,7 +525,7 @@ pub fn render_plan(plan: &crate::plan::Plan, color: bool, columns: usize) -> Str
         })
         .collect::<Vec<_>>()
         .join(", ");
-    [
+    let mut lines = vec![
         verdict(color, columns, YELLOW, "preview", "  untrusted"),
         field(
             columns,
@@ -515,9 +546,210 @@ pub fn render_plan(plan: &crate::plan::Plan, color: bool, columns: usize) -> Str
             ),
         ),
         field(columns, "blockers", &blockers),
-        next_line(color, columns, "this preview cannot authorize a transfer"),
-    ]
-    .join("\n")
+    ];
+    if let Some(representation) = &plan.representation {
+        lines.push(field(columns, "representation", representation));
+        lines.push(field(
+            columns,
+            "base",
+            &format!(
+                "{} @ {}",
+                plan.base_repo_id.as_deref().unwrap_or("not declared"),
+                plan.base_revision.as_deref().unwrap_or("not established")
+            ),
+        ));
+        if let Some(label) = &plan.quantization_label {
+            lines.push(field(columns, "quantization", label));
+        }
+        if let Some(note) = &plan.precision_note {
+            lines.push(field(columns, "precision", note));
+        }
+        if let Some(source) = &plan.license_evidence_source {
+            lines.push(field(
+                columns,
+                "license evidence",
+                &format!(
+                    "{source} {}",
+                    plan.license_id.as_deref().unwrap_or("unknown")
+                ),
+            ));
+        }
+        if !plan.gguf_candidates.is_empty() {
+            let listed = plan
+                .gguf_candidates
+                .iter()
+                .map(|candidate| {
+                    format!(
+                        "{} {} {}",
+                        role_word(candidate.role),
+                        candidate.path,
+                        candidate.size_bytes
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+            lines.push(field(columns, "candidates", &listed));
+        }
+    }
+    lines.push(next_line(
+        color,
+        columns,
+        "this preview cannot authorize a transfer",
+    ));
+    lines.join("\n")
+}
+
+pub fn render_budget(report: &crate::budget::BudgetReport, color: bool, columns: usize) -> String {
+    let word = if report.supported {
+        "budget"
+    } else {
+        "unsupported"
+    };
+    let mut lines = vec![
+        verdict(color, columns, YELLOW, word, "  offline"),
+        field(columns, "ceiling", &report.max_stored_bytes.to_string()),
+        field(columns, "reserve", &report.min_free_bytes.to_string()),
+        field(columns, "workspace", report.workspace_note),
+    ];
+    for row in &report.rows {
+        let bytes = row
+            .required_bytes
+            .map(|size| size.to_string())
+            .unwrap_or_else(|| "unknown".into());
+        let remaining = row
+            .remaining_bytes
+            .map(|size| size.to_string())
+            .unwrap_or_else(|| "unknown".into());
+        let shortfall = row
+            .shortfall_bytes
+            .map(|size| size.to_string())
+            .unwrap_or_else(|| "unknown".into());
+        let ceiling = if row.at_storage_ceiling {
+            " at-ceiling"
+        } else {
+            ""
+        };
+        lines.push(field(
+            columns,
+            &row.candidate,
+            &format!(
+                "{}  {bytes}  remaining {remaining}  shortfall {shortfall}{ceiling}  {}",
+                row.representation,
+                row.blockers.join(",")
+            ),
+        ));
+    }
+    let combined_remaining = report
+        .combined_remaining_bytes
+        .map(|size| size.to_string())
+        .unwrap_or_else(|| "unknown".into());
+    let combined_shortfall = report
+        .combined_shortfall_bytes
+        .map(|size| size.to_string())
+        .unwrap_or_else(|| "unknown".into());
+    lines.push(field(
+        columns,
+        "combined",
+        &format!(
+            "{}  remaining {combined_remaining}  shortfall {combined_shortfall}  {}",
+            report.combined_required_bytes,
+            if report.combined_size_complete {
+                "complete"
+            } else {
+                "incomplete"
+            }
+        ),
+    ));
+    if !report.blockers.is_empty() {
+        lines.push(field(columns, "blockers", &report.blockers.join(", ")));
+    }
+    lines.push(next_line(
+        color,
+        columns,
+        "this preview cannot authorize a transfer",
+    ));
+    lines.join("\n")
+}
+
+pub fn render_kit(report: &crate::kit::KitReport, color: bool, columns: usize) -> String {
+    let word = if report.supported {
+        "kit"
+    } else {
+        "unsupported"
+    };
+    let mut lines = vec![
+        verdict(color, columns, YELLOW, word, "  offline"),
+        field(columns, "ceiling", &report.max_stored_bytes.to_string()),
+        field(columns, "workspace", report.workspace_note),
+    ];
+    if let Some(note) = &report.hardware_tier_note {
+        lines.push(field(columns, "hardware note", note));
+    }
+    lines.push(field(columns, "recommendation", "none"));
+    for slot in &report.slots {
+        if slot.picks.is_empty() {
+            lines.push(field(columns, &slot.display, "empty"));
+            continue;
+        }
+        for pick in &slot.picks {
+            let bytes = pick
+                .required_bytes
+                .map(|size| size.to_string())
+                .unwrap_or_else(|| "unknown".into());
+            let local = match pick.verified_local {
+                Some(true) => "verified-local",
+                Some(false) => "not-verified-local",
+                None => "not-recorded",
+            };
+            lines.push(field(
+                columns,
+                &slot.display,
+                &format!(
+                    "{}  {}  {bytes}  {}  {}  {local}  {}",
+                    pick.repo_id,
+                    pick.representation,
+                    pick.license_id,
+                    pick.license_status,
+                    pick.reasons.join(",")
+                ),
+            ));
+        }
+        lines.push(field(
+            columns,
+            &format!("{} attributed", slot.display),
+            &slot.attributed_bytes.to_string(),
+        ));
+    }
+    let physical_remaining = report
+        .physical_remaining_bytes
+        .map(|size| size.to_string())
+        .unwrap_or_else(|| "unknown".into());
+    let physical_shortfall = report
+        .physical_shortfall_bytes
+        .map(|size| size.to_string())
+        .unwrap_or_else(|| "unknown".into());
+    lines.push(field(
+        columns,
+        "physical",
+        &format!(
+            "{}  remaining {physical_remaining}  shortfall {physical_shortfall}  {}",
+            report.physical_required_bytes,
+            if report.physical_size_complete {
+                "complete"
+            } else {
+                "incomplete"
+            }
+        ),
+    ));
+    if !report.blockers.is_empty() {
+        lines.push(field(columns, "blockers", &report.blockers.join(", ")));
+    }
+    lines.push(next_line(
+        color,
+        columns,
+        "this report does not choose a model or authorize a transfer",
+    ));
+    lines.join("\n")
 }
 
 pub fn render_readiness(report: &crate::readiness::Report, color: bool, columns: usize) -> String {
@@ -980,6 +1212,7 @@ mod tests {
                 paths: vec!["LICENSE".into()],
             },
             files: Vec::new(),
+            base: None,
         };
         let file = SourceFile {
             path: "model.safetensors".into(),
@@ -1113,6 +1346,14 @@ mod tests {
                         Blocker::LocalInventoryUntrusted,
                         Blocker::LicenseNeedsReview,
                     ],
+                    representation: None,
+                    base_repo_id: None,
+                    base_revision: None,
+                    quantization_label: None,
+                    precision_note: None,
+                    license_evidence_source: None,
+                    license_id: None,
+                    gguf_candidates: Vec::new(),
                 },
                 color,
                 columns,
@@ -1210,6 +1451,8 @@ mod tests {
             "unsupported_profile",
             "unsupported_source",
             "unsupported_schema",
+            "invalid_budget",
+            "invalid_kit",
         ] {
             let text = error_text(&Error::new(code, "details"), false, 80);
             assert!(text.starts_with("error:"), "{code}: {text}");

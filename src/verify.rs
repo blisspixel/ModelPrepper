@@ -264,6 +264,7 @@ mod tests {
                 paths: vec!["LICENSE".into()],
             },
             files,
+            base: None,
         }
     }
 
