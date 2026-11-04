@@ -1,5 +1,5 @@
-ready  vault 8397c2c3
-  primary  mounted  404.7 GB (376.9 GiB) free
-  path  \\?\C:\GitHub\ModelPrepper\target\docs-capture\models
+ready  vault 6a15dca7
+  primary  mounted  2.2 TB (2.0 TiB) free
+  path  /home/pueo/Work/security-nov04/bli...lPrepper/target/docs-capture/models
   preserved  none yet
 next: modelprepper resolve --repo <org/model>
