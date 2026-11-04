@@ -77,15 +77,15 @@ impl RuntimeInventory {
         } else {
             "partial"
         };
-        let mut lines = vec![format!("{verdict}  {}", self.summary)];
+        let mut lines = vec![format!("{verdict}  {}", terminal_field(&self.summary))];
         if !self.message.is_empty() {
-            lines.push(format!("  {}", self.message));
+            lines.push(format!("  {}", terminal_field(&self.message)));
         }
         if !self.note.is_empty() {
-            lines.push(format!("  {}", self.note));
+            lines.push(format!("  {}", terminal_field(&self.note)));
         }
         for model in &self.models {
-            let quant = model.quantization.as_deref().unwrap_or("unknown");
+            let quant = terminal_field(model.quantization.as_deref().unwrap_or("unknown"));
             let license = if model.license_layer {
                 "license"
             } else {
@@ -94,15 +94,18 @@ impl RuntimeInventory {
             let missing = if model.missing_roles.is_empty() {
                 String::new()
             } else {
-                format!("  missing {}", model.missing_roles.join(", "))
+                format!(
+                    "  missing {}",
+                    terminal_field(&model.missing_roles.join(", "))
+                )
             };
             lines.push(format!(
                 "  {name}  {coverage}  {matched}/{total}  {format}/{quant}  {license}{missing}",
-                name = model.name,
-                coverage = coverage_word(&model.coverage),
+                name = terminal_field(&model.name),
+                coverage = terminal_field(coverage_word(&model.coverage)),
                 matched = model.matched_digests,
                 total = model.total_digests,
-                format = model.format,
+                format = terminal_field(&model.format),
             ));
         }
         let next = if self
@@ -124,6 +127,20 @@ impl RuntimeInventory {
         lines.push(format!("next: {next}"));
         lines.join("\n")
     }
+}
+
+fn terminal_field(value: &str) -> String {
+    let mut text = String::new();
+    for ch in value.chars() {
+        if ch.is_control()
+            || matches!(ch, '\u{200e}' | '\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}' | '\u{061c}' | '\u{2028}' | '\u{2029}' | '\\')
+        {
+            text.extend(ch.escape_default());
+        } else {
+            text.push(ch);
+        }
+    }
+    text
 }
 
 fn coverage_word(coverage: &str) -> &str {
@@ -588,6 +605,54 @@ mod tests {
             r#"{{"schemaVersion":2,"config":{{"mediaType":"application/vnd.docker.container.image.v1+json","digest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","size":10}},"layers":[{}]}}"#,
             layers.join(",")
         )
+    }
+
+    #[test]
+    fn inventory_text_escapes_fields_without_changing_json() {
+        let root = tempfile::TempDir::new().unwrap();
+        let store = root.path().join("models");
+        let dir = store.join("manifests/registry.ollama.ai/library/example");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("latest"), manifest(&"b".repeat(64), false, false)).unwrap();
+        let mut report = inventory(&[store], None).unwrap();
+        let hostile = "model\u{1b}[2J\rhidden\nforged\t\u{8}\u{7f}\u{9b}\u{202e}\\literal";
+        report.models[0].name = hostile.into();
+        report.message = hostile.into();
+        let json = serde_json::to_value(&report).unwrap();
+        assert_eq!(json["models"][0]["name"], hostile);
+        let text = report.text();
+        assert_eq!(text.lines().count(), 5);
+        assert!(text.contains("\\u{1b}[2J\\rhidden\\nforged"));
+        assert!(!text.chars().any(|ch| ch.is_control() && ch != '\n'));
+        assert!(!text.contains('\u{202e}'));
+        for color in [false, true] {
+            let rendered = crate::present::render_runtime(&report, color, 80);
+            assert_eq!(rendered.lines().count(), 5);
+            assert!(!rendered.contains("\u{1b}[2J"));
+            assert!(!rendered.contains('\r'));
+        }
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn hostile_store_filename_cannot_add_terminal_rows() {
+        let root = tempfile::TempDir::new().unwrap();
+        let dir = root
+            .path()
+            .join("manifests/registry.ollama.ai/library/example");
+        fs::create_dir_all(&dir).unwrap();
+        let tag = "tag\u{1b}[31m\nforged\r";
+        fs::write(dir.join(tag), manifest(&"b".repeat(64), false, false)).unwrap();
+        let report = inventory(&[root.path().to_path_buf()], None).unwrap();
+        assert_eq!(report.models[0].name, format!("example:{tag}"));
+        let json = serde_json::to_value(&report).unwrap();
+        assert_eq!(json["models"][0]["name"], format!("example:{tag}"));
+        for color in [false, true] {
+            let text = crate::present::render_runtime(&report, color, 500);
+            assert!(text.contains("tag\\u{1b}[31m\\nforged\\r"));
+            assert!(!text.contains("\u{1b}[31m"));
+            assert_eq!(text.lines().count(), report.text().lines().count());
+        }
     }
 
     #[test]

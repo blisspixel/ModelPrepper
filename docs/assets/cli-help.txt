@@ -1,6 +1,6 @@
 Keep verified copies of open-weight models on your own disks.
 
-Usage: modelprepper.exe [OPTIONS] <COMMAND>
+Usage: modelprepper [OPTIONS] <COMMAND>
 
 Setup:
   config        Create or check a vault configuration file
