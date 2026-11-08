@@ -49,6 +49,12 @@ pub struct CollectionEntry {
     pub note: String,
     /// The operator's written choice. Absent means the file did not choose.
     pub representation: Option<String>,
+    /// Declared base repository. Absent means the file did not name one.
+    pub base_repo: Option<String>,
+    /// Declared base revision. Absent means the file did not establish one.
+    pub base_revision: Option<String>,
+    /// Preview does not fetch or verify the declared base.
+    pub base_preserved: bool,
     /// Preview does not contact a publisher, so this stays false.
     pub resolved: bool,
 }
@@ -213,7 +219,12 @@ fn parse_entry(value: &toml::Value) -> Result<CollectionEntry> {
     };
     reject_unknown(
         table.keys(),
-        |key| matches!(key, "repo_id" | "revision" | "note" | "representation"),
+        |key| {
+            matches!(
+                key,
+                "repo_id" | "revision" | "note" | "representation" | "base_repo" | "base_revision"
+            )
+        },
         "unknown entry field",
     )?;
     let repo_id = match table.get("repo_id") {
@@ -268,11 +279,51 @@ fn parse_entry(value: &toml::Value) -> Result<CollectionEntry> {
             ));
         }
     };
+    let base_repo = match table.get("base_repo") {
+        None => None,
+        Some(toml::Value::String(value)) => Some(crate::validation::normalize_repo(value)?),
+        Some(_) => {
+            return Err(Error::new(
+                "invalid_collection",
+                "base_repo must be a string",
+            ));
+        }
+    };
+    let base_revision = match table.get("base_revision") {
+        None => None,
+        Some(toml::Value::String(value)) => {
+            crate::validation::validate_revision(value)?;
+            Some(value.clone())
+        }
+        Some(_) => {
+            return Err(Error::new(
+                "invalid_collection",
+                "base_revision must be a string",
+            ));
+        }
+    };
+    if base_revision.is_some() && base_repo.is_none() {
+        return Err(Error::new(
+            "invalid_collection",
+            "base_revision requires base_repo",
+        ));
+    }
+    if base_repo.as_deref() == Some(repo_id.as_str())
+        && base_revision.as_deref() == Some(revision.as_str())
+    {
+        return Err(Error::new(
+            "invalid_collection",
+            "an entry cannot name itself as its base",
+        ));
+    }
     Ok(CollectionEntry {
         repo_id,
         revision,
         note,
         representation,
+        base_repo,
+        base_revision,
+        base_preserved: false,
         resolved: false,
     })
 }
@@ -392,6 +443,9 @@ mod tests {
         assert_eq!(report.entry_count, 1);
         assert_eq!(report.entries[0].repo_id, "example/model");
         assert!(report.entries[0].representation.is_none());
+        assert!(report.entries[0].base_repo.is_none());
+        assert!(report.entries[0].base_revision.is_none());
+        assert!(!report.entries[0].base_preserved);
         assert!(report.ceilings.is_empty());
         assert!(!report.entries[0].resolved);
         assert!(!report.transfer_authorized);
@@ -407,9 +461,10 @@ mod tests {
         let report = preview(&same_repo).unwrap();
         assert!(report.entries[0].note.is_empty());
         assert_eq!(report.entries.len(), report.entry_count);
-        let text = crate::present::render_collection(&report, false, 80);
+        let text = crate::present::render_collection(&report, false, 120);
         assert!(text.contains("unspecified"), "{text}");
         assert!(text.contains("unresolved"), "{text}");
+        assert!(text.contains("base not declared"), "{text}");
         assert!(!text.contains("pinned"), "{text}");
         let chosen = format!(
             "{}\nrepresentation = \"original-required\"\n",
@@ -447,11 +502,23 @@ mod tests {
     fn the_example_file_previews_without_a_download() {
         let report = preview(include_str!("../examples/collection.toml")).unwrap();
         assert!(report.supported);
-        assert_eq!(report.entries.len(), 1);
+        assert_eq!(report.entries.len(), 2);
         assert_eq!(
             report.entries[0].representation.as_deref(),
             Some("original-required")
         );
+        assert!(report.entries[0].base_repo.is_none());
+        assert!(!report.entries[0].base_preserved);
+        assert_eq!(
+            report.entries[1].base_repo.as_deref(),
+            Some("example/model")
+        );
+        assert_eq!(
+            report.entries[1].base_revision.as_deref(),
+            Some("0123456789abcdef0123456789abcdef01234567")
+        );
+        assert!(!report.entries[1].base_preserved);
+        assert!(!report.entries[1].resolved);
         assert_eq!(report.ceilings.len(), 1);
         assert_eq!(report.ceilings[0].category, "coding");
         assert_eq!(report.ceilings[0].bytes, 500_000_000_000);
@@ -651,6 +718,81 @@ revision = \"main\"
                 .message
                 .contains("at most 9")
         );
+        assert_eq!(
+            code(&entry(
+                "repo_id = \"example/model\"\nrevision = \"main\"\nbase_repo = 1\n"
+            )),
+            "invalid_collection"
+        );
+        assert_eq!(
+            code(&entry(
+                "repo_id = \"example/model\"\nrevision = \"main\"\nbase_repo = \"not a repo\"\n"
+            )),
+            "invalid_repo"
+        );
+        assert_eq!(
+            code(&entry(
+                "repo_id = \"example/model\"\nrevision = \"main\"\nbase_revision = 1\n"
+            )),
+            "invalid_collection"
+        );
+        assert_eq!(
+            code(&entry(
+                "repo_id = \"example/model\"\nrevision = \"main\"\nbase_revision = \"../x\"\n"
+            )),
+            "invalid_revision"
+        );
+        let missing_repo = preview(&entry(
+            "repo_id = \"example/model\"\nrevision = \"main\"\nbase_revision = \"v1\"\n",
+        ))
+        .unwrap_err();
+        assert!(
+            missing_repo
+                .message
+                .contains("base_revision requires base_repo")
+        );
+        let itself = preview(&entry(
+            "repo_id = \"example/model\"\nrevision = \"main\"\nbase_repo = \"https://huggingface.co/example/model/\"\nbase_revision = \"main\"\n",
+        ))
+        .unwrap_err();
+        assert!(itself.message.contains("cannot name itself"));
+    }
+
+    #[test]
+    fn a_declared_base_is_recorded_and_not_preserved() {
+        let named = preview(&entry(
+            "repo_id = \"example/model\"\nrevision = \"main\"\nbase_repo = \"https://huggingface.co/example/base/\"\nbase_revision = \"v1\"\n",
+        ))
+        .unwrap();
+        assert_eq!(named.entries[0].base_repo.as_deref(), Some("example/base"));
+        assert_eq!(named.entries[0].base_revision.as_deref(), Some("v1"));
+        assert!(!named.entries[0].base_preserved);
+        assert!(!named.entries[0].resolved);
+        assert!(!named.downloads_started);
+        assert!(named.workspace_bytes.is_none());
+        let text = crate::present::render_collection(&named, false, 120);
+        assert!(
+            text.contains("base example/base@v1 not preserved"),
+            "{text}"
+        );
+        let open = preview(&entry(
+            "repo_id = \"example/model\"\nrevision = \"main\"\nbase_repo = \"example/model\"\n",
+        ))
+        .unwrap();
+        assert_eq!(open.entries[0].base_repo.as_deref(), Some("example/model"));
+        assert!(open.entries[0].base_revision.is_none());
+        assert!(!open.entries[0].base_preserved);
+        let open_text = crate::present::render_collection(&open, false, 120);
+        assert!(
+            open_text.contains("base example/model revision not established"),
+            "{open_text}"
+        );
+        let earlier = preview(&entry(
+            "repo_id = \"example/model\"\nrevision = \"main\"\nbase_repo = \"example/model\"\nbase_revision = \"v1\"\n",
+        ))
+        .unwrap();
+        assert_eq!(earlier.entries[0].base_revision.as_deref(), Some("v1"));
+        assert!(!earlier.entries[0].base_preserved);
     }
 
     #[test]
@@ -723,6 +865,16 @@ revision = \"main\"
         assert!(value["workspace_bytes"].is_null());
         assert_eq!(value["entries"][0]["resolved"], false);
         assert_eq!(value["entries"][0]["representation"], "original-required");
+        assert!(value["entries"][0]["base_repo"].is_null());
+        assert!(value["entries"][0]["base_revision"].is_null());
+        assert_eq!(value["entries"][0]["base_preserved"], false);
+        assert_eq!(value["entries"][1]["base_repo"], "example/model");
+        assert_eq!(
+            value["entries"][1]["base_revision"],
+            "0123456789abcdef0123456789abcdef01234567"
+        );
+        assert_eq!(value["entries"][1]["base_preserved"], false);
+        assert_eq!(value["entries"][1]["resolved"], false);
         assert_eq!(value["ceilings"][0]["category"], "coding");
         assert_eq!(value["ceilings"][0]["bytes"], 500_000_000_000_u64);
         assert_eq!(value["ceilings"][0]["applied"], false);

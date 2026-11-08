@@ -13,3 +13,11 @@ repo_id = "https://huggingface.co/example/model/"
 revision = "0123456789abcdef0123456789abcdef01234567"
 representation = "original-required"
 note = "pinned example; this preview does not resolve or substitute it"
+
+[[entries]]
+repo_id = "example/model-q4"
+revision = "abcdef0123456789abcdef0123456789abcdef01"
+representation = "selected-derivative"
+base_repo = "https://huggingface.co/example/model/"
+base_revision = "0123456789abcdef0123456789abcdef01234567"
+note = "declared base; this preview does not resolve or preserve it"

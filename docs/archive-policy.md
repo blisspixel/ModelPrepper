@@ -14,7 +14,7 @@ Explicit selections work without discovery, a leaderboard, or an agent. A collec
 
 Default archival priority is the publisher's original release, including its actual tensor precision and required assets. FP16 and BF16 originals preserve information that a lossy quantization cannot restore. If the original is FP8 or mixed precision, retain that original rather than fabricating a larger "full precision" copy by upcasting it.
 
-Store a quantization, fine-tune, merge, adapter, or abliterated release as a separate artifact. Record its declared base, exact base revision when established, conversion or training provenance when available, and missing evidence. A variant's existence does not prove that its base is preserved. A model described as uncensored has an attributed description, not a verified behavioral guarantee.
+Store a quantization, fine-tune, merge, adapter, or abliterated release as a separate artifact. Record its declared base, exact base revision when established, conversion or training provenance when available, and missing evidence. A variant's existence does not prove that its base is preserved. `collection preview` can record `base_repo` and `base_revision` from the file. It leaves `base_preserved` false and does not fetch that base. Conversion provenance and missing evidence stay outside this preview. A model described as uncensored has an attributed description, not a verified behavioral guarantee.
 
 The planner offers three explicit representation policies:
 
