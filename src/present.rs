@@ -1152,6 +1152,7 @@ pub fn render_collection_custody(
             "dependents",
             &format!("{}  not retired", entry.dependents),
         ));
+        lines.push(field(columns, "blocked", &entry.blocks.join(", ")));
     }
     lines.push(field(columns, "approval", "still blocked"));
     lines.push(next_line(
