@@ -186,6 +186,8 @@ fn next_for(error: &Error) -> String {
         "invalid_budget" => "modelprepper budget --config <file> --request <file>".into(),
         "invalid_kit" => "modelprepper kit --config <file> --kit <file>".into(),
         "invalid_collection" => "modelprepper collection preview --file <file>".into(),
+        "output_exists" => "choose a new output path".into(),
+        "export_failed" => "choose a writable directory and a new output path".into(),
         "collection_not_stored" => {
             "modelprepper collection store --config <file> --file <file>".into()
         }
@@ -932,6 +934,23 @@ pub fn render_collection_custody(
         color,
         columns,
         "this match is not a fresh hash or a download",
+    ));
+    lines.join("\n")
+}
+
+pub fn render_collection_export(
+    report: &crate::collection::CollectionExport,
+    color: bool,
+    columns: usize,
+) -> String {
+    let mut lines = vec![verdict(color, columns, YELLOW, "exported", "  offline")];
+    lines.push(field(columns, "name", &report.name));
+    lines.push(field(columns, "file", &report.path.display().to_string()));
+    lines.push(field(columns, "approval", "still blocked"));
+    lines.push(next_line(
+        color,
+        columns,
+        "this list is not resolved or downloaded",
     ));
     lines.join("\n")
 }
@@ -1977,6 +1996,8 @@ mod tests {
             "invalid_budget",
             "invalid_kit",
             "invalid_collection",
+            "output_exists",
+            "export_failed",
             "collection_not_stored",
             "vault_not_initialized",
             "filesystem_read_only",
