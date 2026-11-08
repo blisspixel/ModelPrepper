@@ -938,6 +938,48 @@ pub fn render_collection_custody(
     lines.join("\n")
 }
 
+pub fn render_collection_diff(
+    report: &crate::collection::CollectionDiff,
+    color: bool,
+    columns: usize,
+) -> String {
+    let word = if !report.supported {
+        "unsupported"
+    } else if report.matches {
+        "equal"
+    } else {
+        "differ"
+    };
+    let mut lines = vec![verdict(color, columns, YELLOW, word, "  offline")];
+    if !report.name.is_empty() {
+        lines.push(field(columns, "name", &report.name));
+    }
+    lines.push(field(
+        columns,
+        "matches",
+        if !report.supported {
+            "not compared"
+        } else if report.matches {
+            "yes"
+        } else {
+            "no"
+        },
+    ));
+    if !report.changed.is_empty() {
+        lines.push(field(columns, "changed", &report.changed.join(", ")));
+    }
+    lines.push(field(columns, "approval", "still blocked"));
+    let next = if !report.supported {
+        "this schema is not compared"
+    } else if report.matches {
+        "this comparison is not a download"
+    } else {
+        "the file and the stored list disagree"
+    };
+    lines.push(next_line(color, columns, next));
+    lines.join("\n")
+}
+
 pub fn render_collection_export(
     report: &crate::collection::CollectionExport,
     color: bool,

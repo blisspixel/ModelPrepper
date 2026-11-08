@@ -357,7 +357,7 @@ pub enum PreviewCommand {
         #[arg(long)]
         kit: PathBuf,
     },
-    /// Preview, store, list, remove, or export a shared list, and report matching custody. Nothing is downloaded.
+    /// Preview, store, list, remove, export, or diff a shared list, and report matching custody. Nothing is downloaded.
     Collection {
         #[command(subcommand)]
         command: CollectionAction,
@@ -420,6 +420,15 @@ pub enum CollectionAction {
         /// Collection name to delete from the catalog.
         #[arg(long)]
         name: String,
+    },
+    /// Compare one schema 1 file with the stored list. Neither side is changed.
+    Diff {
+        /// Path to the vault configuration file.
+        #[arg(long)]
+        config: PathBuf,
+        /// Collection TOML. Comments are ignored. An unknown schema is not compared.
+        #[arg(long)]
+        file: PathBuf,
     },
     /// Write one stored list to a new schema 1 file. The catalog is not changed.
     Export {
@@ -777,6 +786,13 @@ pub(crate) fn execute_with(
                 let report = crate::collection::remove(&located_config(&config)?, &name)?;
                 show(&view, &report, true, |report| {
                     crate::present::render_collection(report, view.color, view.columns)
+                })
+            }
+            CollectionAction::Diff { config, file } => {
+                let report =
+                    crate::collection::diff(&located_config(&config)?, &read_text(&file)?)?;
+                show(&view, &report, true, |report| {
+                    crate::present::render_collection_diff(report, view.color, view.columns)
                 })
             }
             CollectionAction::Export {
