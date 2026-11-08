@@ -1,0 +1,62 @@
+{
+  "schema_version": 1,
+  "profile": "publisher-safetensors-text-v1",
+  "model": {
+    "endpoint": "https://huggingface.co",
+    "repo_id": "example/model",
+    "resolved_revision": "0123456789abcdef0123456789abcdef01234567",
+    "files": [
+      {
+        "path": "config.json",
+        "role": "config",
+        "capability": "text-generation",
+        "need": "required",
+        "retention": "retained",
+        "size_bytes": 2,
+        "sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+      },
+      {
+        "path": "tokenizer.json",
+        "role": "tokenizer",
+        "capability": "text-generation",
+        "need": "required",
+        "retention": "retained",
+        "size_bytes": 7,
+        "sha256": "afbf9d0f3560b0fd7795e81c42a0a79ee6b6fc67e064f77826aee642cad28d91"
+      },
+      {
+        "path": "model.safetensors",
+        "role": "weight",
+        "capability": "text-generation",
+        "need": "required",
+        "retention": "retained",
+        "size_bytes": 7,
+        "sha256": "9a129038d9a00aed0cf6a7ea059ca50a813449061ab87848cf1a13eafdf33b2c"
+      },
+      {
+        "path": "chat_template.jinja",
+        "role": "template",
+        "capability": "text-generation",
+        "need": "required",
+        "retention": "retained",
+        "size_bytes": 13,
+        "sha256": "52ed09e8448c395a40c52b4d91dc1818070d481a6afd2354b2653956dbf2dfc5"
+      }
+    ]
+  },
+  "capabilities": ["text-generation"],
+  "runtime": {
+    "name": "transformers",
+    "version": "4.55.2",
+    "os": "any",
+    "arch": "any",
+    "artifact": {
+      "retention": "named",
+      "locator": "transformers==4.55.2"
+    }
+  },
+  "rights": {
+    "status": "matched",
+    "license_id": "apache-2.0"
+  }
+}

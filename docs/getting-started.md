@@ -57,14 +57,14 @@ cargo run --locked --release -- plan --config examples/config.toml --inventory t
 This inventory is synthetic. Every local preview contains local_inventory_untrusted and transfer_authorized=false. Available bytes are a supplied observation, not a reservation. A GGUF derivative preview requires profile `selected-gguf-v1` and one `--select` path per file. `budget` and `kit` compare pinned sizes with the storage ceiling. Neither command contacts a publisher, reserves bytes, or authorizes a transfer. See [contracts](contracts.md).
 
 ```text
-cargo run --locked --release -- budget --config examples/config.toml --request budget.json
+cargo run --locked --release -- budget --config examples/config.toml --request examples/budget.json
 cargo run --locked --release -- kit --config examples/config.toml --kit examples/kit.toml
 ```
 
 ## Check offline readiness
 
 ```text
-cargo run --locked --release -- readiness --recipe recipe.json --path ~/Downloads/qwen
+cargo run --locked --release -- readiness --recipe examples/recipe.json --path examples/readiness
 ```
 
 The recipe is local JSON. The directory is the retained files. A missing directory is reported and is not created. The report keeps integrity, capability closure, rights, and readiness separate. Matching small files still leave readiness `untested` until a real network-disabled drill is recorded. A package name or URL is not a retained runtime. A retained runtime larger than 2 MiB is `unverified`, and a present runtime that does not match its declared bytes is `damaged`. Neither is called missing. See [preservation](preservation.md).

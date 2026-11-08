@@ -266,11 +266,20 @@ fn build_selected_gguf(
     }
     let candidates = gguf_candidates(inventory);
     let resolved = resolve_gguf_selection(inventory, &requested);
+    let selection_ok = resolved.blockers.is_empty();
     blockers.extend(resolved.blockers);
     if !requested.is_empty() && !resolved.files.iter().any(|file| file.role == Role::Weight) {
         blockers.push(Blocker::MissingRequiredRole);
     }
     let mut selected_files = resolved.files;
+    if selection_ok && selected_files.iter().any(|file| file.role == Role::Weight) {
+        for file in &inventory.files {
+            if is_carried_rights(file) && !selected_files.iter().any(|have| have.path == file.path)
+            {
+                selected_files.push(file.clone());
+            }
+        }
+    }
     for file in &selected_files {
         if file.upstream_hash.is_none() {
             blockers.push(Blocker::MissingUpstreamHash);
@@ -324,16 +333,15 @@ fn build_selected_gguf(
         &normalized_inventory,
         &identity_selection,
     )?;
-    let quantization_label = if selected_files.is_empty() {
+    let quant_labels: Vec<String> = selected_files
+        .iter()
+        .filter(|file| is_gguf_candidate(file))
+        .map(|file| quantization_label(&file.path))
+        .collect();
+    let quantization_label = if quant_labels.is_empty() {
         None
     } else {
-        Some(
-            selected_files
-                .iter()
-                .map(|file| quantization_label(&file.path))
-                .collect::<Vec<_>>()
-                .join(", "),
-        )
+        Some(quant_labels.join(", "))
     };
     let base_repo_id = normalized_inventory
         .base
@@ -587,6 +595,28 @@ fn is_gguf_candidate(file: &SourceFile) -> bool {
     !file.path.contains('/')
         && file.path.to_ascii_lowercase().ends_with(".gguf")
         && matches!(file.role, Role::Weight | Role::Projector)
+}
+
+/// License and notice bytes travel with a successful GGUF selection. The
+/// operator cannot name them with `--select`. A root `NOTICE` kept as `other`
+/// still counts. Nested paths and `..` do not.
+fn is_carried_rights(file: &SourceFile) -> bool {
+    if file.path.starts_with('/') || file.path.split(['/', '\\']).any(|part| part == "..") {
+        return false;
+    }
+    if matches!(file.role, Role::License | Role::Notice) {
+        return true;
+    }
+    let name = file
+        .path
+        .rsplit(['/', '\\'])
+        .next()
+        .unwrap_or(file.path.as_str())
+        .to_ascii_lowercase();
+    matches!(
+        name.as_str(),
+        "license" | "license.txt" | "license.md" | "notice" | "notice.txt" | "notice.md"
+    )
 }
 
 fn gguf_candidates(inventory: &Inventory) -> Vec<GgufCandidate> {
@@ -964,6 +994,75 @@ mod tests {
             Some("q4_k_m, q4_k_m, q4_k_m")
         );
         assert!(!has(&one, Blocker::IncompleteGgufSet));
+    }
+
+    #[test]
+    fn a_gguf_selection_carries_license_and_notice_without_labeling_them() {
+        let mut license = gguf("LICENSE", 20, Role::License);
+        license.required = true;
+        license.upstream_hash = Some(UpstreamHash {
+            algorithm: HashAlgorithm::GitSha1,
+            value: "0123456789abcdef0123456789abcdef01234567".into(),
+        });
+        let mut notice = gguf("NOTICE", 5, Role::Other);
+        notice.required = false;
+        let files = vec![
+            gguf("m-Q4_K_M-00001-of-00003.gguf", 10, Role::Weight),
+            gguf("m-Q4_K_M-00002-of-00003.gguf", 11, Role::Weight),
+            gguf("m-Q4_K_M-00003-of-00003.gguf", 12, Role::Weight),
+            gguf("mmproj-f16.gguf", 7, Role::Projector),
+            license,
+            notice,
+            gguf("README.md", 3, Role::Documentation),
+        ];
+        let mut inventory = inventory(files, None);
+        inventory.license = LicenseEvidence {
+            license_id: "apache-2.0".into(),
+            status: EvidenceStatus::Matched,
+            paths: vec!["LICENSE".into()],
+        };
+        let plan = build_plan_selecting(
+            &config("selected-gguf-v1"),
+            &inventory,
+            u64::MAX,
+            &["m-Q4_K_M-00002-of-00003.gguf".into()],
+        )
+        .unwrap();
+        let selected: Vec<&str> = plan
+            .selected_files
+            .iter()
+            .map(|file| file.path.as_str())
+            .collect();
+        assert_eq!(
+            selected,
+            vec![
+                "LICENSE",
+                "NOTICE",
+                "m-Q4_K_M-00001-of-00003.gguf",
+                "m-Q4_K_M-00002-of-00003.gguf",
+                "m-Q4_K_M-00003-of-00003.gguf",
+            ]
+        );
+        assert_eq!(plan.payload_bytes, 10 + 11 + 12 + 20 + 5);
+        assert_eq!(
+            plan.quantization_label.as_deref(),
+            Some("Q4_K_M, Q4_K_M, Q4_K_M")
+        );
+        assert!(plan.excluded_files.contains(&"README.md".into()));
+        assert!(plan.excluded_files.contains(&"mmproj-f16.gguf".into()));
+        assert!(!plan.excluded_files.iter().any(|path| path == "LICENSE"));
+        assert!(!has(&plan, Blocker::RequiredFileExcluded));
+        assert!(!has(&plan, Blocker::MissingUpstreamHash));
+        assert_eq!(plan.blockers, vec![Blocker::LocalInventoryUntrusted]);
+        let rejected = build_plan_selecting(
+            &config("selected-gguf-v1"),
+            &inventory,
+            u64::MAX,
+            &["LICENSE".into()],
+        )
+        .unwrap();
+        assert!(has(&rejected, Blocker::UnknownGgufSelection));
+        assert!(rejected.selected_files.is_empty());
     }
 
     #[test]

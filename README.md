@@ -26,7 +26,7 @@ Local custody, portable data, and user control are central. The project rejects 
 | kit | Report a person-written slot list from saved evidence. Empty slots stay empty. One model counts once in the physical total. |
 | readiness | Read a local runtime recipe and report capability closure, rights, disk presence, and recorded readiness. It does not download, execute, or change a vault. |
 
-See [implementation status](docs/implementation-status.md) for observed evidence and limitations, and the [roadmap](docs/roadmap.md) for the work waves. The next wave makes a GGUF plan keep its license and notice text, and makes the getting-started examples real. A download command waits until one approved revision can be published. Unattended watches wait until that revision can be restored with the hub unreachable.
+See [implementation status](docs/implementation-status.md) for observed evidence and limitations, and the [roadmap](docs/roadmap.md) for the work waves. A GGUF selection carries its license and notice text. The next wave measures TLS and kernel socket buffers before an approval can use a workspace number. A download command waits until one approved revision can be published. Unattended watches wait until that revision can be restored with the hub unreachable.
 
 An optional Omarchy bar chip lives in [plugins/omarchy-presence](plugins/omarchy-presence/README.md). It is not installed with the CLI and it is not a marketplace plugin. The chip reads `status` and reports disk presence only.
 
