@@ -1,6 +1,6 @@
 # Getting started with the prototype
 
-Read [current status](implementation-status.md) before setup. This version initializes and inspects a vault; it does not preserve a model end to end.
+Read [current status](implementation-status.md) before setup. This version initializes and inspects a vault. `fetch` can seal one granted revision; these examples do not download weights.
 
 ## Build and run
 

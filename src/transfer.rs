@@ -1,4 +1,4 @@
-//! Restart-focused transport experiment. No approval or publication.
+//! Restart-focused transport experiment. This module does not approve or publish.
 //! The staging journal charges a segment allowance before the request and does
 //! not refund it when an uncommitted tail is discarded. A rejected redirect
 //! location is refreshed once from the original URL. A later redirect back to

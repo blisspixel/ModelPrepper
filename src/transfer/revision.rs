@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use std::{
     fs::{self, OpenOptions},
     io::Write,
-    path::Path,
+    path::{Path, PathBuf},
 };
 
 const MAX_FILES: usize = 1024;
@@ -43,6 +43,7 @@ pub struct RevisionStage {
     members: Vec<StagingSession>,
     _writer: WriterLock,
     files: Vec<SourceFile>,
+    root: PathBuf,
 }
 
 impl RevisionStage {
@@ -69,6 +70,7 @@ impl RevisionStage {
             members,
             _writer: writer,
             files,
+            root: root.to_path_buf(),
         })
     }
 
@@ -98,7 +100,17 @@ impl RevisionStage {
             members,
             _writer: writer,
             files,
+            root: root.to_path_buf(),
         })
+    }
+
+    /// `payload.part` for one member. The name stays a part file until a seal copies it.
+    pub(crate) fn payload_path(&self, index: usize) -> PathBuf {
+        member_path(&self.root, index).join("payload.part")
+    }
+
+    pub(crate) fn files(&self) -> &[SourceFile] {
+        &self.files
     }
 
     /// Allowances charged before requests, summed across the set. Recovery does

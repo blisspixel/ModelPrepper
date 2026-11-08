@@ -53,4 +53,15 @@ Windows-native tests exercise reopen/resume, competing ownership, empty files, e
 
 The local Windows suite passes 108 Rust tests. The single CI workflow runs the journal tests on native Windows, macOS, and Linux runners; consult the current main-branch run for hosted results. Existing transfer and installer drills are documented separately in [validation-drills.md](validation-drills.md).
 
-The expired-location fixture requests the original URL once more and does not reuse the rejected location. The same fixture counts plaintext request and response bytes and shows that they exceed the charged allowance. Next integration is still durable vault storage and transfer reservations tied to approved plans. TLS and kernel socket buffers are recorded. A frozen set is staged as one checkpoint session per file, including license and notice, and those part files are not a seal. A grant can name one review, the measured connection bounds, the per-file staging bound, the volume UUID, and the policy digest. It is dropped when any of those change. Until a workspace number also covers every selected file, `workspace_bytes` stays null and transfer approval stays blocked. The recorded side-file cap is not the multi-file workspace number. Cancellation, startup orphan inspection, large-file performance, network filesystem qualification, manifests, and physical power-loss recovery remain open. Repeated prefix sweeps are bounded in memory but expensive in disk reads; this is not a large-model throughput claim.
+The expired-location fixture requests the original URL once more and does not reuse the rejected location. The same fixture counts plaintext request and response bytes and shows that they exceed the charged allowance. TLS and kernel socket buffers are recorded. A frozen set is staged as one checkpoint session per file, including license and notice. Those part files stay part files. `fetch` copies a fully staged set into the volume only while the grant still matches, writes `modelprepper-bundle.json` in the folder, and records custody after the rename. A reservation file under `.modelprepper-adopt` is not custody. Until a workspace number also covers every selected file, `workspace_bytes` stays null and `decide` stays blocked.
+
+| Code | Meaning |
+| --- | --- |
+| not_sealed | The published directory has no readable bundle. A rename alone is not a seal, and custody is not written. |
+| seal_interrupted | The seal stopped before the rename or before the catalog record. Retry continues from the reservation or the published folder. |
+| revision_not_staged | A member checkpoint does not yet cover its file. Nothing is reserved. |
+| transfer_interrupted | The fetch loop did not finish the set inside its request bound. |
+| destination_conflict | The published bytes or the recorded manifest do not match the grant. The tree is left in place. |
+| grant_dropped | Policy, bounds, or volume changed. Custody is not written. |
+
+Cancellation, startup orphan inspection, large-file performance, network filesystem qualification, and physical power-loss recovery remain open. Repeated prefix sweeps are bounded in memory but expensive in disk reads; this is not a large-model throughput claim.

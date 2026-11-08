@@ -437,6 +437,41 @@ pub fn render_adoption(adoption: &crate::vault::Adoption, color: bool, columns: 
     lines.join("\n")
 }
 
+pub fn render_seal(seal: &crate::vault::Seal, color: bool, columns: usize) -> String {
+    [
+        verdict(
+            color,
+            columns,
+            GREEN,
+            "sealed",
+            &format!("  {} @ {}", seal.repo_id, short_id(&seal.resolved_revision)),
+        ),
+        field(
+            columns,
+            "files",
+            &format!(
+                "{} files  {}  bundle SHA-256",
+                seal.file_count,
+                human_pair(seal.size_bytes)
+            ),
+        ),
+        field(columns, "primary", &seal.path.display().to_string()),
+        field(
+            columns,
+            "license",
+            &format!("{}, text kept with the copy", seal.license_id),
+        ),
+        field(columns, "provenance", seal.provenance),
+        field(columns, "approval", "still blocked"),
+        next_line(
+            color,
+            columns,
+            "modelprepper readiness --recipe <file> --path <dir>",
+        ),
+    ]
+    .join("\n")
+}
+
 pub fn render_proposal(proposal: &crate::vault::Proposal, color: bool, columns: usize) -> String {
     let (code, word) = match proposal.decision {
         crate::vault::Decision::Approved => (GREEN, "approved"),

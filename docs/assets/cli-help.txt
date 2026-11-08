@@ -20,6 +20,7 @@ Local copies:
   verify-local  Hash a local folder against a resolved commit. Reads only;
                 nothing is copied
   adopt         Copy or move a verified local folder into the vault
+  fetch         Stage and seal one granted revision. Approval stays blocked
   local         Read-only inventory of local runtime stores
 
 Preview:
