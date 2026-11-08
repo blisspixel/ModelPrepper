@@ -800,6 +800,21 @@ pub fn render_collection(
             ),
         ));
     }
+    lines.push(field(
+        columns,
+        "shared",
+        &report.shared_bases.len().to_string(),
+    ));
+    for shared in &report.shared_bases {
+        lines.push(field(
+            columns,
+            "group",
+            &format!(
+                "{}@{}  {} entries  not deduplicated",
+                shared.base_repo, shared.base_revision, shared.entry_count
+            ),
+        ));
+    }
     lines.push(field(columns, "approval", "still blocked"));
     lines.push(next_line(
         color,
