@@ -35,6 +35,7 @@ pub struct CollectionReport {
     pub ceilings: Vec<CategoryCeiling>,
     pub entries: Vec<CollectionEntry>,
     pub entry_count: usize,
+    pub shared_bases: Vec<SharedBase>,
     pub transfer_authorized: bool,
     pub network_contact: bool,
     pub vault_mutated: bool,
@@ -65,6 +66,16 @@ pub struct CategoryCeiling {
     pub bytes: u64,
     /// The operator's written cap. Preview does not charge entries against it.
     pub applied: bool,
+}
+
+#[derive(Debug, PartialEq, Eq, Serialize)]
+pub struct SharedBase {
+    pub base_repo: String,
+    pub base_revision: String,
+    /// How many entries name this exact base. Preview does not merge them.
+    pub entry_count: usize,
+    /// Preview does not drop an entry or claim a byte saving.
+    pub deduplicated: bool,
 }
 
 pub fn preview(text: &str) -> Result<CollectionReport> {
@@ -125,6 +136,7 @@ pub fn preview(text: &str) -> Result<CollectionReport> {
         entries.push(entry);
     }
     let entry_count = entries.len();
+    let shared_bases = shared_bases(&entries);
     Ok(CollectionReport {
         schema_version: 1,
         action: "preview",
@@ -134,6 +146,7 @@ pub fn preview(text: &str) -> Result<CollectionReport> {
         ceilings,
         entries,
         entry_count,
+        shared_bases,
         transfer_authorized: false,
         network_contact: false,
         vault_mutated: false,
@@ -152,6 +165,7 @@ fn empty_report(supported: bool) -> CollectionReport {
         ceilings: Vec::new(),
         entries: Vec::new(),
         entry_count: 0,
+        shared_bases: Vec::new(),
         transfer_authorized: false,
         network_contact: false,
         vault_mutated: false,
@@ -326,6 +340,33 @@ fn parse_entry(value: &toml::Value) -> Result<CollectionEntry> {
         base_preserved: false,
         resolved: false,
     })
+}
+
+fn shared_bases(entries: &[CollectionEntry]) -> Vec<SharedBase> {
+    let mut groups: Vec<SharedBase> = Vec::new();
+    for entry in entries {
+        let Some(repo) = entry.base_repo.as_deref() else {
+            continue;
+        };
+        let Some(revision) = entry.base_revision.as_deref() else {
+            continue;
+        };
+        if let Some(group) = groups
+            .iter_mut()
+            .find(|group| group.base_repo == repo && group.base_revision == revision)
+        {
+            group.entry_count += 1;
+        } else {
+            groups.push(SharedBase {
+                base_repo: repo.to_owned(),
+                base_revision: revision.to_owned(),
+                entry_count: 1,
+                deduplicated: false,
+            });
+        }
+    }
+    groups.retain(|group| group.entry_count >= 2);
+    groups
 }
 
 fn parse_ceilings(table: &toml::Table) -> Result<Vec<CategoryCeiling>> {
@@ -519,6 +560,7 @@ mod tests {
         );
         assert!(!report.entries[1].base_preserved);
         assert!(!report.entries[1].resolved);
+        assert!(report.shared_bases.is_empty());
         assert_eq!(report.ceilings.len(), 1);
         assert_eq!(report.ceilings[0].category, "coding");
         assert_eq!(report.ceilings[0].bytes, 500_000_000_000);
@@ -538,6 +580,7 @@ mod tests {
             assert!(!report.supported, "{text}");
             assert!(report.entries.is_empty());
             assert!(report.ceilings.is_empty());
+            assert!(report.shared_bases.is_empty());
             assert!(!report.transfer_authorized);
             assert!(report.workspace_bytes.is_none());
         }
@@ -793,6 +836,58 @@ revision = \"main\"
         .unwrap();
         assert_eq!(earlier.entries[0].base_revision.as_deref(), Some("v1"));
         assert!(!earlier.entries[0].base_preserved);
+        assert!(named.shared_bases.is_empty());
+    }
+
+    #[test]
+    fn a_repeated_base_is_listed_and_not_deduplicated() {
+        let one = preview(&format!(
+            "{}\n{}",
+            entry("repo_id = \"example/model\"\nrevision = \"main\"\nbase_repo = \"example/base\"\nbase_revision = \"v1\"\n"),
+            "[[entries]]\nrepo_id = \"example/other\"\nrevision = \"main\"\nbase_repo = \"example/base\"\nbase_revision = \"v1\"\n"
+        ))
+        .unwrap();
+        assert_eq!(one.entries.len(), 2);
+        assert_eq!(one.shared_bases.len(), 1);
+        assert_eq!(one.shared_bases[0].base_repo, "example/base");
+        assert_eq!(one.shared_bases[0].base_revision, "v1");
+        assert_eq!(one.shared_bases[0].entry_count, 2);
+        assert!(!one.shared_bases[0].deduplicated);
+        assert!(!one.downloads_started);
+        assert!(one.workspace_bytes.is_none());
+        let text = crate::present::render_collection(&one, false, 120);
+        assert!(
+            text.contains("example/base@v1  2 entries  not deduplicated"),
+            "{text}"
+        );
+        let split = preview(&format!(
+            "{}\n[[entries]]\nrepo_id = \"example/other\"\nrevision = \"main\"\nbase_repo = \"example/base\"\nbase_revision = \"v2\"\n",
+            entry("repo_id = \"example/model\"\nrevision = \"main\"\nbase_repo = \"example/base\"\nbase_revision = \"v1\"\n")
+        ))
+        .unwrap();
+        assert!(split.shared_bases.is_empty());
+        assert_eq!(split.entries.len(), 2);
+        let open = preview(&format!(
+            "{}\n[[entries]]\nrepo_id = \"example/other\"\nrevision = \"main\"\nbase_repo = \"example/base\"\n",
+            entry("repo_id = \"example/model\"\nrevision = \"main\"\nbase_repo = \"example/base\"\n")
+        ))
+        .unwrap();
+        assert!(open.shared_bases.is_empty());
+        let ordered = preview(&format!(
+            "{}\n[[entries]]\nrepo_id = \"example/other\"\nrevision = \"main\"\nbase_repo = \"example/base\"\nbase_revision = \"v1\"\n[[entries]]\nrepo_id = \"example/third\"\nrevision = \"main\"\nbase_repo = \"example/later\"\nbase_revision = \"v9\"\n[[entries]]\nrepo_id = \"example/fourth\"\nrevision = \"main\"\nbase_repo = \"example/later\"\nbase_revision = \"v9\"\n",
+            entry("repo_id = \"example/model\"\nrevision = \"main\"\nbase_repo = \"example/base\"\nbase_revision = \"v1\"\n")
+        ))
+        .unwrap();
+        assert_eq!(ordered.entries.len(), 4);
+        assert_eq!(ordered.shared_bases.len(), 2);
+        assert_eq!(ordered.shared_bases[0].base_repo, "example/base");
+        assert_eq!(ordered.shared_bases[1].base_repo, "example/later");
+        assert!(!ordered.shared_bases[1].deduplicated);
+        let alone = preview(&entry(
+            "repo_id = \"example/model\"\nrevision = \"main\"\nbase_repo = \"example/base\"\nbase_revision = \"v1\"\n",
+        ))
+        .unwrap();
+        assert!(alone.shared_bases.is_empty());
     }
 
     #[test]
@@ -875,6 +970,7 @@ revision = \"main\"
         );
         assert_eq!(value["entries"][1]["base_preserved"], false);
         assert_eq!(value["entries"][1]["resolved"], false);
+        assert!(value["shared_bases"].as_array().unwrap().is_empty());
         assert_eq!(value["ceilings"][0]["category"], "coding");
         assert_eq!(value["ceilings"][0]["bytes"], 500_000_000_000_u64);
         assert_eq!(value["ceilings"][0]["applied"], false);

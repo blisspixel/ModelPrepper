@@ -71,7 +71,7 @@ The recipe is local JSON. The directory is the retained files. A missing directo
 
 ## Shared collection
 
-`collection preview --file <file>` lists the repositories in a shared TOML file. An entry may name `original-required`, `original-preferred`, or `selected-derivative`, and it may name a declared base. The collection may name a byte ceiling for a kit slot. The preview does not apply that name or that ceiling, and it does not preserve the base. It does not resolve those revisions, download them, or write them into the catalog. See [examples/collection.toml](../examples/collection.toml). A collection is not imported by this command.
+`collection preview --file <file>` lists the repositories in a shared TOML file. An entry may name `original-required`, `original-preferred`, or `selected-derivative`, and it may name a declared base. The collection may name a byte ceiling for a kit slot. The preview does not apply that name or that ceiling, and it does not preserve the base. A repeated declared base is listed and not merged. It does not resolve those revisions, download them, or write them into the catalog. See [examples/collection.toml](../examples/collection.toml). A collection is not imported by this command.
 
 ## Weekly timer
 

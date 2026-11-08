@@ -88,7 +88,7 @@ Acceptance: disabling internet access does not prevent local status, verificatio
 | Bounded automation | M5 | `watch` creates a new plan for a new commit, keeps old revisions, and fetches only inside a current grant and the weekly byte ceiling. |
 | Disk qualification | M6 | Status names the filesystem. Unsupported and read-only mounts fail before a write. A live share and HDD timing are still unmeasured. |
 | Release usability | M7 | `schedule` previews a weekly timer and installs it only when the digest matches. CI injects the host runner. Clean-machine setup and persona drills remain open. |
-| Later conveniences | M8 onward | `collection preview` lists an explicit shared file, records a representation name, a category ceiling, and a declared base without applying them, and does not download it. Discovery, ranking, a local web UI, optional MCP, interoperable archival exports, and runtime kits remain open. |
+| Later conveniences | M8 onward | `collection preview` lists an explicit shared file, records a representation name, a category ceiling, and a declared base without applying them, lists a repeated base without merging it, and does not download it. Discovery, ranking, a local web UI, optional MCP, interoperable archival exports, and runtime kits remain open. |
 
 Setup, readable output, and explainable plans are M2 and stay available while later milestones are open. A watch entry that only records intent is M2. `watch` fetches that entry only inside a current grant. `schedule` previews the weekly timer and installs it only when the digest matches. A live scheduler was not enabled. The [roadmap](roadmap.md) wave list is the same order.
 
