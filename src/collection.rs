@@ -1,4 +1,4 @@
-//! Shared collection file. Preview lists explicit entries. Store writes that list and does not download it.
+//! Shared collection file. Preview lists explicit entries. Store writes that list and does not download it. Remove deletes one stored list and does not delete archived revisions.
 use crate::{Error, Result};
 use serde::Serialize;
 use std::collections::BTreeSet;
@@ -39,7 +39,7 @@ pub struct CollectionReport {
     pub transfer_authorized: bool,
     pub network_contact: bool,
     pub vault_mutated: bool,
-    /// Store replaces one named list. Preview and show leave this false.
+    /// Store replaces one named list. Preview, show, list, and remove leave this false.
     pub replaced: bool,
     pub downloads_started: bool,
     pub workspace_bytes: Option<u64>,
@@ -199,6 +199,12 @@ pub fn store(config: &crate::Config, text: &str) -> Result<CollectionReport> {
 pub fn show(config: &crate::Config, name: &str) -> Result<CollectionReport> {
     check_text(name, 1, MAX_NAME, "name")?;
     crate::vault::read_collection(config, name)
+}
+
+/// Delete one stored list. Archived revisions stay.
+pub fn remove(config: &crate::Config, name: &str) -> Result<CollectionReport> {
+    check_text(name, 1, MAX_NAME, "name")?;
+    crate::vault::remove_collection(config, name)
 }
 
 #[derive(Debug, PartialEq, Eq, Serialize)]
@@ -1933,5 +1939,123 @@ base_revision = \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"
             list(&missing, None, 20).unwrap_err().code,
             "vault_not_initialized"
         );
+    }
+
+    #[test]
+    fn remove_deletes_one_stored_list_and_keeps_archived_revisions() {
+        let (_dir, config, config_path) = ready();
+        let before = [
+            "vault",
+            "volumes",
+            "proposals",
+            "custody",
+            "grants",
+            "replicas",
+            "period_charges",
+        ]
+        .map(|table| rows(&config, table));
+        store(&config, include_str!("../examples/collection.toml")).unwrap();
+        store(
+            &config,
+            "schema_version = 1\nname = \"kept\"\n[[entries]]\nrepo_id = \"example/kept\"\nrevision = \"main\"\n",
+        )
+        .unwrap();
+        let removed = remove(&config, "offline coding").unwrap();
+        assert_eq!(removed.action, "removed");
+        assert!(removed.vault_mutated);
+        assert!(!removed.replaced);
+        assert!(!removed.transfer_authorized);
+        assert!(!removed.network_contact);
+        assert!(!removed.downloads_started);
+        assert!(removed.workspace_bytes.is_none());
+        assert_eq!(removed.name, "offline coding");
+        assert_eq!(removed.replica.as_deref(), Some("backup"));
+        assert_eq!(removed.entries.len(), 2);
+        assert!(!removed.entries[0].resolved);
+        assert!(!removed.entries[1].base_preserved);
+        assert!(!removed.entries[1].evidence_checked);
+        assert!(!removed.entries[1].provenance_verified);
+        assert!(!removed.entries[1].evaluation.as_ref().unwrap().ranked);
+        assert!(!removed.ceilings[0].applied);
+        assert!(removed.shared_bases.iter().all(|base| !base.deduplicated));
+        assert_eq!(rows(&config, "collections"), 1);
+        assert_eq!(rows(&config, "collection_entries"), 1);
+        assert_eq!(rows(&config, "collection_ceilings"), 0);
+        assert_eq!(rows(&config, "collection_entry_categories"), 0);
+        for (table, count) in [
+            "vault",
+            "volumes",
+            "proposals",
+            "custody",
+            "grants",
+            "replicas",
+            "period_charges",
+        ]
+        .into_iter()
+        .zip(before)
+        {
+            assert_eq!(rows(&config, table), count, "{table}");
+        }
+        let version: i64 = rusqlite::Connection::open(config.catalog_path.join("catalog.sqlite3"))
+            .unwrap()
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(version, 7);
+        assert_eq!(show(&config, "kept").unwrap().entries.len(), 1);
+        assert_eq!(
+            show(&config, "offline coding").unwrap_err().code,
+            "collection_not_stored"
+        );
+        assert_eq!(
+            remove(&config, "offline coding").unwrap_err().code,
+            "collection_not_stored"
+        );
+        assert_eq!(rows(&config, "collections"), 1);
+        assert_eq!(remove(&config, "").unwrap_err().code, "invalid_collection");
+        assert_eq!(
+            remove(&config, &"x".repeat(81)).unwrap_err().code,
+            "invalid_collection"
+        );
+        assert_eq!(rows(&config, "collections"), 1);
+        let text = crate::present::render_collection(&removed, true, 80);
+        assert!(text.contains("removed"), "{text}");
+        assert!(text.contains("archived revisions stay"), "{text}");
+        assert!(
+            text.lines().all(|line| line.chars().count() <= 80),
+            "{text}"
+        );
+
+        let command = crate::cli::Cli::try_parse_from([
+            "modelprepper",
+            "collection",
+            "remove",
+            "--config",
+            config_path.to_str().unwrap(),
+            "--name",
+            "kept",
+        ])
+        .unwrap();
+        let output = crate::cli::execute_in(command, crate::cli::View::piped()).unwrap();
+        let crate::cli::CommandOutput::Json(value) = output else {
+            panic!("remove is json when stdout is a pipe");
+        };
+        assert_eq!(value["action"], "removed");
+        assert_eq!(value["vault_mutated"], true);
+        assert_eq!(value["replaced"], false);
+        assert!(value["workspace_bytes"].is_null());
+        assert_eq!(value["entries"][0]["resolved"], false);
+        assert_eq!(rows(&config, "collections"), 0);
+        assert_eq!(rows(&config, "custody"), before[3]);
+
+        let unready = tempfile::tempdir().unwrap();
+        let root = std::fs::canonicalize(unready.path()).unwrap();
+        std::fs::create_dir_all(root.join("catalog")).unwrap();
+        std::fs::create_dir_all(root.join("models")).unwrap();
+        let missing = crate::Config::default_for(root.join("catalog"), root.join("models"));
+        assert_eq!(
+            remove(&missing, "kept").unwrap_err().code,
+            "vault_not_initialized"
+        );
+        assert!(!root.join("catalog").join("catalog.sqlite3").exists());
     }
 }
