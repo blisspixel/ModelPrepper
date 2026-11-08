@@ -118,7 +118,7 @@ The manual drill remains:
 4. Load the model and run one small task for the selected capability. Record the recipe digest, runtime version, OS, architecture, hardware, and the result.
 5. Keep that record with the recipe. A later `readiness` reading can show it only while it still applies. It does not run the task again.
 
-No catalog-independent restore is claimed. That remains the restoration milestone.
+`rebuild` restores sealed inventory and replica locations from `modelprepper-bundle.json` without the hub, including after the catalog file is removed. It does not restore grants, proposals, or approval authority. A runtime load is still not claimed.
 
 ## Runtime kits
 

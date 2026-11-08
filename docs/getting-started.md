@@ -1,6 +1,6 @@
 # Getting started with the prototype
 
-Read [current status](implementation-status.md) before setup. This version initializes and inspects a vault. `fetch` can seal one granted revision; these examples do not download weights.
+Read [current status](implementation-status.md) before setup. This version initializes and inspects a vault. `fetch` can seal one granted revision, and `replica`, `rebuild`, and `import` can copy or record local bytes. These examples do not download weights.
 
 ## Build and run
 
@@ -44,7 +44,7 @@ cargo run --locked --release -- verify-local --repo Qwen/Qwen2.5-0.5B-Instruct -
 cargo run --locked --release -- adopt --config config.local.toml --plan <plan_id> --path ~/Downloads/qwen --copy
 ```
 
-`verify-local` only reads the local folder. `--repo` still resolves the commit from the publisher. With `--plan` and `--config` it uses the saved review and does not use the network. Exit status is non-zero when a required file is missing or does not match, or when an optional file is present but damaged. The message names that file. An optional file that is absent is reported as excluded and is left out of the copy. `adopt` requires a pending review whose license evidence matched, copies or moves only that frozen matched set through a staging journal, re-checks the destination, and records `upstream-verified (local source)`. A successful adopt can print a preservation receipt. A mismatch does not. That is not a local-baseline import: a baseline would record bytes without this upstream proof, and that import is not implemented. Interrupted adoption resumes; a failed hash removes the staging copy and does not publish a partial tree.
+`verify-local` only reads the local folder. `--repo` still resolves the commit from the publisher. With `--plan` and `--config` it uses the saved review and does not use the network. Exit status is non-zero when a required file is missing or does not match, or when an optional file is present but damaged. The message names that file. An optional file that is absent is reported as excluded and is left out of the copy. `adopt` requires a pending review whose license evidence matched, copies or moves only that frozen matched set through a staging journal, re-checks the destination, and records `upstream-verified (local source)`. A successful adopt can print a preservation receipt. A mismatch does not. That is not a local-baseline import. `import` records bytes without this upstream proof and keeps the provenance `local-baseline`. Interrupted adoption resumes; a failed hash removes the staging copy and does not publish a partial tree.
 
 `local list` reads Ollama manifests from `OLLAMA_MODELS`, `~/.ollama/models`, and `/usr/share/ollama/.ollama/models`. It does not contact Ollama and does not change the store. Without `--config` every tag is `not_checked`. With `--config` the command compares manifest digests with digests already recorded in the catalog and names missing roles when the match is partial. A recorded match survives an unplugged disk because it is catalog history, not a live hash of the volume. A missing store is explained in the output instead of failing with only an error code.
 

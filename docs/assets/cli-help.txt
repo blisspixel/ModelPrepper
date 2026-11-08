@@ -21,6 +21,11 @@ Local copies:
                 nothing is copied
   adopt         Copy or move a verified local folder into the vault
   fetch         Stage and seal one granted revision. Approval stays blocked
+  replica       Copy one sealed revision onto another volume. No network and no
+                approval
+  rebuild       Rebuild custody from on-volume bundles. No network and no
+                approvals
+  import        Record a local folder that has no upstream proof
   local         Read-only inventory of local runtime stores
 
 Preview:

@@ -220,6 +220,42 @@ pub enum LocalCopiesCommand {
         #[arg(long)]
         stage: PathBuf,
     },
+    /// Copy one sealed revision onto another volume. No network and no approval.
+    Replica {
+        /// Path to the vault configuration file.
+        #[arg(long)]
+        config: PathBuf,
+        /// Plan id of the sealed revision.
+        #[arg(long)]
+        plan: String,
+        /// Destination volume label. It must differ from the sealing volume.
+        #[arg(long)]
+        volume: String,
+    },
+    /// Rebuild custody from on-volume bundles. No network and no approvals.
+    Rebuild {
+        /// Path to the vault configuration file.
+        #[arg(long)]
+        config: PathBuf,
+    },
+    /// Record a local folder that has no upstream proof.
+    Import {
+        /// Path to the vault configuration file.
+        #[arg(long)]
+        config: PathBuf,
+        /// Local directory outside the catalog and volumes.
+        #[arg(long)]
+        path: PathBuf,
+        /// Operator repository label. It is not resolved.
+        #[arg(long)]
+        repo: String,
+        /// 40-hex label. It is not an upstream pin.
+        #[arg(long)]
+        revision: String,
+        /// Destination volume label.
+        #[arg(long)]
+        volume: String,
+    },
     /// Read-only inventory of local runtime stores.
     Local {
         #[command(subcommand)]
@@ -438,6 +474,40 @@ pub fn execute_in(cli: Cli, view: View) -> Result<CommandOutput> {
             let seal = crate::vault::fetch(&located_config(&config)?, &plan, &stage)?;
             show(&view, &seal, true, |seal| {
                 crate::present::render_seal(seal, view.color, view.columns)
+            })
+        }
+        Command::LocalCopies(LocalCopiesCommand::Replica {
+            config,
+            plan,
+            volume,
+        }) => {
+            let replica = crate::vault::replica(&located_config(&config)?, &plan, &volume)?;
+            show(&view, &replica, true, |replica| {
+                crate::present::render_replica(replica, view.color, view.columns)
+            })
+        }
+        Command::LocalCopies(LocalCopiesCommand::Rebuild { config }) => {
+            let rebuilt = crate::vault::rebuild(&located_config(&config)?)?;
+            show(&view, &rebuilt, true, |rebuilt| {
+                crate::present::render_rebuild(rebuilt, view.color, view.columns)
+            })
+        }
+        Command::LocalCopies(LocalCopiesCommand::Import {
+            config,
+            path,
+            repo,
+            revision,
+            volume,
+        }) => {
+            let imported = crate::vault::import_baseline(
+                &located_config(&config)?,
+                &path,
+                &repo,
+                &revision,
+                &volume,
+            )?;
+            show(&view, &imported, true, |imported| {
+                crate::present::render_import(imported, view.color, view.columns)
             })
         }
         Command::LocalCopies(LocalCopiesCommand::Local { command }) => match command {

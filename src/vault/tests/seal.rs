@@ -285,6 +285,7 @@ fn fetch_seals_one_granted_revision_and_does_not_claim_a_load() {
     assert_eq!(bundle["schema_version"], 1);
     assert_eq!(bundle["bundle_id"], proposal.plan_id);
     assert!(bundle.get("sealed_at").is_none());
+    assert_eq!(bundle["provenance"], PROVENANCE_RANGED_HTTPS);
     assert_eq!(bundle["files"].as_array().unwrap().len(), 5);
     assert!(stage.join("members/0003/payload.part").is_file());
     assert_eq!(

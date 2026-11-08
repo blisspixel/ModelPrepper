@@ -1,6 +1,6 @@
 # Interfaces
 
-The executable implements config init/check, init with an existing config, offline status, resolve for public models, and plan against an untrusted local inventory. Resolve fetches bounded metadata and license evidence; it never downloads weights. Init and status currently cover catalog and disk ownership only. See [contracts.md](contracts.md). The table below describes the target interface; other commands and broader behavior remain proposed.
+The executable implements config init/check, init with an existing config, offline status, resolve for public models, plan against an untrusted local inventory, `fetch` for one granted revision, and offline `replica`, `rebuild`, and `import`. Resolve fetches bounded metadata and license evidence. `fetch` is the only command that downloads a payload, and only for one granted plan. See [contracts.md](contracts.md). The table below describes the target interface; commands that are not implemented, and broader behavior, remain proposed.
 
 ## CLI
 
