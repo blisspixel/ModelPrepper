@@ -172,8 +172,8 @@ fn existing_ancestor(path: &Path) -> io::Result<std::path::PathBuf> {
 
 #[cfg(target_os = "macos")]
 fn observe_macos(path: &Path) -> Result<Observed> {
-    let stat = rustix::fs::statfs(path).map_err(unreadable)?;
-    let vfs = rustix::fs::statvfs(path).map_err(unreadable)?;
+    let stat = rustix::fs::statfs(path).map_err(|error| unreadable(error.into()))?;
+    let vfs = rustix::fs::statvfs(path).map_err(|error| unreadable(error.into()))?;
     let kind = c_name(&stat.f_fstypename);
     if kind.is_empty() {
         return Err(Error::new(
