@@ -58,8 +58,19 @@ pub struct CollectionEntry {
     pub base_revision: Option<String>,
     /// Preview does not fetch or verify the declared base.
     pub base_preserved: bool,
+    /// The operator's written attribution. Absent means the file did not give one.
+    pub evaluation: Option<EvaluationAttribution>,
     /// Preview does not contact a publisher, so this stays false.
     pub resolved: bool,
+}
+
+#[derive(Debug, PartialEq, Eq, Serialize)]
+pub struct EvaluationAttribution {
+    pub source: String,
+    pub name: String,
+    pub value: String,
+    /// Preview does not order entries by this text.
+    pub ranked: bool,
 }
 
 #[derive(Debug, PartialEq, Eq, Serialize)]
@@ -245,6 +256,9 @@ fn parse_entry(value: &toml::Value) -> Result<CollectionEntry> {
                     | "categories"
                     | "base_repo"
                     | "base_revision"
+                    | "evaluation_source"
+                    | "evaluation_name"
+                    | "evaluation_value"
             )
         },
         "unknown entry field",
@@ -339,6 +353,7 @@ fn parse_entry(value: &toml::Value) -> Result<CollectionEntry> {
             "an entry cannot name itself as its base",
         ));
     }
+    let evaluation = parse_evaluation(table)?;
     Ok(CollectionEntry {
         repo_id,
         revision,
@@ -348,8 +363,42 @@ fn parse_entry(value: &toml::Value) -> Result<CollectionEntry> {
         base_repo,
         base_revision,
         base_preserved: false,
+        evaluation,
         resolved: false,
     })
+}
+
+fn parse_evaluation(table: &toml::Table) -> Result<Option<EvaluationAttribution>> {
+    let source = optional_text(table, "evaluation_source")?;
+    let name = optional_text(table, "evaluation_name")?;
+    let value = optional_text(table, "evaluation_value")?;
+    match (source, name, value) {
+        (None, None, None) => Ok(None),
+        (Some(source), Some(name), Some(value)) => Ok(Some(EvaluationAttribution {
+            source,
+            name,
+            value,
+            ranked: false,
+        })),
+        _ => Err(Error::new(
+            "invalid_collection",
+            "evaluation requires source, name, and value",
+        )),
+    }
+}
+
+fn optional_text(table: &toml::Table, key: &str) -> Result<Option<String>> {
+    match table.get(key) {
+        None => Ok(None),
+        Some(toml::Value::String(value)) => {
+            check_text(value, 1, MAX_NAME, key)?;
+            Ok(Some(value.clone()))
+        }
+        Some(_) => Err(Error::new(
+            "invalid_collection",
+            format!("{key} must be a string"),
+        )),
+    }
 }
 
 fn parse_categories(table: &toml::Table) -> Result<Vec<String>> {
@@ -557,7 +606,7 @@ mod tests {
         let report = preview(&same_repo).unwrap();
         assert!(report.entries[0].note.is_empty());
         assert_eq!(report.entries.len(), report.entry_count);
-        let text = crate::present::render_collection(&report, false, 160);
+        let text = crate::present::render_collection(&report, false, 220);
         assert!(text.contains("unspecified"), "{text}");
         assert!(text.contains("unresolved"), "{text}");
         assert!(text.contains("base not declared"), "{text}");
@@ -605,6 +654,7 @@ mod tests {
         );
         assert!(report.entries[0].base_repo.is_none());
         assert!(report.entries[0].categories.is_empty());
+        assert!(report.entries[0].evaluation.is_none());
         assert!(!report.entries[0].base_preserved);
         assert_eq!(
             report.entries[1].base_repo.as_deref(),
@@ -620,6 +670,11 @@ mod tests {
             report.entries[1].categories,
             ["coding".to_string(), "text".to_string()]
         );
+        let evaluation = report.entries[1].evaluation.as_ref().unwrap();
+        assert_eq!(evaluation.source, "operator");
+        assert_eq!(evaluation.name, "manual-review");
+        assert_eq!(evaluation.value, "not scored");
+        assert!(!evaluation.ranked);
         assert!(!report.ceilings[0].applied);
         assert!(report.shared_bases.is_empty());
         assert_eq!(report.ceilings.len(), 1);
@@ -899,13 +954,83 @@ revision = \"main\"
                 .message
                 .contains("at most 9")
         );
+        for partial in [
+            "evaluation_source = \"operator\"\n",
+            "evaluation_name = \"manual-review\"\n",
+            "evaluation_value = \"not scored\"\n",
+            "evaluation_source = \"operator\"\nevaluation_name = \"manual-review\"\n",
+        ] {
+            let error = preview(&entry(&format!(
+                "repo_id = \"example/model\"\nrevision = \"main\"\n{partial}"
+            )))
+            .unwrap_err();
+            assert_eq!(error.code, "invalid_collection");
+            assert!(
+                error
+                    .message
+                    .contains("evaluation requires source, name, and value")
+            );
+        }
+        assert_eq!(
+            code(&entry(
+                "repo_id = \"example/model\"\nrevision = \"main\"\nevaluation_source = \"operator\"\nevaluation_name = \"manual-review\"\nevaluation_value = 1\n"
+            )),
+            "invalid_collection"
+        );
+        assert_eq!(
+            code(&entry(
+                "repo_id = \"example/model\"\nrevision = \"main\"\nevaluation_source = \"\"\nevaluation_name = \"manual-review\"\nevaluation_value = \"not scored\"\n"
+            )),
+            "invalid_collection"
+        );
+        assert_eq!(
+            code(&entry(&format!(
+                "repo_id = \"example/model\"\nrevision = \"main\"\nevaluation_source = \"operator\"\nevaluation_name = \"{}\"\nevaluation_value = \"not scored\"\n",
+                "n".repeat(81)
+            ))),
+            "invalid_collection"
+        );
+        assert_eq!(
+            code(&entry(
+                "repo_id = \"example/model\"\nrevision = \"main\"\nevaluation_source = \"bad\\nsource\"\nevaluation_name = \"manual-review\"\nevaluation_value = \"not scored\"\n"
+            )),
+            "invalid_collection"
+        );
+    }
+
+    #[test]
+    fn an_evaluation_is_recorded_and_not_ranked() {
+        let report = preview(&entry(
+            "repo_id = \"example/model\"\nrevision = \"main\"\nevaluation_source = \"operator\"\nevaluation_name = \"manual-review\"\nevaluation_value = \"not scored\"\n",
+        ))
+        .unwrap();
+        let evaluation = report.entries[0].evaluation.as_ref().unwrap();
+        assert_eq!(evaluation.source, "operator");
+        assert_eq!(evaluation.name, "manual-review");
+        assert_eq!(evaluation.value, "not scored");
+        assert!(!evaluation.ranked);
+        assert!(!report.entries[0].resolved);
+        assert!(!report.downloads_started);
+        assert!(report.workspace_bytes.is_none());
+        let text = crate::present::render_collection(&report, false, 160);
+        assert!(
+            text.contains("evaluation operator: manual-review = not scored not ranked"),
+            "{text}"
+        );
+        let absent = preview(&entry("repo_id = \"example/model\"\nrevision = \"main\"\n")).unwrap();
+        assert!(absent.entries[0].evaluation.is_none());
+        let absent_text = crate::present::render_collection(&absent, false, 160);
+        assert!(
+            absent_text.contains("evaluation not attributed"),
+            "{absent_text}"
+        );
     }
 
     #[test]
     fn categories_are_recorded_and_do_not_charge_a_ceiling() {
         let absent = preview(&entry("repo_id = \"example/model\"\nrevision = \"main\"\n")).unwrap();
         assert!(absent.entries[0].categories.is_empty());
-        let absent_text = crate::present::render_collection(&absent, false, 160);
+        let absent_text = crate::present::render_collection(&absent, false, 220);
         assert!(absent_text.contains("uncategorized"), "{absent_text}");
         let empty = preview(&entry(
             "repo_id = \"example/model\"\nrevision = \"main\"\ncategories = []\n",
@@ -940,7 +1065,7 @@ revision = \"main\"
             overlap.entries[0].categories,
             ["coding".to_string(), "text".to_string()]
         );
-        let text = crate::present::render_collection(&overlap, false, 160);
+        let text = crate::present::render_collection(&overlap, false, 220);
         assert!(text.contains("categories coding,text"), "{text}");
     }
 
@@ -956,7 +1081,7 @@ revision = \"main\"
         assert!(!named.entries[0].resolved);
         assert!(!named.downloads_started);
         assert!(named.workspace_bytes.is_none());
-        let text = crate::present::render_collection(&named, false, 160);
+        let text = crate::present::render_collection(&named, false, 220);
         assert!(
             text.contains("base example/base@v1 not preserved"),
             "{text}"
@@ -968,7 +1093,7 @@ revision = \"main\"
         assert_eq!(open.entries[0].base_repo.as_deref(), Some("example/model"));
         assert!(open.entries[0].base_revision.is_none());
         assert!(!open.entries[0].base_preserved);
-        let open_text = crate::present::render_collection(&open, false, 160);
+        let open_text = crate::present::render_collection(&open, false, 220);
         assert!(
             open_text.contains("base example/model revision not established"),
             "{open_text}"
@@ -998,7 +1123,7 @@ revision = \"main\"
         assert!(!one.shared_bases[0].deduplicated);
         assert!(!one.downloads_started);
         assert!(one.workspace_bytes.is_none());
-        let text = crate::present::render_collection(&one, false, 160);
+        let text = crate::present::render_collection(&one, false, 220);
         assert!(
             text.contains("example/base@v1  2 entries  not deduplicated"),
             "{text}"
@@ -1120,6 +1245,11 @@ revision = \"main\"
         assert_eq!(value["entries"][1]["base_preserved"], false);
         assert_eq!(value["entries"][1]["categories"][0], "coding");
         assert_eq!(value["entries"][1]["categories"][1], "text");
+        assert!(value["entries"][0]["evaluation"].is_null());
+        assert_eq!(value["entries"][1]["evaluation"]["source"], "operator");
+        assert_eq!(value["entries"][1]["evaluation"]["name"], "manual-review");
+        assert_eq!(value["entries"][1]["evaluation"]["value"], "not scored");
+        assert_eq!(value["entries"][1]["evaluation"]["ranked"], false);
         assert_eq!(value["ceilings"][0]["applied"], false);
         assert_eq!(value["entries"][1]["resolved"], false);
         assert!(value["shared_bases"].as_array().unwrap().is_empty());
