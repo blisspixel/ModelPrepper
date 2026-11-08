@@ -572,14 +572,33 @@ mod tests {
         }
     }
 
+    /// A leading slash is absolute on Unix and relative on Windows.
+    fn host_path(path: &str) -> PathBuf {
+        #[cfg(windows)]
+        {
+            PathBuf::from(format!("C:{path}"))
+        }
+        #[cfg(not(windows))]
+        {
+            PathBuf::from(path)
+        }
+    }
+
+    /// Join with `/` so the rendered spelling does not gain a backslash on Windows.
+    fn slash(root: &Path, suffix: &str) -> PathBuf {
+        let root = root.to_str().expect("test path is utf-8");
+        let root = root.trim_end_matches(['/', '\\']);
+        PathBuf::from(format!("{root}/{suffix}"))
+    }
+
     fn plan(host: Host, root: &Path) -> SchedulePlan {
         SchedulePlan {
             host,
-            binary: root.join("bin").join("model prepper"),
-            config: root.join("my dir").join("config.toml"),
-            stage: root.join("stage dir").join("stage"),
-            working_directory: root.join("my dir"),
-            unit_dir: root.join("units"),
+            binary: slash(root, "bin/model prepper"),
+            config: slash(root, "my dir/config.toml"),
+            stage: slash(root, "stage dir/stage"),
+            working_directory: slash(root, "my dir"),
+            unit_dir: slash(root, "units"),
             uid: 501,
         }
     }
@@ -603,21 +622,18 @@ mod tests {
 
     #[test]
     fn three_hosts_quote_paths_and_keep_the_weekly_clock() {
-        let root = Path::new("/tmp/modelprepper-schedule");
-        let systemd = preview(&plan(Host::Systemd, root)).unwrap();
+        let root = host_path("/tmp/modelprepper-schedule");
+        let planned = plan(Host::Systemd, &root);
+        let systemd = preview(&planned).unwrap();
         assert_watch(&systemd);
         assert_eq!(systemd.timezone, "UTC");
         assert_eq!(systemd.process_limit, "12h");
         let service = &systemd.files[0].body;
         assert!(service.contains("TimeoutStartSec=12h"), "{service}");
-        assert!(
-            service.contains("\"/tmp/modelprepper-schedule/bin/model prepper\""),
-            "{service}"
-        );
-        assert!(
-            service.contains("\"/tmp/modelprepper-schedule/my dir/config.toml\""),
-            "{service}"
-        );
+        let binary = planned.binary.to_str().unwrap();
+        let config = planned.config.to_str().unwrap();
+        assert!(service.contains(&format!("\"{binary}\"")), "{service}");
+        assert!(service.contains(&format!("\"{config}\"")), "{service}");
         assert!(
             service.contains("OnCalendar=Mon *-*-* 00:05:00 UTC")
                 || systemd.files[1].body.contains("00:05:00 UTC")
@@ -631,8 +647,8 @@ mod tests {
         );
 
         let odd = SchedulePlan {
-            binary: PathBuf::from("/tmp/100%done\"app"),
-            ..plan(Host::Systemd, root)
+            binary: host_path("/tmp/100%done\"app"),
+            ..plan(Host::Systemd, &root)
         };
         let quoted = preview(&odd).unwrap();
         assert!(
@@ -641,7 +657,7 @@ mod tests {
             quoted.files[0].body
         );
 
-        let launchd = preview(&plan(Host::Launchd, root)).unwrap();
+        let launchd = preview(&plan(Host::Launchd, &root)).unwrap();
         assert_watch(&launchd);
         assert_eq!(launchd.timezone, "local");
         assert_eq!(launchd.process_limit, "none");
@@ -655,8 +671,8 @@ mod tests {
         assert_eq!(launchd.enable[0][2], "gui/501");
 
         let marked = SchedulePlan {
-            binary: PathBuf::from("/tmp/a&b<c"),
-            ..plan(Host::Launchd, root)
+            binary: host_path("/tmp/a&b<c"),
+            ..plan(Host::Launchd, &root)
         };
         let escaped = preview(&marked).unwrap();
         assert!(
@@ -666,7 +682,8 @@ mod tests {
         );
         assert!(!escaped.files[0].body.contains("/tmp/a&b<c"));
 
-        let task = preview(&plan(Host::TaskScheduler, root)).unwrap();
+        let task_plan = plan(Host::TaskScheduler, &root);
+        let task = preview(&task_plan).unwrap();
         assert_watch(&task);
         assert_eq!(task.timezone, "UTC");
         assert!(
@@ -689,11 +706,9 @@ mod tests {
             "{}",
             task.files[0].body
         );
+        let task_binary = task_plan.binary.to_str().unwrap();
         assert!(
-            task.files[0]
-                .body
-                .contains("&quot;/tmp/modelprepper-schedule/bin/model prepper&quot;")
-                || task.files[0].body.contains("model prepper"),
+            task.files[0].body.contains("&quot;") && task.files[0].body.contains(task_binary),
             "{}",
             task.files[0].body
         );
@@ -706,16 +721,16 @@ mod tests {
 
     #[test]
     fn digest_changes_when_the_config_changes() {
-        let root = Path::new("/var/prep");
-        let first = preview(&plan(Host::Systemd, root)).unwrap();
-        let mut other = plan(Host::Systemd, root);
-        other.config = PathBuf::from("/var/prep/other.toml");
+        let root = host_path("/var/prep");
+        let first = preview(&plan(Host::Systemd, &root)).unwrap();
+        let mut other = plan(Host::Systemd, &root);
+        other.config = host_path("/var/prep/other.toml");
         let second = preview(&other).unwrap();
         assert_ne!(first.preview, second.preview);
         assert!(
             preview(&SchedulePlan {
                 binary: PathBuf::from("relative"),
-                ..plan(Host::Systemd, root)
+                ..plan(Host::Systemd, &root)
             })
             .is_err()
         );
@@ -824,39 +839,39 @@ mod tests {
 
     #[test]
     fn unit_directory_uses_the_platform_home_and_rejects_a_relative_one() {
-        let home = Path::new("/home/keeper");
-        let xdg = Path::new("/xdg");
-        let local = Path::new("/local");
+        let home = host_path("/home/keeper");
+        let xdg = host_path("/xdg");
+        let local = host_path("/local");
         assert_eq!(
-            unit_directory(Host::Systemd, Some(home), Some(xdg), None).unwrap(),
-            PathBuf::from("/xdg/systemd/user")
+            unit_directory(Host::Systemd, Some(&home), Some(&xdg), None).unwrap(),
+            xdg.join("systemd/user")
         );
         assert_eq!(
-            unit_directory(Host::Systemd, Some(home), None, None).unwrap(),
-            PathBuf::from("/home/keeper/.config/systemd/user")
+            unit_directory(Host::Systemd, Some(&home), None, None).unwrap(),
+            home.join(".config/systemd/user")
         );
         assert_eq!(
-            unit_directory(Host::Launchd, Some(home), None, None).unwrap(),
-            PathBuf::from("/home/keeper/Library/LaunchAgents")
+            unit_directory(Host::Launchd, Some(&home), None, None).unwrap(),
+            home.join("Library/LaunchAgents")
         );
         assert_eq!(
-            unit_directory(Host::TaskScheduler, Some(home), None, Some(local)).unwrap(),
-            PathBuf::from("/local/ModelPrepper/schedule")
+            unit_directory(Host::TaskScheduler, Some(&home), None, Some(&local)).unwrap(),
+            local.join("ModelPrepper/schedule")
         );
         assert_eq!(
-            unit_directory(Host::TaskScheduler, Some(home), None, None).unwrap(),
-            PathBuf::from("/home/keeper/AppData/Local/ModelPrepper/schedule")
+            unit_directory(Host::TaskScheduler, Some(&home), None, None).unwrap(),
+            home.join("AppData/Local/ModelPrepper/schedule")
         );
         assert!(unit_directory(Host::Systemd, None, None, None).is_err());
         assert!(unit_directory(Host::Systemd, Some(Path::new("relative")), None, None).is_err());
         assert_eq!(
-            unit_directory(Host::Systemd, Some(home), Some(Path::new("")), None).unwrap(),
+            unit_directory(Host::Systemd, Some(&home), Some(Path::new("")), None).unwrap(),
             PathBuf::from("/home/keeper/.config/systemd/user")
         );
         assert!(
             preview(&SchedulePlan {
-                config: PathBuf::from("/tmp/has\nnewline"),
-                ..plan(Host::Systemd, Path::new("/tmp/prep"))
+                config: host_path("/tmp/has\nnewline"),
+                ..plan(Host::Systemd, &host_path("/tmp/prep"))
             })
             .is_err()
         );
@@ -928,7 +943,7 @@ mod tests {
     fn text_preview_stays_within_the_terminal_width() {
         let report = preview(&plan(
             Host::Systemd,
-            Path::new("/tmp/modelprepper-schedule"),
+            &host_path("/tmp/modelprepper-schedule"),
         ))
         .unwrap();
         let text = crate::present::render_schedule(&report, false, 80);
@@ -942,12 +957,14 @@ mod tests {
     }
 
     fn write_config(dir: &Path) -> (PathBuf, PathBuf) {
-        let config = crate::Config::default_for(dir.join("catalog"), dir.join("models"));
+        // macOS temp directories sit under the /var symlink. Vault paths refuse that.
+        let root = fs::canonicalize(dir).unwrap();
+        let config = crate::Config::default_for(root.join("catalog"), root.join("models"));
         let text = toml::to_string_pretty(&config).unwrap();
-        let path = dir.join("config.toml");
+        let path = root.join("config.toml");
         fs::write(&path, text).unwrap();
-        fs::create_dir(dir.join("stage-parent")).unwrap();
-        (path, dir.join("stage-parent").join("stage"))
+        fs::create_dir(root.join("stage-parent")).unwrap();
+        (path, root.join("stage-parent").join("stage"))
     }
 
     #[test]
