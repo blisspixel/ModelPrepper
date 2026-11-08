@@ -35,8 +35,8 @@ Preview:
                 is reserved
   kit           Report a data-only kit. Slots stay empty until a person names a
                 pick
-  collection    Preview, store, list, or remove a shared list of repositories.
-                Nothing is downloaded
+  collection    Preview, store, list, or remove a shared list, and report
+                matching custody. Nothing is downloaded
   readiness     Read a local recipe and report offline readiness
 
 Watches:

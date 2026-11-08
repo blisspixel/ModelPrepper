@@ -1,7 +1,8 @@
 //! Catalog rows for one shared list. Writing or removing them does not download or apply the list.
 use super::{db, open_catalog};
 use crate::collection::{
-    CategoryCeiling, CollectionEntry, CollectionReport, CollectionSummary, EvaluationAttribution,
+    CategoryCeiling, CollectionCustodyEntry, CollectionEntry, CollectionReport, CollectionSummary,
+    EvaluationAttribution,
 };
 use crate::{Config, Error, Result};
 use rusqlite::{OptionalExtension, params};
@@ -129,6 +130,47 @@ pub(crate) fn remove_collection(config: &Config, name: &str) -> Result<Collectio
 pub(crate) fn read_collection(config: &Config, name: &str) -> Result<CollectionReport> {
     let catalog = open_catalog(config, false)?;
     load_collection(&catalog.db, name)
+}
+
+/// Exact repo and revision text against custody. This does not hash a file or open a socket.
+pub(crate) fn custody_matches(
+    config: &Config,
+    name: &str,
+) -> Result<(String, Vec<CollectionCustodyEntry>)> {
+    let catalog = open_catalog(config, false)?;
+    let stored = load_collection(&catalog.db, name)?;
+    let mut statement = catalog
+        .db
+        .prepare(
+            "SELECT provenance FROM custody
+             WHERE repo_id = ?1 AND resolved_revision = ?2
+             ORDER BY plan_id",
+        )
+        .map_err(db)?;
+    let mut entries = Vec::with_capacity(stored.entries.len());
+    for entry in &stored.entries {
+        let rows = statement
+            .query_map(params![entry.repo_id, entry.revision], |row| {
+                row.get::<_, String>(0)
+            })
+            .map_err(db)?;
+        let mut provenances = Vec::new();
+        let mut custody_rows = 0u64;
+        for row in rows {
+            let provenance = row.map_err(db)?;
+            custody_rows += 1;
+            if !provenances.contains(&provenance) {
+                provenances.push(provenance);
+            }
+        }
+        entries.push(CollectionCustodyEntry {
+            repo_id: entry.repo_id.clone(),
+            revision: entry.revision.clone(),
+            custody_rows,
+            provenances,
+        });
+    }
+    Ok((stored.name, entries))
 }
 
 fn load_collection(connection: &rusqlite::Connection, name: &str) -> Result<CollectionReport> {

@@ -1,4 +1,4 @@
-//! Shared collection file. Preview lists explicit entries. Store writes that list and does not download it. Remove deletes one stored list and does not delete archived revisions.
+//! Shared collection file. Preview lists explicit entries. Store writes that list and does not download it. Remove deletes one stored list and does not delete archived revisions. Custody reports exact catalog matches and does not hash files.
 use crate::{Error, Result};
 use serde::Serialize;
 use std::collections::BTreeSet;
@@ -205,6 +205,58 @@ pub fn show(config: &crate::Config, name: &str) -> Result<CollectionReport> {
 pub fn remove(config: &crate::Config, name: &str) -> Result<CollectionReport> {
     check_text(name, 1, MAX_NAME, "name")?;
     crate::vault::remove_collection(config, name)
+}
+
+#[derive(Debug, PartialEq, Eq, Serialize)]
+pub struct CollectionCustody {
+    pub schema_version: u32,
+    pub action: &'static str,
+    pub name: String,
+    pub entries: Vec<CollectionCustodyEntry>,
+    /// A text match is not a publisher resolution.
+    pub resolved: bool,
+    /// Recorded provenance strings are not checked again.
+    pub provenance_verified: bool,
+    /// Custody rows are not opened or hashed.
+    pub evidence_checked: bool,
+    /// Match order is the stored entry order, not a rank.
+    pub ranked: bool,
+    pub transfer_authorized: bool,
+    pub network_contact: bool,
+    pub vault_mutated: bool,
+    pub downloads_started: bool,
+    pub workspace_bytes: Option<u64>,
+}
+
+#[derive(Debug, PartialEq, Eq, Serialize)]
+pub struct CollectionCustodyEntry {
+    pub repo_id: String,
+    pub revision: String,
+    /// Custody rows with this exact repository and revision text.
+    pub custody_rows: u64,
+    /// Distinct provenance strings on those rows, in plan id order. Not rechecked.
+    pub provenances: Vec<String>,
+}
+
+/// Count custody rows that match one stored list. Nothing is hashed or downloaded.
+pub fn custody(config: &crate::Config, name: &str) -> Result<CollectionCustody> {
+    check_text(name, 1, MAX_NAME, "name")?;
+    let (name, entries) = crate::vault::custody_matches(config, name)?;
+    Ok(CollectionCustody {
+        schema_version: 1,
+        action: "custody",
+        name,
+        entries,
+        resolved: false,
+        provenance_verified: false,
+        evidence_checked: false,
+        ranked: false,
+        transfer_authorized: false,
+        network_contact: false,
+        vault_mutated: false,
+        downloads_started: false,
+        workspace_bytes: None,
+    })
 }
 
 #[derive(Debug, PartialEq, Eq, Serialize)]
@@ -2054,6 +2106,166 @@ base_revision = \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"
         let missing = crate::Config::default_for(root.join("catalog"), root.join("models"));
         assert_eq!(
             remove(&missing, "kept").unwrap_err().code,
+            "vault_not_initialized"
+        );
+        assert!(!root.join("catalog").join("catalog.sqlite3").exists());
+    }
+
+    #[test]
+    fn custody_counts_exact_rows_and_does_not_hash_or_resolve() {
+        let (_dir, config, config_path) = ready();
+        let pin = "0123456789abcdef0123456789abcdef01234567";
+        let other_pin = "fedcba9876543210fedcba9876543210fedcba98";
+        store(
+            &config,
+            &format!(
+                "schema_version = 1\nname = \"offline coding\"\n[[entries]]\nrepo_id = \"example/model\"\nrevision = \"{pin}\"\n[[entries]]\nrepo_id = \"example/model\"\nrevision = \"main\"\n[[entries]]\nrepo_id = \"example/other\"\nrevision = \"{pin}\"\n"
+            ),
+        )
+        .unwrap();
+        store(
+            &config,
+            "schema_version = 1\nname = \"empty\"\nentries = []\n",
+        )
+        .unwrap();
+        let connection =
+            rusqlite::Connection::open(config.catalog_path.join("catalog.sqlite3")).unwrap();
+        for (plan, revision, provenance) in [
+            ("a".repeat(64), pin, "upstream-verified (ranged https)"),
+            ("b".repeat(64), pin, "local-baseline"),
+            ("c".repeat(64), pin, "upstream-verified (ranged https)"),
+            ("d".repeat(64), other_pin, "local-baseline"),
+        ] {
+            connection
+                .execute(
+                    "INSERT INTO custody (plan_id, repo_id, resolved_revision, provenance, volume_label, relative_dir, manifest) VALUES (?1, 'example/model', ?2, ?3, 'models', 'model', '{}')",
+                    rusqlite::params![plan, revision, provenance],
+                )
+                .unwrap();
+        }
+        connection
+            .execute(
+                "INSERT INTO replicas (plan_id, volume_label, relative_dir, manifest) VALUES (?1, 'models', 'other', '{}')",
+                rusqlite::params!["e".repeat(64)],
+            )
+            .unwrap();
+        drop(connection);
+        let before = rows(&config, "custody");
+        let noted = custody(&config, "offline coding").unwrap();
+        assert_eq!(noted.action, "custody");
+        assert_eq!(noted.name, "offline coding");
+        assert!(!noted.resolved);
+        assert!(!noted.provenance_verified);
+        assert!(!noted.evidence_checked);
+        assert!(!noted.ranked);
+        assert!(!noted.transfer_authorized);
+        assert!(!noted.network_contact);
+        assert!(!noted.vault_mutated);
+        assert!(!noted.downloads_started);
+        assert!(noted.workspace_bytes.is_none());
+        assert_eq!(noted.entries.len(), 3);
+        assert_eq!(noted.entries[0].custody_rows, 3);
+        assert_eq!(
+            noted.entries[0].provenances,
+            vec![
+                "upstream-verified (ranged https)".to_string(),
+                "local-baseline".to_string()
+            ]
+        );
+        assert_eq!(noted.entries[1].revision, "main");
+        assert_eq!(noted.entries[1].custody_rows, 0);
+        assert!(noted.entries[1].provenances.is_empty());
+        assert_eq!(noted.entries[2].repo_id, "example/other");
+        assert_eq!(noted.entries[2].custody_rows, 0);
+        assert_eq!(rows(&config, "custody"), before);
+        assert_eq!(rows(&config, "replicas"), 1);
+        let wide = crate::present::render_collection_custody(&noted, false, 160);
+        assert!(wide.contains("noted"), "{wide}");
+        assert!(wide.contains("custody 3"), "{wide}");
+        assert!(
+            wide.contains("upstream-verified (ranged https), local-baseline"),
+            "{wide}"
+        );
+        assert!(
+            wide.contains("custody not recorded  not rehashed"),
+            "{wide}"
+        );
+        assert!(wide.contains("not a fresh hash or a download"), "{wide}");
+        let narrow = crate::present::render_collection_custody(&noted, true, 80);
+        assert!(
+            narrow.lines().all(|line| line.chars().count() <= 80),
+            "{narrow}"
+        );
+        let empty = custody(&config, "empty").unwrap();
+        assert!(empty.entries.is_empty());
+        let none = crate::present::render_collection_custody(&empty, false, 80);
+        assert!(none.contains("none"), "{none}");
+        assert!(none.contains("not a fresh hash or a download"), "{none}");
+        assert_eq!(
+            custody(&config, "missing").unwrap_err().code,
+            "collection_not_stored"
+        );
+        assert_eq!(custody(&config, "").unwrap_err().code, "invalid_collection");
+        assert_eq!(rows(&config, "custody"), before);
+
+        let command = crate::cli::Cli::try_parse_from([
+            "modelprepper",
+            "collection",
+            "custody",
+            "--config",
+            config_path.to_str().unwrap(),
+            "--name",
+            "offline coding",
+        ])
+        .unwrap();
+        let output = crate::cli::execute_in(command, crate::cli::View::piped()).unwrap();
+        let crate::cli::CommandOutput::Json(value) = output else {
+            panic!("custody is json when stdout is a pipe");
+        };
+        assert_eq!(value["action"], "custody");
+        assert_eq!(value["resolved"], false);
+        assert_eq!(value["provenance_verified"], false);
+        assert_eq!(value["evidence_checked"], false);
+        assert_eq!(value["entries"][0]["custody_rows"], 3);
+        assert_eq!(value["entries"][1]["custody_rows"], 0);
+        assert!(value["workspace_bytes"].is_null());
+        assert_eq!(rows(&config, "custody"), before);
+
+        let text_command = crate::cli::Cli::try_parse_from([
+            "modelprepper",
+            "collection",
+            "custody",
+            "--config",
+            config_path.to_str().unwrap(),
+            "--name",
+            "empty",
+        ])
+        .unwrap();
+        let text_output = crate::cli::execute_in(
+            text_command,
+            crate::cli::View {
+                text: true,
+                ..crate::cli::View::piped()
+            },
+        )
+        .unwrap();
+        let crate::cli::CommandOutput::Text { body, ok } = text_output else {
+            panic!("text custody");
+        };
+        assert!(ok);
+        assert!(body.contains("none"), "{body}");
+        assert!(
+            body.lines().all(|line| line.chars().count() <= 80),
+            "{body}"
+        );
+
+        let unready = tempfile::tempdir().unwrap();
+        let root = std::fs::canonicalize(unready.path()).unwrap();
+        std::fs::create_dir_all(root.join("catalog")).unwrap();
+        std::fs::create_dir_all(root.join("models")).unwrap();
+        let missing = crate::Config::default_for(root.join("catalog"), root.join("models"));
+        assert_eq!(
+            custody(&missing, "offline coding").unwrap_err().code,
             "vault_not_initialized"
         );
         assert!(!root.join("catalog").join("catalog.sqlite3").exists());
