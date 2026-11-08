@@ -1,4 +1,4 @@
-//! Shared collection file. Preview lists explicit entries. Store writes that list and does not download it. Remove deletes one stored list and does not delete archived revisions. Custody reports exact catalog matches and does not hash files. A 40-character lowercase hex revision is named `commit`; any other accepted revision is named `name`. That label is not a resolution. Export writes one stored list back to schema 1. Diff compares one schema 1 file with the stored list and does not change either.
+//! Shared collection file. Preview lists explicit entries. Store writes that list and does not download it. Remove deletes one stored list and does not delete archived revisions. Custody reports exact catalog matches and does not hash files. A 40-character lowercase hex revision is named `commit`; any other accepted revision is named `name`. That label is not a resolution. When every matching manifest records `size_bytes` and those totals agree, the report shows that sum and does not charge a ceiling. Export writes one stored list back to schema 1. Diff compares one schema 1 file with the stored list and does not change either.
 use crate::{Error, Result};
 use serde::Serialize;
 use std::collections::BTreeSet;
@@ -242,6 +242,21 @@ pub struct CollectionCustodyEntry {
     /// `commit` for 40 lowercase hex characters. `name` for any other accepted revision.
     /// The label is not a publisher resolution.
     pub revision_shape: &'static str,
+    /// Sum of stored `size_bytes` when every matching manifest parses and the totals agree.
+    /// Absent when nothing is recorded or the manifests do not agree. Not a charge.
+    pub measured_bytes: Option<u64>,
+}
+
+/// Sum `size_bytes` in one stored manifest. A manifest that does not parse is not a size.
+pub(crate) fn measured_total(manifest: &str) -> Option<u64> {
+    let files =
+        serde_json::from_str::<Vec<serde_json::Map<String, serde_json::Value>>>(manifest).ok()?;
+    let mut total = 0u64;
+    for file in files {
+        let size = file.get("size_bytes")?.as_u64()?;
+        total = total.checked_add(size)?;
+    }
+    Some(total)
 }
 
 /// Classify revision text. This does not contact a publisher or hash a file.
@@ -2394,6 +2409,15 @@ base_revision = \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"
             "schema_version = 1\nname = \"empty\"\nentries = []\n",
         )
         .unwrap();
+        let agreed = "a".repeat(40);
+        let split = "b".repeat(40);
+        store(
+            &config,
+            &format!(
+                "schema_version = 1\nname = \"sized\"\n[[entries]]\nrepo_id = \"example/sized\"\nrevision = \"{agreed}\"\n[[entries]]\nrepo_id = \"example/sized\"\nrevision = \"{split}\"\n"
+            ),
+        )
+        .unwrap();
         let connection =
             rusqlite::Connection::open(config.catalog_path.join("catalog.sqlite3")).unwrap();
         for (plan, revision, provenance) in [
@@ -2415,6 +2439,20 @@ base_revision = \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"
                 rusqlite::params!["e".repeat(64)],
             )
             .unwrap();
+        let same = r#"[{"path":"weights.safetensors","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","size_bytes":100},{"path":"card.md","sha256":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","size_bytes":20}]"#;
+        for (plan, revision, manifest) in [
+            ("f".repeat(64), agreed.clone(), same),
+            ("g".repeat(64), agreed.clone(), same),
+            ("h".repeat(64), split.clone(), r#"[{"size_bytes":10}]"#),
+            ("i".repeat(64), split.clone(), r#"[{"size_bytes":11}]"#),
+        ] {
+            connection
+                .execute(
+                    "INSERT INTO custody (plan_id, repo_id, resolved_revision, provenance, volume_label, relative_dir, manifest) VALUES (?1, 'example/sized', ?2, 'upstream-verified (ranged https)', 'models', 'model', ?3)",
+                    rusqlite::params![plan, revision, manifest],
+                )
+                .unwrap();
+        }
         drop(connection);
         let before = rows(&config, "custody");
         let noted = custody(&config, "offline coding").unwrap();
@@ -2431,6 +2469,7 @@ base_revision = \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"
         assert!(noted.workspace_bytes.is_none());
         assert_eq!(noted.entries.len(), 5);
         assert_eq!(noted.entries[0].revision_shape, "commit");
+        assert_eq!(noted.entries[0].measured_bytes, None);
         assert_eq!(noted.entries[0].custody_rows, 3);
         assert_eq!(
             noted.entries[0].provenances,
@@ -2441,6 +2480,7 @@ base_revision = \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"
         );
         assert_eq!(noted.entries[1].revision, "main");
         assert_eq!(noted.entries[1].revision_shape, "name");
+        assert_eq!(noted.entries[1].measured_bytes, None);
         assert_eq!(noted.entries[1].custody_rows, 0);
         assert!(noted.entries[1].provenances.is_empty());
         assert_eq!(noted.entries[2].repo_id, "example/other");
@@ -2458,12 +2498,35 @@ base_revision = \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"
             "{wide}"
         );
         assert!(
-            wide.contains("main  name  custody not recorded  not rehashed"),
+            wide.contains(
+                "main  name  custody not recorded  measured not recorded  not rehashed  not charged"
+            ),
             "{wide}"
         );
         assert!(
             wide.contains(&format!("{pin}  commit  custody 3")),
             "{wide}"
+        );
+        assert!(wide.contains("measured unavailable"), "{wide}");
+        assert!(wide.contains("not charged"), "{wide}");
+        let sized = custody(&config, "sized").unwrap();
+        assert_eq!(sized.entries[0].measured_bytes, Some(120));
+        assert_eq!(sized.entries[0].custody_rows, 2);
+        assert_eq!(sized.entries[0].revision_shape, "commit");
+        assert_eq!(sized.entries[1].measured_bytes, None);
+        assert_eq!(sized.entries[1].custody_rows, 2);
+        assert!(!sized.vault_mutated);
+        let sized_text = crate::present::render_collection_custody(&sized, false, 220);
+        assert!(sized_text.contains("measured 120"), "{sized_text}");
+        assert!(sized_text.contains("measured unavailable"), "{sized_text}");
+        assert!(sized_text.contains("not charged"), "{sized_text}");
+        assert_eq!(measured_total("[]"), Some(0));
+        assert_eq!(measured_total("{}"), None);
+        assert_eq!(measured_total(r#"[{"size_bytes":1}]"#), Some(1));
+        assert_eq!(measured_total(r#"[{"path":"weights"}]"#), None);
+        assert_eq!(
+            measured_total(r#"[{"size_bytes":18446744073709551615},{"size_bytes":1}]"#),
+            None
         );
         assert!(wide.contains("not a fresh hash or a download"), "{wide}");
         let narrow = crate::present::render_collection_custody(&noted, true, 80);
@@ -2503,6 +2566,7 @@ base_revision = \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"
         assert_eq!(value["evidence_checked"], false);
         assert_eq!(value["entries"][0]["custody_rows"], 3);
         assert_eq!(value["entries"][0]["revision_shape"], "commit");
+        assert!(value["entries"][0]["measured_bytes"].is_null());
         assert_eq!(value["entries"][1]["custody_rows"], 0);
         assert_eq!(value["entries"][1]["revision_shape"], "name");
         assert!(value["workspace_bytes"].is_null());

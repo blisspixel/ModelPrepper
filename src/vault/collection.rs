@@ -2,7 +2,7 @@
 use super::{db, open_catalog};
 use crate::collection::{
     CategoryCeiling, CollectionCustodyEntry, CollectionEntry, CollectionReport, CollectionSummary,
-    EvaluationAttribution, revision_shape,
+    EvaluationAttribution, measured_total, revision_shape,
 };
 use crate::{Config, Error, Result};
 use rusqlite::{OptionalExtension, params};
@@ -142,7 +142,7 @@ pub(crate) fn custody_matches(
     let mut statement = catalog
         .db
         .prepare(
-            "SELECT provenance FROM custody
+            "SELECT provenance, manifest FROM custody
              WHERE repo_id = ?1 AND resolved_revision = ?2
              ORDER BY plan_id",
         )
@@ -151,24 +151,39 @@ pub(crate) fn custody_matches(
     for entry in &stored.entries {
         let rows = statement
             .query_map(params![entry.repo_id, entry.revision], |row| {
-                row.get::<_, String>(0)
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
             })
             .map_err(db)?;
         let mut provenances = Vec::new();
+        let mut totals = Vec::new();
+        let mut measurable = true;
         let mut custody_rows = 0u64;
         for row in rows {
-            let provenance = row.map_err(db)?;
+            let (provenance, manifest) = row.map_err(db)?;
             custody_rows += 1;
             if !provenances.contains(&provenance) {
                 provenances.push(provenance);
             }
+            match measured_total(&manifest) {
+                Some(total) => totals.push(total),
+                None => measurable = false,
+            }
         }
+        let measured_bytes = if measurable
+            && let Some(first) = totals.first()
+            && totals.iter().all(|total| total == first)
+        {
+            Some(*first)
+        } else {
+            None
+        };
         entries.push(CollectionCustodyEntry {
             repo_id: entry.repo_id.clone(),
             revision: entry.revision.clone(),
             custody_rows,
             provenances,
             revision_shape: revision_shape(&entry.revision),
+            measured_bytes,
         });
     }
     Ok((stored.name, entries))
