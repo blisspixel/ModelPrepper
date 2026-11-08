@@ -37,6 +37,8 @@ Preview:
                 pick
   collection    Preview, store, list, remove, export, or diff a shared list, and
                 report matching custody. Nothing is downloaded
+  discover      Search the reviewed source catalog. Nothing is downloaded or
+                approved
   readiness     Read a local recipe and report offline readiness
 
 Watches:

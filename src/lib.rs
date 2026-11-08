@@ -5,6 +5,7 @@ mod buffers;
 pub mod cli;
 mod collection;
 pub mod config;
+mod discover;
 pub mod error;
 mod filesystem;
 mod http;

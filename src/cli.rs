@@ -362,6 +362,18 @@ pub enum PreviewCommand {
         #[command(subcommand)]
         command: CollectionAction,
     },
+    /// Search the reviewed source catalog. Nothing is downloaded or approved.
+    Discover {
+        /// Constraint TOML. See examples/discovery.toml.
+        #[arg(long)]
+        file: PathBuf,
+        /// Return matches after this source id.
+        #[arg(long)]
+        after: Option<String>,
+        /// Page size from 1 to 100.
+        #[arg(long, default_value_t = 20, value_parser = clap::value_parser!(u32).range(1..=100))]
+        limit: u32,
+    },
     /// Read a local recipe and report offline readiness.
     Readiness {
         /// Versioned runtime recipe JSON. See examples/recipe.json.
@@ -812,6 +824,12 @@ pub(crate) fn execute_with(
                 })
             }
         },
+        Command::Preview(PreviewCommand::Discover { file, after, limit }) => {
+            let report = crate::discover::search(&read_text(&file)?, after.as_deref(), limit)?;
+            show(&view, &report, true, |report| {
+                crate::present::render_discovery(report, view.color, view.columns)
+            })
+        }
         Command::Preview(PreviewCommand::Readiness { recipe, path }) => {
             let recipe = crate::readiness::Recipe::parse(&read_text(&recipe)?)?;
             let report = crate::readiness::preflight(&recipe, &path)?;
