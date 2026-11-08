@@ -253,6 +253,8 @@ pub struct CustodyPlan {
     /// This plan's manifest total. Absent when that manifest does not parse.
     /// Not a charge and not a reason to drop the plan.
     pub measured_bytes: Option<u64>,
+    /// Replica rows stored for this plan id. A replica is not a custody row and is not dropped.
+    pub replica_rows: u64,
 }
 
 #[derive(Debug, PartialEq, Eq, Serialize)]
@@ -268,6 +270,9 @@ pub struct CollectionCustodyEntry {
     /// The same plans, with the stored volume and that plan's own manifest total.
     /// A missing total does not drop the plan.
     pub plans: Vec<CustodyPlan>,
+    /// Other entries in this stored list that name this repository and revision as a declared base.
+    /// The count does not fetch that base and does not retire this entry.
+    pub dependents: u64,
     /// `commit` for 40 lowercase hex characters. `name` for any other accepted revision.
     /// The label is not a publisher resolution.
     pub revision_shape: &'static str,
@@ -346,7 +351,8 @@ pub(crate) fn charge_ceilings(
         .collect()
 }
 
-/// Count custody rows that match one stored list and name each plan's volume and bytes.
+/// Count custody rows that match one stored list.
+/// Each plan names its volume, bytes, and replica rows. Dependents are declared bases in this list.
 /// Nothing is dropped, merged, hashed, or downloaded.
 pub fn custody(config: &crate::Config, name: &str) -> Result<CollectionCustody> {
     check_text(name, 1, MAX_NAME, "name")?;
@@ -2714,7 +2720,7 @@ base_revision = \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"
         store(
             &config,
             &format!(
-                "schema_version = 1\nname = \"sized\"\n[[entries]]\nrepo_id = \"example/sized\"\nrevision = \"{agreed}\"\n[[entries]]\nrepo_id = \"example/sized\"\nrevision = \"{split}\"\n"
+                "schema_version = 1\nname = \"sized\"\n[[entries]]\nrepo_id = \"example/sized\"\nrevision = \"{agreed}\"\n[[entries]]\nrepo_id = \"example/sized\"\nrevision = \"{split}\"\n[[entries]]\nrepo_id = \"example/child\"\nrevision = \"child\"\nbase_repo = \"example/sized\"\nbase_revision = \"{agreed}\"\n"
             ),
         )
         .unwrap();
@@ -2739,6 +2745,12 @@ base_revision = \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"
                 rusqlite::params!["e".repeat(64)],
             )
             .unwrap();
+        connection
+            .execute(
+                "INSERT INTO replicas (plan_id, volume_label, relative_dir, manifest) VALUES (?1, 'spare', 'copy', '{}')",
+                rusqlite::params!["a".repeat(64)],
+            )
+            .unwrap();
         let same = r#"[{"path":"weights.safetensors","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","size_bytes":100},{"path":"card.md","sha256":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","size_bytes":20}]"#;
         for (plan, revision, manifest) in [
             ("f".repeat(64), agreed.clone(), same),
@@ -2755,6 +2767,7 @@ base_revision = \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"
         }
         drop(connection);
         let before = rows(&config, "custody");
+        let replicas_before = rows(&config, "replicas");
         let noted = custody(&config, "offline coding").unwrap();
         assert_eq!(noted.action, "custody");
         assert_eq!(noted.name, "offline coding");
@@ -2794,7 +2807,8 @@ base_revision = \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"
         assert_eq!(noted.entries[3].revision_shape, "name");
         assert_eq!(noted.entries[4].revision_shape, "name");
         assert_eq!(rows(&config, "custody"), before);
-        assert_eq!(rows(&config, "replicas"), 1);
+        assert_eq!(rows(&config, "replicas"), replicas_before);
+        assert_eq!(replicas_before, 2);
         let wide = crate::present::render_collection_custody(&noted, false, 220);
         assert!(wide.contains("noted"), "{wide}");
         assert!(wide.contains("custody 3"), "{wide}");
@@ -2816,13 +2830,16 @@ base_revision = \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"
         assert!(wide.contains("not charged"), "{wide}");
         assert!(
             wide.contains(&format!(
-                "{}  models  measured unavailable  not dropped",
+                "{}  models  measured unavailable  replicas 1  not dropped",
                 "a".repeat(64)
             )),
             "{wide}"
         );
         assert_eq!(noted.entries[0].plans[0].volume_label, "models");
         assert!(noted.entries[0].plans[0].measured_bytes.is_none());
+        assert_eq!(noted.entries[0].plans[0].replica_rows, 1);
+        assert_eq!(noted.entries[0].plans[1].replica_rows, 0);
+        assert_eq!(noted.entries[0].dependents, 0);
         assert_eq!(noted.entries[0].plans.len(), 3);
         assert!(!wide.contains(&"e".repeat(64)), "{wide}");
         let sized = custody(&config, "sized").unwrap();
@@ -2834,8 +2851,12 @@ base_revision = \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"
         );
         assert_eq!(sized.entries[0].plans[0].measured_bytes, Some(120));
         assert_eq!(sized.entries[0].plans[1].measured_bytes, Some(120));
+        assert_eq!(sized.entries[0].dependents, 1);
         assert_eq!(sized.entries[1].plans[0].measured_bytes, Some(10));
         assert_eq!(sized.entries[1].plans[1].measured_bytes, Some(11));
+        assert_eq!(sized.entries[1].dependents, 0);
+        assert_eq!(sized.entries[2].custody_rows, 0);
+        assert_eq!(sized.entries[2].dependents, 0);
         assert_eq!(sized.entries[0].revision_shape, "commit");
         assert_eq!(sized.entries[1].measured_bytes, None);
         assert_eq!(sized.entries[1].custody_rows, 2);
@@ -2843,8 +2864,16 @@ base_revision = \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"
         let sized_text = crate::present::render_collection_custody(&sized, false, 220);
         assert!(sized_text.contains("measured 120"), "{sized_text}");
         assert!(
+            sized_text.contains("dependents  1  not retired"),
+            "{sized_text}"
+        );
+        assert!(
+            sized_text.contains("dependents  0  not retired"),
+            "{sized_text}"
+        );
+        assert!(
             sized_text.contains(&format!(
-                "{}  models  measured 120  not dropped",
+                "{}  models  measured 120  replicas 0  not dropped",
                 "f".repeat(64)
             )),
             "{sized_text}"
@@ -2901,6 +2930,8 @@ base_revision = \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"
         assert_eq!(value["entries"][0]["plan_ids"][0], "a".repeat(64));
         assert_eq!(value["entries"][0]["plans"][0]["volume_label"], "models");
         assert!(value["entries"][0]["plans"][0]["measured_bytes"].is_null());
+        assert_eq!(value["entries"][0]["plans"][0]["replica_rows"], 1);
+        assert_eq!(value["entries"][0]["dependents"], 0);
         assert_eq!(value["entries"][0]["plan_ids"][2], "c".repeat(64));
         assert!(
             value["entries"][1]["plan_ids"]

@@ -1142,11 +1142,16 @@ pub fn render_collection_custody(
                 columns,
                 "plan",
                 &format!(
-                    "{}  {}  {measured}  not dropped",
-                    plan.plan_id, plan.volume_label
+                    "{}  {}  {measured}  replicas {}  not dropped",
+                    plan.plan_id, plan.volume_label, plan.replica_rows
                 ),
             ));
         }
+        lines.push(field(
+            columns,
+            "dependents",
+            &format!("{}  not retired", entry.dependents),
+        ));
     }
     lines.push(field(columns, "approval", "still blocked"));
     lines.push(next_line(
