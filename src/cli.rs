@@ -208,6 +208,18 @@ pub enum LocalCopiesCommand {
         #[arg(long)]
         copy: bool,
     },
+    /// Stage and seal one granted revision. Approval stays blocked.
+    Fetch {
+        /// Path to the vault configuration file.
+        #[arg(long)]
+        config: PathBuf,
+        /// Pending plan id that has a current grant.
+        #[arg(long)]
+        plan: String,
+        /// Absolute staging directory outside the catalog and volumes.
+        #[arg(long)]
+        stage: PathBuf,
+    },
     /// Read-only inventory of local runtime stores.
     Local {
         #[command(subcommand)]
@@ -418,6 +430,16 @@ pub fn execute_in(cli: Cli, view: View) -> Result<CommandOutput> {
             move_source,
             copy: _,
         }) => adopt_local(&view, quiet, &config, &plan, &path, move_source),
+        Command::LocalCopies(LocalCopiesCommand::Fetch {
+            config,
+            plan,
+            stage,
+        }) => {
+            let seal = crate::vault::fetch(&located_config(&config)?, &plan, &stage)?;
+            show(&view, &seal, true, |seal| {
+                crate::present::render_seal(seal, view.color, view.columns)
+            })
+        }
         Command::LocalCopies(LocalCopiesCommand::Local { command }) => match command {
             LocalCommand::List {
                 ollama_dir,

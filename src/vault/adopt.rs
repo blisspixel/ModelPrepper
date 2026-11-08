@@ -388,7 +388,7 @@ fn copy_one(
 }
 
 /// Hash check that never deletes. Publication uses this so a bad read cannot erase a sealed copy.
-fn matched_sha256(path: &Path, file: &SourceFile) -> Result<Option<String>> {
+pub(crate) fn matched_sha256(path: &Path, file: &SourceFile) -> Result<Option<String>> {
     if !path.exists() {
         return Ok(None);
     }
@@ -413,7 +413,7 @@ fn matched_sha256(path: &Path, file: &SourceFile) -> Result<Option<String>> {
     Ok(Some(hashed.sha256))
 }
 
-fn manifest_from_tree(root: &Path, files: &[SourceFile]) -> Result<String> {
+pub(crate) fn manifest_from_tree(root: &Path, files: &[SourceFile]) -> Result<String> {
     let mut entries = Vec::new();
     for file in files {
         let sha256 = matched_sha256(&verify::local_path(root, &file.path), file)?
@@ -427,7 +427,7 @@ fn manifest_from_tree(root: &Path, files: &[SourceFile]) -> Result<String> {
     serde_json::to_string(&entries).map_err(|error| Error::new("output_failed", error.to_string()))
 }
 
-fn recorded_manifest(catalog: &super::Catalog, plan_id: &str) -> Result<Option<String>> {
+pub(crate) fn recorded_manifest(catalog: &super::Catalog, plan_id: &str) -> Result<Option<String>> {
     use rusqlite::OptionalExtension;
     catalog
         .db
@@ -462,6 +462,16 @@ fn discard_staging_extras(staging: &Path, report: &Verification) -> Result<()> {
     Ok(())
 }
 
+pub(crate) struct CustodyRecord<'a> {
+    pub plan_id: &'a str,
+    pub repo: &'a str,
+    pub revision: &'a str,
+    pub provenance: &'a str,
+    pub volume_label: &'a str,
+    pub relative: &'a str,
+    pub manifest: &'a str,
+}
+
 fn record(
     catalog: &super::Catalog,
     plan_id: &str,
@@ -471,18 +481,33 @@ fn record(
     relative: &str,
     manifest: &str,
 ) -> Result<()> {
+    record_custody(
+        catalog,
+        &CustodyRecord {
+            plan_id,
+            repo,
+            revision,
+            provenance: PROVENANCE_LOCAL_UPSTREAM,
+            volume_label,
+            relative,
+            manifest,
+        },
+    )
+}
+
+pub(crate) fn record_custody(catalog: &super::Catalog, record: &CustodyRecord<'_>) -> Result<()> {
     catalog
         .db
         .execute(
             "INSERT INTO custody (plan_id, repo_id, resolved_revision, provenance, volume_label, relative_dir, manifest) VALUES (?1,?2,?3,?4,?5,?6,?7) ON CONFLICT(plan_id) DO NOTHING",
             rusqlite::params![
-                plan_id,
-                repo,
-                revision,
-                PROVENANCE_LOCAL_UPSTREAM,
-                volume_label,
-                relative,
-                manifest
+                record.plan_id,
+                record.repo,
+                record.revision,
+                record.provenance,
+                record.volume_label,
+                record.relative,
+                record.manifest
             ],
         )
         .map_err(db)?;
@@ -595,7 +620,7 @@ fn rollback(staging: &Path, journal: &Path) {
     let _ = fs::remove_file(journal);
 }
 
-fn publish_dir(volume: &Path, repo: &str, revision: &str) -> PathBuf {
+pub(crate) fn publish_dir(volume: &Path, repo: &str, revision: &str) -> PathBuf {
     let mut path = volume.join("preserved");
     for part in repo.split('/') {
         path.push(part);
@@ -604,7 +629,7 @@ fn publish_dir(volume: &Path, repo: &str, revision: &str) -> PathBuf {
     path
 }
 
-fn relative_dir(repo: &str, revision: &str) -> String {
+pub(crate) fn relative_dir(repo: &str, revision: &str) -> String {
     format!("preserved/{repo}/{revision}")
 }
 
@@ -613,7 +638,7 @@ fn partial_path(path: &Path) -> PathBuf {
     path.with_file_name(format!("{name}.partial"))
 }
 
-fn sync_dir(path: &Path) -> Result<()> {
+pub(crate) fn sync_dir(path: &Path) -> Result<()> {
     #[cfg(unix)]
     File::open(path).map_err(io)?.sync_all().map_err(io)?;
     #[cfg(not(unix))]

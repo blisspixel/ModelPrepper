@@ -73,6 +73,8 @@ Illustrative schema, to be finalized during the format milestone:
 
 Local SHA-256 is recorded for all files. Ordinary Git blob ids use Git object hashing, not raw-file SHA-256. Xet metadata requires the client's documented interpretation. Never compare unlike algorithms.
 
+The sealed folder writes `modelprepper-bundle.json` beside the files. That file has no timestamp. Custody stores the compact `{path, sha256, size_bytes}` list. A directory rename without the bundle file is not a seal. Readiness on the fixture seal reports `untested` and does not report `load_passed`.
+
 A hash match establishes identity relative to captured metadata. It does not make an unsigned publisher cryptographically authenticated beyond the source trust used when capturing that metadata.
 
 ## Independent status dimensions

@@ -20,11 +20,13 @@ mod grant;
 #[path = "vault/tests/ownership.rs"]
 mod ownership_tests;
 mod review;
+mod seal;
 pub use adoption::{Adoption, Outcome, PROVENANCE_LOCAL_UPSTREAM, adopt};
 pub use grant::{Grant, current_grant, record_grant};
 pub use review::{Decision, Proposal, ProposalPage, decide, proposals, propose, show_proposal};
 #[cfg(test)]
 pub(crate) use review::{ProposalSummary, SourceReview};
+pub use seal::{PROVENANCE_RANGED_HTTPS, Seal, SealStop, fetch, seal_staged};
 
 #[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]

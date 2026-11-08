@@ -31,6 +31,7 @@ fn native_cli_reports_version_help_and_argument_failures() {
         vec!["propose", "--help"],
         vec!["proposals", "--help"],
         vec!["decide", "--help"],
+        vec!["fetch", "--help"],
     ] {
         let output = binary(&args);
         assert!(output.status.success());
