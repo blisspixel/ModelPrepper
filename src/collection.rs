@@ -1,4 +1,4 @@
-//! Shared collection file. Preview lists explicit entries. Store writes that list and does not download it. Remove deletes one stored list and does not delete archived revisions. Custody reports exact catalog matches and does not hash files. Export writes one stored list back to schema 1.
+//! Shared collection file. Preview lists explicit entries. Store writes that list and does not download it. Remove deletes one stored list and does not delete archived revisions. Custody reports exact catalog matches and does not hash files. Export writes one stored list back to schema 1. Diff compares one schema 1 file with the stored list and does not change either.
 use crate::{Error, Result};
 use serde::Serialize;
 use std::collections::BTreeSet;
@@ -425,6 +425,90 @@ fn publish_export(output: &Path, temp: &Path, text: &str) -> Result<()> {
     }
     let _ = std::fs::remove_file(temp);
     Ok(())
+}
+
+#[derive(Debug, PartialEq, Eq, Serialize)]
+pub struct CollectionDiff {
+    pub schema_version: u32,
+    pub action: &'static str,
+    pub supported: bool,
+    pub name: String,
+    /// True only when the parsed file fields equal the stored list.
+    pub matches: bool,
+    /// Parsed field groups that differ, in a fixed order. Empty when the lists match.
+    pub changed: Vec<String>,
+    pub resolved: bool,
+    pub ranked: bool,
+    pub evidence_checked: bool,
+    pub provenance_verified: bool,
+    pub transfer_authorized: bool,
+    pub network_contact: bool,
+    /// The catalog and the file are not rewritten.
+    pub vault_mutated: bool,
+    pub downloads_started: bool,
+    pub workspace_bytes: Option<u64>,
+}
+
+/// Compare one schema 1 file with the stored list of the same name.
+///
+/// Comments and key order are ignored. An unknown schema does not open the catalog.
+pub fn diff(config: &crate::Config, text: &str) -> Result<CollectionDiff> {
+    let file = preview(text)?;
+    if !file.supported {
+        return Ok(CollectionDiff {
+            schema_version: 1,
+            action: "diff",
+            supported: false,
+            name: String::new(),
+            matches: false,
+            changed: Vec::new(),
+            resolved: false,
+            ranked: false,
+            evidence_checked: false,
+            provenance_verified: false,
+            transfer_authorized: false,
+            network_contact: false,
+            vault_mutated: false,
+            downloads_started: false,
+            workspace_bytes: None,
+        });
+    }
+    let stored = show(config, &file.name)?;
+    let changed = changed_fields(&file, &stored);
+    Ok(CollectionDiff {
+        schema_version: 1,
+        action: "diff",
+        supported: true,
+        name: file.name,
+        matches: changed.is_empty(),
+        changed,
+        resolved: false,
+        ranked: false,
+        evidence_checked: false,
+        provenance_verified: false,
+        transfer_authorized: false,
+        network_contact: false,
+        vault_mutated: false,
+        downloads_started: false,
+        workspace_bytes: None,
+    })
+}
+
+fn changed_fields(file: &CollectionReport, stored: &CollectionReport) -> Vec<String> {
+    let mut changed = Vec::new();
+    if file.replica != stored.replica {
+        changed.push("replica".to_string());
+    }
+    if file.ceilings != stored.ceilings {
+        changed.push("ceilings".to_string());
+    }
+    if file.entries != stored.entries {
+        changed.push("entries".to_string());
+    }
+    if file.shared_bases != stored.shared_bases {
+        changed.push("shared_bases".to_string());
+    }
+    changed
 }
 
 #[derive(Debug, PartialEq, Eq, Serialize)]
@@ -2627,6 +2711,213 @@ base_revision = "abcdef0123456789abcdef0123456789abcdef01"
             "vault_not_initialized"
         );
         assert!(!unready_output.exists());
+        assert!(
+            !unready_root
+                .join("catalog")
+                .join("catalog.sqlite3")
+                .exists()
+        );
+    }
+
+    #[test]
+    fn diff_compares_parsed_fields_and_does_not_change_either_side() {
+        let (_dir, config, config_path) = ready();
+        let root = config_path.parent().unwrap();
+        let example = include_str!("../examples/collection.toml");
+        store(&config, example).unwrap();
+        store(
+            &config,
+            r#"
+schema_version = 1
+name = "quoted"
+replica = "backup"
+[[ceilings]]
+category = "text"
+bytes = 0
+[[entries]]
+repo_id = "example/model"
+revision = "0123456789abcdef0123456789abcdef01234567"
+note = "say \"hi\" \\ path"
+representation = "original-required"
+categories = ["text", "coding"]
+base_repo = "example/base"
+base_revision = "abcdef0123456789abcdef0123456789abcdef01"
+evaluation_source = "operator"
+evaluation_name = "manual-review"
+evaluation_value = "not scored"
+evidence = "present"
+provenance = "stated conversion"
+[[entries]]
+repo_id = "example/other"
+revision = "main"
+base_repo = "example/base"
+base_revision = "abcdef0123456789abcdef0123456789abcdef01"
+"#,
+        )
+        .unwrap();
+        let before = [
+            "collections",
+            "collection_entries",
+            "collection_ceilings",
+            "custody",
+        ]
+        .map(|table| rows(&config, table));
+        let source = root.join("source.toml");
+        std::fs::write(&source, example).unwrap();
+        let equal = diff(&config, example).unwrap();
+        assert!(equal.supported);
+        assert!(equal.matches);
+        assert!(equal.changed.is_empty());
+        assert_eq!(equal.action, "diff");
+        assert_eq!(equal.name, "offline coding");
+        assert!(!equal.vault_mutated);
+        assert!(!equal.resolved);
+        assert!(!equal.ranked);
+        assert!(!equal.evidence_checked);
+        assert!(!equal.provenance_verified);
+        assert!(!equal.transfer_authorized);
+        assert!(!equal.network_contact);
+        assert!(!equal.downloads_started);
+        assert!(equal.workspace_bytes.is_none());
+        assert_eq!(std::fs::read(&source).unwrap(), example.as_bytes());
+        let commented = format!("# operator note\n{example}");
+        assert!(diff(&config, &commented).unwrap().matches);
+        let output = root.join("quoted.toml");
+        export(&config, "quoted", &output).unwrap();
+        let quoted = std::fs::read_to_string(&output).unwrap();
+        assert!(diff(&config, &quoted).unwrap().matches);
+        let replica = quoted.replace("replica = \"backup\"", "replica = \"other\"");
+        let replica_diff = diff(&config, &replica).unwrap();
+        assert!(!replica_diff.matches);
+        assert_eq!(replica_diff.changed, ["replica"]);
+        let ceilings = quoted.replace("bytes = 0", "bytes = 1");
+        assert_eq!(diff(&config, &ceilings).unwrap().changed, ["ceilings"]);
+        let note = quoted.replace("say \\\"hi\\\" \\\\ path", "changed");
+        assert_eq!(diff(&config, &note).unwrap().changed, ["entries"]);
+        let swapped = quoted.replace("repo_id = \"example/model\"", "repo_id = \"example/zzz\"");
+        let moved = swapped.replacen(
+            "repo_id = \"example/other\"",
+            "repo_id = \"example/model\"",
+            1,
+        );
+        let order = moved.replacen(
+            "repo_id = \"example/zzz\"",
+            "repo_id = \"example/other\"",
+            1,
+        );
+        assert_eq!(diff(&config, &order).unwrap().changed, ["entries"]);
+        let base = quoted.replace(
+            "base_revision = \"abcdef0123456789abcdef0123456789abcdef01\"",
+            "base_revision = \"0123456789abcdef0123456789abcdef01234567\"",
+        );
+        assert_eq!(
+            diff(&config, &base).unwrap().changed,
+            ["entries", "shared_bases"]
+        );
+        for (table, count) in [
+            "collections",
+            "collection_entries",
+            "collection_ceilings",
+            "custody",
+        ]
+        .into_iter()
+        .zip(before)
+        {
+            assert_eq!(rows(&config, table), count, "{table}");
+        }
+        assert_eq!(std::fs::read_to_string(&output).unwrap(), quoted);
+        assert_eq!(
+            diff(
+                &config,
+                "schema_version = 1\nname = \"missing\"\nentries = []\n"
+            )
+            .unwrap_err()
+            .code,
+            "collection_not_stored"
+        );
+        let unsupported = diff(&config, "[1]\n").unwrap();
+        assert!(!unsupported.supported);
+        assert!(!unsupported.matches);
+        assert!(unsupported.changed.is_empty());
+        assert!(unsupported.name.is_empty());
+        let wide = crate::present::render_collection_diff(&equal, false, 160);
+        assert!(wide.contains("equal"), "{wide}");
+        assert!(wide.contains("not a download"), "{wide}");
+        let differ = crate::present::render_collection_diff(&replica_diff, false, 160);
+        assert!(differ.contains("differ"), "{differ}");
+        assert!(differ.contains("replica"), "{differ}");
+        let skipped = crate::present::render_collection_diff(&unsupported, false, 160);
+        assert!(skipped.contains("not compared"), "{skipped}");
+        let narrow = crate::present::render_collection_diff(&equal, true, 80);
+        assert!(
+            narrow.lines().all(|line| line.chars().count() <= 80),
+            "{narrow}"
+        );
+
+        let file = root.join("diff.toml");
+        std::fs::write(&file, example).unwrap();
+        let command = crate::cli::Cli::try_parse_from([
+            "modelprepper",
+            "collection",
+            "diff",
+            "--config",
+            config_path.to_str().unwrap(),
+            "--file",
+            file.to_str().unwrap(),
+        ])
+        .unwrap();
+        let cli = crate::cli::execute_in(command, crate::cli::View::piped()).unwrap();
+        let crate::cli::CommandOutput::Json(value) = cli else {
+            panic!("diff is json when stdout is a pipe");
+        };
+        assert_eq!(value["action"], "diff");
+        assert_eq!(value["matches"], true);
+        assert_eq!(value["vault_mutated"], false);
+        assert!(value["workspace_bytes"].is_null());
+        assert!(value.get("ok").is_none());
+        let text_command = crate::cli::Cli::try_parse_from([
+            "modelprepper",
+            "collection",
+            "diff",
+            "--config",
+            config_path.to_str().unwrap(),
+            "--file",
+            file.to_str().unwrap(),
+        ])
+        .unwrap();
+        let text_output = crate::cli::execute_in(
+            text_command,
+            crate::cli::View {
+                text: true,
+                ..crate::cli::View::piped()
+            },
+        )
+        .unwrap();
+        let crate::cli::CommandOutput::Text { body, ok } = text_output else {
+            panic!("text diff");
+        };
+        assert!(ok);
+        assert!(body.contains("equal"), "{body}");
+        assert!(
+            body.lines().all(|line| line.chars().count() <= 80),
+            "{body}"
+        );
+
+        let unready = tempfile::tempdir().unwrap();
+        let unready_root = std::fs::canonicalize(unready.path()).unwrap();
+        std::fs::create_dir_all(unready_root.join("catalog")).unwrap();
+        std::fs::create_dir_all(unready_root.join("models")).unwrap();
+        let missing =
+            crate::Config::default_for(unready_root.join("catalog"), unready_root.join("models"));
+        assert_eq!(
+            diff(&missing, example).unwrap_err().code,
+            "vault_not_initialized"
+        );
+        assert_eq!(
+            diff(&missing, "schema_version = 1\n").unwrap_err().code,
+            "invalid_collection"
+        );
+        assert!(!diff(&missing, "[1]\n").unwrap().supported);
         assert!(
             !unready_root
                 .join("catalog")
