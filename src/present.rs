@@ -185,6 +185,7 @@ fn next_for(error: &Error) -> String {
         "invalid_usage" => "modelprepper --help".into(),
         "invalid_budget" => "modelprepper budget --config <file> --request <file>".into(),
         "invalid_kit" => "modelprepper kit --config <file> --kit <file>".into(),
+        "invalid_collection" => "modelprepper collection preview --file <file>".into(),
         "license_needs_review" => "review the license text, then propose the commit again".into(),
         "proposal_not_pending" | "invalid_proposal" => {
             "modelprepper proposals list --config <file>".into()
@@ -742,6 +743,45 @@ pub fn render_schedule(
         "modelprepper schedule remove"
     };
     lines.push(next_line(color, columns, next));
+    lines.join("\n")
+}
+
+pub fn render_collection(
+    report: &crate::collection::CollectionReport,
+    color: bool,
+    columns: usize,
+) -> String {
+    let word = if report.supported {
+        "preview"
+    } else {
+        "unsupported"
+    };
+    let mut lines = vec![verdict(color, columns, YELLOW, word, "  offline")];
+    if !report.name.is_empty() {
+        lines.push(field(columns, "name", &report.name));
+    }
+    if let Some(replica) = &report.replica {
+        lines.push(field(columns, "replica", replica));
+    }
+    lines.push(field(columns, "entries", &report.entries.len().to_string()));
+    for entry in &report.entries {
+        let note = if entry.note.is_empty() {
+            String::new()
+        } else {
+            format!("  {}", entry.note)
+        };
+        lines.push(field(
+            columns,
+            "entry",
+            &format!("{}  {}  unresolved{note}", entry.repo_id, entry.revision),
+        ));
+    }
+    lines.push(field(columns, "approval", "still blocked"));
+    lines.push(next_line(
+        color,
+        columns,
+        "this preview does not download or resolve",
+    ));
     lines.join("\n")
 }
 
@@ -1785,6 +1825,7 @@ mod tests {
             "unsupported_schema",
             "invalid_budget",
             "invalid_kit",
+            "invalid_collection",
             "filesystem_read_only",
             "filesystem_unreadable",
             "unsupported_filesystem",

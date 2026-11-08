@@ -357,6 +357,11 @@ pub enum PreviewCommand {
         #[arg(long)]
         kit: PathBuf,
     },
+    /// Preview a shared list of repositories. Nothing is downloaded.
+    Collection {
+        #[command(subcommand)]
+        command: CollectionAction,
+    },
     /// Read a local recipe and report offline readiness.
     Readiness {
         /// Versioned runtime recipe JSON. See examples/recipe.json.
@@ -365,6 +370,17 @@ pub enum PreviewCommand {
         /// Directory of retained model files. A missing directory is reported and not created.
         #[arg(long)]
         path: PathBuf,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+#[command(term_width = 80)]
+pub enum CollectionAction {
+    /// List the entries in a collection file. The file is not rewritten.
+    Preview {
+        /// Collection TOML. See examples/collection.toml.
+        #[arg(long)]
+        file: PathBuf,
     },
 }
 
@@ -666,6 +682,14 @@ pub(crate) fn execute_with(
                 crate::present::render_kit(report, view.color, view.columns)
             })
         }
+        Command::Preview(PreviewCommand::Collection { command }) => match command {
+            CollectionAction::Preview { file } => {
+                let report = crate::collection::preview(&read_text(&file)?)?;
+                show(&view, &report, true, |report| {
+                    crate::present::render_collection(report, view.color, view.columns)
+                })
+            }
+        },
         Command::Preview(PreviewCommand::Readiness { recipe, path }) => {
             let recipe = crate::readiness::Recipe::parse(&read_text(&recipe)?)?;
             let report = crate::readiness::preflight(&recipe, &path)?;
