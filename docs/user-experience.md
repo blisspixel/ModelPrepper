@@ -86,7 +86,7 @@ Acceptance: disabling internet access does not prevent local status, verificatio
 | Foundation | M1 through M3 | Honest plans, exact byte identities, measured bounds, resumable transfer, and one published revision readable without the program. |
 | Protect that revision | M4 | Replica, fixity, catalog rebuild with the hub unreachable, and local-baseline import. |
 | Bounded automation | M5 | `watch` creates a new plan for a new commit, keeps old revisions, and fetches only inside a current grant and the weekly byte ceiling. |
-| Disk qualification | M6 | Missing mounts, full volumes, and filesystem drills. One bundle stays on one volume. |
+| Disk qualification | M6 | Status names the filesystem. Unsupported and read-only mounts fail before a write. A live share and HDD timing are still unmeasured. |
 | Release usability | M7 | Native install and build guides, schedule preview and install, current CLI captures, clean-machine and persona drills. |
 | Later conveniences | M8 onward | Collections, optional discovery, local web UI, optional MCP, interoperable archival exports, and runtime kits. |
 

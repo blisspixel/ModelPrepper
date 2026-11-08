@@ -239,6 +239,7 @@ fn prepare(config: &Config, plan_id: &str, kernel: KernelSocketBuffers) -> Resul
             "connect the configured destination disk with its original identity",
         ));
     }
+    crate::filesystem::admit(&volume.path, crate::filesystem::Purpose::Payload)?;
     let available = volume.available_bytes.ok_or_else(|| {
         Error::new(
             "volume_unavailable",

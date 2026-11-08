@@ -133,6 +133,7 @@ pub(crate) fn replica_with(
     let dest_root = fs::canonicalize(&destination.path).map_err(super::io)?;
     check_path(&source_root)?;
     check_path(&dest_root)?;
+    crate::filesystem::admit(&destination.path, crate::filesystem::Purpose::Payload)?;
     let source = source_root.join(&row.relative);
     let files = parse_manifest(&row.manifest)?;
     let bundle = seal::read_published_bundle(&source.join(BUNDLE_NAME))?;
@@ -361,6 +362,7 @@ pub fn import_baseline(
         .ok_or_else(|| Error::new("size_overflow", "baseline size exceeds u64 capacity"))?;
     let current = status(config)?;
     let volume = mounted(&current, volume_label)?;
+    crate::filesystem::admit(&volume.path, crate::filesystem::Purpose::Payload)?;
     let available = volume.available_bytes.ok_or_else(|| {
         Error::new(
             "volume_unavailable",

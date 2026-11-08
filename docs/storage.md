@@ -109,8 +109,8 @@ Migration defaults to verified copy. Source deletion is a separate explicit step
 
 ## Filesystem support
 
-Baseline: NTFS on Windows, APFS on macOS, and ext4 on Linux, with tested alternatives documented. Mounted SMB/NFS are supported only for payload with a single writer. exFAT needs explicit tests; FAT32 cannot hold files over its per-file limit.
+Baseline: NTFS on Windows, APFS on macOS, and ext4 on Linux. btrfs, xfs, tmpfs, and zfs are usable local filesystems and are not that baseline. The catalog and the checkpoint journal stay on a local filesystem. Mounted SMB/NFS are allowed for payload only, with the existing single-writer catalog lock; a live share was not mounted to prove that allowance. FAT and exFAT are refused before a write. A read-only mount is refused before a write. An unknown type is refused.
 
 Reject unsupported path collisions before transfer. All bundles must be readable without symlinks or platform-specific deduplication.
 
-Measure cache and staging behavior on HDD as well as SSD. Deduplication is a later optimization and must not undermine portable self-contained copies.
+HDD cache and staging behavior has not been measured. Deduplication is a later optimization and must not undermine portable self-contained copies.

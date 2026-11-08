@@ -189,8 +189,18 @@ fn next_for(error: &Error) -> String {
         "proposal_not_pending" | "invalid_proposal" => {
             "modelprepper proposals list --config <file>".into()
         }
-        "volume_unavailable" | "volume_identity_mismatch" => {
+        "volume_unavailable" | "volume_identity_mismatch" | "filesystem_unreadable" => {
             "modelprepper status --config <file>".into()
+        }
+        "filesystem_read_only" => "remount the volume read-write, then retry the command".into(),
+        "unsupported_filesystem" => {
+            "choose ext4, APFS, NTFS, or another local filesystem this build names".into()
+        }
+        "unsupported_catalog_filesystem" => {
+            "keep the catalog on a local disk; a network share can hold payload only".into()
+        }
+        "unsupported_staging_filesystem" => {
+            "put the checkpoint directory on a local disk, not a network share".into()
         }
         "vault_not_ready" => "modelprepper init --config <file>".into(),
         "repository_not_found_or_private" => {
@@ -231,7 +241,14 @@ pub fn render_status(status: &crate::vault::Status, color: bool, columns: usize)
         };
         // The path is clipped on its own line. Putting it beside the state
         // let a long Windows path swallow "mounted" inside the ellipsis.
-        let head = format!("  {}  {}", volume.label, volume.state);
+        let kind = if volume.filesystem == "unmeasured" {
+            String::new()
+        } else if volume.read_only {
+            format!("  {} read-only", volume.filesystem)
+        } else {
+            format!("  {}", volume.filesystem)
+        };
+        let head = format!("  {}  {}{kind}", volume.label, volume.state);
         if head.chars().count() + 2 + space.chars().count() <= columns {
             lines.push(format!("{head}  {space}"));
         } else {
@@ -1350,7 +1367,7 @@ mod tests {
 
     #[test]
     fn status_keeps_volume_state_when_the_path_is_long() {
-        let status = crate::vault::Status {
+        let mut status = crate::vault::Status {
             schema_version: 1,
             state: "ready".into(),
             vault_id: "8397c2c3aaaaaaaaaaaaaaaaaaaaaaaa".into(),
@@ -1362,6 +1379,9 @@ mod tests {
                 ),
                 state: "mounted",
                 available_bytes: Some(463_856_467_968),
+                filesystem: "ntfs".into(),
+                filesystem_role: crate::vault::FilesystemRole::Baseline,
+                read_only: false,
             }],
             preserved: Vec::new(),
             replicas: Vec::new(),
@@ -1372,8 +1392,24 @@ mod tests {
             "{text}"
         );
         assert!(text.contains("  primary  mounted  "), "{text}");
+        assert!(text.contains("ntfs"), "{text}");
         assert!(text.contains("path"), "{text}");
         assert!(!text.contains("...ounted"), "{text}");
+        status.volumes[0].read_only = true;
+        let read_only = render_status(&status, false, 80);
+        assert!(read_only.contains("ntfs read-only"), "{read_only}");
+        assert!(
+            read_only.lines().all(|line| line.chars().count() <= 80),
+            "{read_only}"
+        );
+        status.volumes[0].filesystem = "unmeasured".into();
+        status.volumes[0].filesystem_role = crate::vault::FilesystemRole::Unmeasured;
+        status.volumes[0].read_only = false;
+        status.volumes[0].state = "offline";
+        status.volumes[0].available_bytes = None;
+        let offline = render_status(&status, false, 80);
+        assert!(offline.contains("offline"), "{offline}");
+        assert!(!offline.contains("unmeasured"), "{offline}");
     }
 
     #[test]
@@ -1599,6 +1635,9 @@ mod tests {
                 path: std::path::PathBuf::from(r"\\?\C:\very\long\path\that\must\stay\readable"),
                 state: "offline",
                 available_bytes: None,
+                filesystem: "unmeasured".into(),
+                filesystem_role: crate::vault::FilesystemRole::Unmeasured,
+                read_only: false,
             }],
             preserved: vec![PreservedCopy {
                 repo_id: "example/model".into(),
@@ -1679,6 +1718,11 @@ mod tests {
             "unsupported_schema",
             "invalid_budget",
             "invalid_kit",
+            "filesystem_read_only",
+            "filesystem_unreadable",
+            "unsupported_filesystem",
+            "unsupported_catalog_filesystem",
+            "unsupported_staging_filesystem",
         ] {
             let text = error_text(&Error::new(code, "details"), false, 80);
             assert!(text.starts_with("error:"), "{code}: {text}");

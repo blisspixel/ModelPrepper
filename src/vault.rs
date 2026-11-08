@@ -1,5 +1,9 @@
 //! Local catalog ownership and restartable volume initialization.
-use crate::{Config, Error, Result, writer_lock::WriterLock};
+use crate::{
+    Config, Error, Result,
+    filesystem::{self, Purpose},
+    writer_lock::WriterLock,
+};
 use rusqlite::{Connection, OpenFlags, params};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -23,6 +27,7 @@ mod restore;
 mod review;
 mod seal;
 mod watch;
+pub use crate::filesystem::FilesystemRole;
 pub use adoption::{Adoption, Outcome, PROVENANCE_LOCAL_UPSTREAM, adopt};
 pub use grant::{Grant, current_grant, record_grant};
 pub use restore::{
@@ -69,6 +74,9 @@ pub struct VolumeStatus {
     pub path: PathBuf,
     pub state: &'static str,
     pub available_bytes: Option<u64>,
+    pub filesystem: String,
+    pub filesystem_role: FilesystemRole,
+    pub read_only: bool,
 }
 
 struct Catalog {
@@ -229,6 +237,7 @@ fn open_recovered_catalog(config: &Config) -> Result<Catalog> {
 fn open_catalog_mode(config: &Config, create: bool, recover: bool) -> Result<Catalog> {
     config.validate()?;
     validate_locations(config)?;
+    filesystem::admit(&config.catalog_path, Purpose::Catalog)?;
     check_path(&config.catalog_path)?;
     let database = config.catalog_path.join("catalog.sqlite3");
     let new = !database.exists();
@@ -544,6 +553,7 @@ pub fn initialize(config: &Config) -> Result<Status> {
     if state == "initializing" {
         // Preflight every disk before adopting any of them.
         for (identity, path) in &volumes {
+            filesystem::admit(path, Purpose::Payload)?;
             check_path(path)?;
             only_entries(path, &[MARKER, PENDING])?;
             for name in [MARKER, PENDING] {
@@ -603,6 +613,11 @@ fn report(catalog: &Catalog, config: &Config) -> Result<Status> {
     let mut reports = Vec::new();
     for (identity, path) in volumes {
         let marker = path.join(MARKER);
+        let placement = if path.exists() {
+            Some(filesystem::classify(&path)?)
+        } else {
+            None
+        };
         let (condition, available_bytes) = if !path.exists() {
             ("offline", None)
         } else if !marker.exists() {
@@ -612,11 +627,18 @@ fn report(catalog: &Catalog, config: &Config) -> Result<Status> {
         } else {
             ("mounted", Some(fs4::available_space(&path).map_err(io)?))
         };
+        let (filesystem, filesystem_role, read_only) = match placement {
+            Some(placement) => (placement.kind, placement.role, placement.read_only),
+            None => ("unmeasured".into(), FilesystemRole::Unmeasured, false),
+        };
         reports.push(VolumeStatus {
             label: identity.label,
             volume_id: identity.volume_id,
             path,
             state: condition,
+            filesystem,
+            filesystem_role,
+            read_only,
             available_bytes,
         });
     }
