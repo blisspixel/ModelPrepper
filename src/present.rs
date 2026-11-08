@@ -186,6 +186,9 @@ fn next_for(error: &Error) -> String {
         "invalid_budget" => "modelprepper budget --config <file> --request <file>".into(),
         "invalid_kit" => "modelprepper kit --config <file> --kit <file>".into(),
         "invalid_collection" => "modelprepper collection preview --file <file>".into(),
+        "invalid_selection" => {
+            "modelprepper collection select --config <file> --name <name> --file <file>".into()
+        }
         "invalid_discovery" => "modelprepper discover --file <file>".into(),
         "output_exists" => "choose a new output path".into(),
         "export_failed" => "choose a writable directory and a new output path".into(),
@@ -898,6 +901,79 @@ pub fn render_collection_list(
         "modelprepper collection show --config <file> --name <name>"
     };
     lines.push(next_line(color, columns, next));
+    lines.join("\n")
+}
+
+pub fn render_collection_selection(
+    report: &crate::collection::CollectionSelection,
+    color: bool,
+    columns: usize,
+) -> String {
+    let word = if !report.supported {
+        "unsupported"
+    } else if report.matches.is_empty() {
+        "none"
+    } else {
+        "selected"
+    };
+    let mut lines = vec![verdict(color, columns, YELLOW, word, "  offline")];
+    if report.supported {
+        if !report.name.is_empty() {
+            lines.push(field(columns, "name", &report.name));
+        }
+        if let Some(category) = &report.category {
+            lines.push(field(
+                columns,
+                "constraint",
+                &format!("category {category}"),
+            ));
+        }
+        if let Some(representation) = &report.representation {
+            lines.push(field(
+                columns,
+                "constraint",
+                &format!("representation {representation}"),
+            ));
+        }
+        if let Some(source) = &report.evaluation_source {
+            lines.push(field(
+                columns,
+                "constraint",
+                &format!("evaluation_source {source}"),
+            ));
+        }
+        if let Some(name) = &report.evaluation_name {
+            lines.push(field(
+                columns,
+                "constraint",
+                &format!("evaluation_name {name}"),
+            ));
+        }
+        if let Some(value) = &report.evaluation_value {
+            lines.push(field(
+                columns,
+                "constraint",
+                &format!("evaluation_value {value}"),
+            ));
+        }
+        lines.push(field(columns, "matches", &report.matches.len().to_string()));
+        for entry in &report.matches {
+            lines.push(field(
+                columns,
+                "entry",
+                &format!("{}  {}  not ranked", entry.repo_id, entry.revision),
+            ));
+        }
+    }
+    lines.push(next_line(
+        color,
+        columns,
+        if report.supported {
+            "this selection keeps stored order and is not a rank"
+        } else {
+            "this schema is not selected"
+        },
+    ));
     lines.join("\n")
 }
 
@@ -2119,6 +2195,7 @@ mod tests {
             "invalid_budget",
             "invalid_kit",
             "invalid_collection",
+            "invalid_selection",
             "invalid_discovery",
             "output_exists",
             "export_failed",

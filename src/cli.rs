@@ -357,7 +357,7 @@ pub enum PreviewCommand {
         #[arg(long)]
         kit: PathBuf,
     },
-    /// Preview, store, list, remove, export, or diff a shared list, and report matching custody. Nothing is downloaded.
+    /// Preview, store, list, remove, export, diff, or select a shared list, and report matching custody. Nothing is downloaded.
     Collection {
         #[command(subcommand)]
         command: CollectionAction,
@@ -453,6 +453,18 @@ pub enum CollectionAction {
         /// New schema 1 file. An existing path is left unchanged.
         #[arg(long)]
         output: PathBuf,
+    },
+    /// Keep stored entries that match exact text. Stored order is not a rank.
+    Select {
+        /// Path to the vault configuration file.
+        #[arg(long)]
+        config: PathBuf,
+        /// Collection name from the catalog.
+        #[arg(long)]
+        name: String,
+        /// Constraint TOML. evaluation_value is exact text, not a score.
+        #[arg(long)]
+        file: PathBuf,
     },
     /// Report custody rows that match one stored list. Nothing is hashed.
     Custody {
@@ -815,6 +827,16 @@ pub(crate) fn execute_with(
                 let report = crate::collection::export(&located_config(&config)?, &name, &output)?;
                 show(&view, &report, true, |report| {
                     crate::present::render_collection_export(report, view.color, view.columns)
+                })
+            }
+            CollectionAction::Select { config, name, file } => {
+                let report = crate::collection::select(
+                    &located_config(&config)?,
+                    &name,
+                    &read_text(&file)?,
+                )?;
+                show(&view, &report, true, |report| {
+                    crate::present::render_collection_selection(report, view.color, view.columns)
                 })
             }
             CollectionAction::Custody { config, name } => {
