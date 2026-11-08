@@ -912,20 +912,42 @@ pub fn render_collection_custody(
     };
     let mut lines = vec![verdict(color, columns, YELLOW, word, "  offline")];
     lines.push(field(columns, "name", &report.name));
+    for ceiling in &report.ceilings {
+        let detail = match ceiling.charged_bytes {
+            Some(bytes) => {
+                let fit = if ceiling.within_written_cap == Some(true) {
+                    "within the written cap"
+                } else {
+                    "over the written cap"
+                };
+                format!(
+                    "{}  {} bytes  charged {bytes}  {fit}",
+                    ceiling.category, ceiling.bytes
+                )
+            }
+            None => format!("{}  {} bytes  not charged", ceiling.category, ceiling.bytes),
+        };
+        lines.push(field(columns, "ceiling", &detail));
+    }
     for entry in &report.entries {
         let measured = match entry.measured_bytes {
             Some(bytes) => format!("measured {bytes}"),
             None if entry.custody_rows == 0 => "measured not recorded".to_string(),
             None => "measured unavailable".to_string(),
         };
+        let charge = if entry.charged {
+            "charged"
+        } else {
+            "not charged"
+        };
         let detail = if entry.custody_rows == 0 {
             format!(
-                "{}  {}  {}  custody not recorded  {measured}  not rehashed  not charged",
+                "{}  {}  {}  custody not recorded  {measured}  not rehashed  {charge}",
                 entry.repo_id, entry.revision, entry.revision_shape
             )
         } else {
             format!(
-                "{}  {}  {}  custody {}  {}  {measured}  not rehashed  not charged",
+                "{}  {}  {}  custody {}  {}  {measured}  not rehashed  {charge}",
                 entry.repo_id,
                 entry.revision,
                 entry.revision_shape,
