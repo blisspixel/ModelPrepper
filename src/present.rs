@@ -915,14 +915,15 @@ pub fn render_collection_custody(
     for entry in &report.entries {
         let detail = if entry.custody_rows == 0 {
             format!(
-                "{}  {}  custody not recorded  not rehashed",
-                entry.repo_id, entry.revision
+                "{}  {}  {}  custody not recorded  not rehashed",
+                entry.repo_id, entry.revision, entry.revision_shape
             )
         } else {
             format!(
-                "{}  {}  custody {}  {}  not rehashed",
+                "{}  {}  {}  custody {}  {}  not rehashed",
                 entry.repo_id,
                 entry.revision,
+                entry.revision_shape,
                 entry.custody_rows,
                 entry.provenances.join(", ")
             )

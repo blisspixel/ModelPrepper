@@ -1,4 +1,4 @@
-//! Shared collection file. Preview lists explicit entries. Store writes that list and does not download it. Remove deletes one stored list and does not delete archived revisions. Custody reports exact catalog matches and does not hash files. Export writes one stored list back to schema 1. Diff compares one schema 1 file with the stored list and does not change either.
+//! Shared collection file. Preview lists explicit entries. Store writes that list and does not download it. Remove deletes one stored list and does not delete archived revisions. Custody reports exact catalog matches and does not hash files. A 40-character lowercase hex revision is named `commit`; any other accepted revision is named `name`. That label is not a resolution. Export writes one stored list back to schema 1. Diff compares one schema 1 file with the stored list and does not change either.
 use crate::{Error, Result};
 use serde::Serialize;
 use std::collections::BTreeSet;
@@ -239,6 +239,18 @@ pub struct CollectionCustodyEntry {
     pub custody_rows: u64,
     /// Distinct provenance strings on those rows, in plan id order. Not rechecked.
     pub provenances: Vec<String>,
+    /// `commit` for 40 lowercase hex characters. `name` for any other accepted revision.
+    /// The label is not a publisher resolution.
+    pub revision_shape: &'static str,
+}
+
+/// Classify revision text. This does not contact a publisher or hash a file.
+pub(crate) fn revision_shape(revision: &str) -> &'static str {
+    if crate::validation::validate_hex(revision, 40).is_ok() {
+        "commit"
+    } else {
+        "name"
+    }
 }
 
 /// Count custody rows that match one stored list. Nothing is hashed or downloaded.
@@ -2368,10 +2380,12 @@ base_revision = \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"
         let (_dir, config, config_path) = ready();
         let pin = "0123456789abcdef0123456789abcdef01234567";
         let other_pin = "fedcba9876543210fedcba9876543210fedcba98";
+        let letters = "g".repeat(40);
+        let upper = "A".repeat(40);
         store(
             &config,
             &format!(
-                "schema_version = 1\nname = \"offline coding\"\n[[entries]]\nrepo_id = \"example/model\"\nrevision = \"{pin}\"\n[[entries]]\nrepo_id = \"example/model\"\nrevision = \"main\"\n[[entries]]\nrepo_id = \"example/other\"\nrevision = \"{pin}\"\n"
+                "schema_version = 1\nname = \"offline coding\"\n[[entries]]\nrepo_id = \"example/model\"\nrevision = \"{pin}\"\n[[entries]]\nrepo_id = \"example/model\"\nrevision = \"main\"\n[[entries]]\nrepo_id = \"example/other\"\nrevision = \"{pin}\"\n[[entries]]\nrepo_id = \"example/model\"\nrevision = \"{letters}\"\n[[entries]]\nrepo_id = \"example/model\"\nrevision = \"{upper}\"\n"
             ),
         )
         .unwrap();
@@ -2415,7 +2429,8 @@ base_revision = \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"
         assert!(!noted.vault_mutated);
         assert!(!noted.downloads_started);
         assert!(noted.workspace_bytes.is_none());
-        assert_eq!(noted.entries.len(), 3);
+        assert_eq!(noted.entries.len(), 5);
+        assert_eq!(noted.entries[0].revision_shape, "commit");
         assert_eq!(noted.entries[0].custody_rows, 3);
         assert_eq!(
             noted.entries[0].provenances,
@@ -2425,13 +2440,17 @@ base_revision = \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"
             ]
         );
         assert_eq!(noted.entries[1].revision, "main");
+        assert_eq!(noted.entries[1].revision_shape, "name");
         assert_eq!(noted.entries[1].custody_rows, 0);
         assert!(noted.entries[1].provenances.is_empty());
         assert_eq!(noted.entries[2].repo_id, "example/other");
+        assert_eq!(noted.entries[2].revision_shape, "commit");
         assert_eq!(noted.entries[2].custody_rows, 0);
+        assert_eq!(noted.entries[3].revision_shape, "name");
+        assert_eq!(noted.entries[4].revision_shape, "name");
         assert_eq!(rows(&config, "custody"), before);
         assert_eq!(rows(&config, "replicas"), 1);
-        let wide = crate::present::render_collection_custody(&noted, false, 160);
+        let wide = crate::present::render_collection_custody(&noted, false, 220);
         assert!(wide.contains("noted"), "{wide}");
         assert!(wide.contains("custody 3"), "{wide}");
         assert!(
@@ -2439,7 +2458,11 @@ base_revision = \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"
             "{wide}"
         );
         assert!(
-            wide.contains("custody not recorded  not rehashed"),
+            wide.contains("main  name  custody not recorded  not rehashed"),
+            "{wide}"
+        );
+        assert!(
+            wide.contains(&format!("{pin}  commit  custody 3")),
             "{wide}"
         );
         assert!(wide.contains("not a fresh hash or a download"), "{wide}");
@@ -2479,7 +2502,9 @@ base_revision = \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"
         assert_eq!(value["provenance_verified"], false);
         assert_eq!(value["evidence_checked"], false);
         assert_eq!(value["entries"][0]["custody_rows"], 3);
+        assert_eq!(value["entries"][0]["revision_shape"], "commit");
         assert_eq!(value["entries"][1]["custody_rows"], 0);
+        assert_eq!(value["entries"][1]["revision_shape"], "name");
         assert!(value["workspace_bytes"].is_null());
         assert_eq!(rows(&config, "custody"), before);
 

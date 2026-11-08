@@ -2,7 +2,7 @@
 use super::{db, open_catalog};
 use crate::collection::{
     CategoryCeiling, CollectionCustodyEntry, CollectionEntry, CollectionReport, CollectionSummary,
-    EvaluationAttribution,
+    EvaluationAttribution, revision_shape,
 };
 use crate::{Config, Error, Result};
 use rusqlite::{OptionalExtension, params};
@@ -168,6 +168,7 @@ pub(crate) fn custody_matches(
             revision: entry.revision.clone(),
             custody_rows,
             provenances,
+            revision_shape: revision_shape(&entry.revision),
         });
     }
     Ok((stored.name, entries))
