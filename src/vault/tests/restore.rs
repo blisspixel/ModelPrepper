@@ -596,15 +596,8 @@ fn replica_refuses_a_tree_that_is_not_the_sealed_revision() {
         "unknown_volume",
     );
     let mut tight = config.clone();
-    let available = crate::vault::status(&config)
-        .unwrap()
-        .volumes
-        .iter()
-        .find(|volume| volume.label == "primary")
-        .unwrap()
-        .available_bytes
-        .unwrap();
-    tight.storage.min_free_bytes = available;
+    // Larger than any mounted disk, so the result does not depend on which volume was measured.
+    tight.storage.min_free_bytes = 1 << 62;
     failure(
         replica(&tight, &proposal.plan_id, "backup"),
         "insufficient_space",
@@ -975,15 +968,19 @@ fn import_keeps_a_baseline_only_when_the_tree_and_the_row_agree() {
             import_baseline(&config, &odd, "local/baseline", &digits, "backup"),
             "unsafe_path",
         );
-        let raw = stage.parent().unwrap().join("raw");
-        fs::create_dir(&raw).unwrap();
-        use std::os::unix::ffi::OsStringExt;
-        let name = std::ffi::OsString::from_vec(vec![0xff]);
-        fs::write(raw.join(name), b"x").unwrap();
-        failure(
-            import_baseline(&config, &raw, "local/baseline", &digits, "backup"),
-            "unsafe_path",
-        );
+        // APFS rejects a non-UTF-8 name. Linux accepts the byte and import refuses it.
+        #[cfg(target_os = "linux")]
+        {
+            use std::os::unix::ffi::OsStringExt;
+            let raw = stage.parent().unwrap().join("raw");
+            fs::create_dir(&raw).unwrap();
+            let name = std::ffi::OsString::from_vec(vec![0xff]);
+            fs::write(raw.join(name), b"x").unwrap();
+            failure(
+                import_baseline(&config, &raw, "local/baseline", &digits, "backup"),
+                "unsafe_path",
+            );
+        }
         let piped = stage.parent().unwrap().join("piped");
         fs::create_dir(&piped).unwrap();
         let fifo = piped.join("pipe");
