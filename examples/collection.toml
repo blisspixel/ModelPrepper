@@ -1,4 +1,4 @@
-# Shared collection. Preview lists these entries and does not download them.
+# Shared collection. Preview lists these entries. Store writes the list and does not download it.
 schema_version = 1
 name = "offline coding"
 replica = "backup"

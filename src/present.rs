@@ -186,6 +186,10 @@ fn next_for(error: &Error) -> String {
         "invalid_budget" => "modelprepper budget --config <file> --request <file>".into(),
         "invalid_kit" => "modelprepper kit --config <file> --kit <file>".into(),
         "invalid_collection" => "modelprepper collection preview --file <file>".into(),
+        "collection_not_stored" => {
+            "modelprepper collection store --config <file> --file <file>".into()
+        }
+        "vault_not_initialized" => "modelprepper init --config <file>".into(),
         "license_needs_review" => "review the license text, then propose the commit again".into(),
         "proposal_not_pending" | "invalid_proposal" => {
             "modelprepper proposals list --config <file>".into()
@@ -751,10 +755,14 @@ pub fn render_collection(
     color: bool,
     columns: usize,
 ) -> String {
-    let word = if report.supported {
-        "preview"
-    } else {
+    let word = if !report.supported {
         "unsupported"
+    } else {
+        match report.action {
+            "stored" => "stored",
+            "show" => "shown",
+            _ => "preview",
+        }
     };
     let mut lines = vec![verdict(color, columns, YELLOW, word, "  offline")];
     if !report.name.is_empty() {
@@ -762,6 +770,13 @@ pub fn render_collection(
     }
     if let Some(replica) = &report.replica {
         lines.push(field(columns, "replica", replica));
+    }
+    if report.action == "stored" {
+        lines.push(field(
+            columns,
+            "replaced",
+            if report.replaced { "yes" } else { "no" },
+        ));
     }
     lines.push(field(columns, "entries", &report.entries.len().to_string()));
     lines.push(field(
@@ -837,11 +852,12 @@ pub fn render_collection(
         ));
     }
     lines.push(field(columns, "approval", "still blocked"));
-    lines.push(next_line(
-        color,
-        columns,
-        "this preview does not download or resolve",
-    ));
+    let next = match (report.supported, report.action) {
+        (false, "store") => "this schema is not stored",
+        (true, "stored" | "show") => "this list is not resolved or downloaded",
+        _ => "this preview does not download or resolve",
+    };
+    lines.push(next_line(color, columns, next));
     lines.join("\n")
 }
 
@@ -1886,6 +1902,8 @@ mod tests {
             "invalid_budget",
             "invalid_kit",
             "invalid_collection",
+            "collection_not_stored",
+            "vault_not_initialized",
             "filesystem_read_only",
             "filesystem_unreadable",
             "unsupported_filesystem",

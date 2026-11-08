@@ -33,7 +33,7 @@ Only the internal resolver can create a persisted review. There is no JSON-impor
 
 Reads check document hash, strict schema, domain, vault/disk ownership, and decision consistency. This detects accidental corruption relative to the id, not a malicious writer replacing both ids and documents. Transfer authorization is independently disabled even if stored fields claim otherwise.
 
-Catalog schema 2 adds proposals through a transaction under the writer lock. Schema 3 adds custody. Schema 4 adds one grant row per review. Schema 5 adds replicas. Schema 6 adds one `period_charges` row per plan and UTC week. Schema 1 upgrades without changing ownership UUIDs. Unknown versions fail closed. Status can trigger migration and is not read-only. Downgrading to schema-1 software after migration is unsupported; retain independent backups before upgrades.
+Catalog schema 2 adds proposals through a transaction under the writer lock. Schema 3 adds custody. Schema 4 adds one grant row per review. Schema 5 adds replicas. Schema 6 adds one `period_charges` row per plan and UTC week. Schema 7 adds the collection tables. A stored list is not a review, a grant, or a seal. Schema 1 upgrades without changing ownership UUIDs. Unknown versions fail closed. Status can trigger migration and is not read-only. Downgrading to schema-1 software after migration is unsupported; retain independent backups before upgrades.
 
 Documents are capped at 8 MiB. List pages contain 1 through 100 summaries in ascending id order, default 20. next_after supplies the following page's cursor. Evidence is parsed one record at a time instead of retained in the list. Separate invocations do not form a snapshot; repeat a scan if proposals change during pagination.
 

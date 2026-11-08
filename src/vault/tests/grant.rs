@@ -82,7 +82,7 @@ fn a_grant_names_the_review_bounds_volume_and_policy_and_drops_when_they_change(
         .db
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 6);
+    assert_eq!(version, 7);
 
     let granted = record_grant(&config, &proposal.plan_id).unwrap();
     let current = current_grant(&config, &proposal.plan_id).unwrap();

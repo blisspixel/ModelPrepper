@@ -1,4 +1,4 @@
-//! Shared collection file. Preview lists explicit entries and does not download them.
+//! Shared collection file. Preview lists explicit entries. Store writes that list and does not download it.
 use crate::{Error, Result};
 use serde::Serialize;
 use std::collections::BTreeSet;
@@ -39,6 +39,8 @@ pub struct CollectionReport {
     pub transfer_authorized: bool,
     pub network_contact: bool,
     pub vault_mutated: bool,
+    /// Store replaces one named list. Preview and show leave this false.
+    pub replaced: bool,
     pub downloads_started: bool,
     pub workspace_bytes: Option<u64>,
 }
@@ -173,9 +175,30 @@ pub fn preview(text: &str) -> Result<CollectionReport> {
         transfer_authorized: false,
         network_contact: false,
         vault_mutated: false,
+        replaced: false,
         downloads_started: false,
         workspace_bytes: None,
     })
+}
+
+/// Write one parsed list into the catalog. An unknown schema is not stored.
+pub fn store(config: &crate::Config, text: &str) -> Result<CollectionReport> {
+    let mut report = preview(text)?;
+    report.action = "store";
+    if !report.supported {
+        return Ok(report);
+    }
+    let replaced = crate::vault::write_collection(config, &report)?;
+    report.action = "stored";
+    report.vault_mutated = true;
+    report.replaced = replaced;
+    Ok(report)
+}
+
+/// Read one stored list. The catalog is not rewritten.
+pub fn show(config: &crate::Config, name: &str) -> Result<CollectionReport> {
+    check_text(name, 1, MAX_NAME, "name")?;
+    crate::vault::read_collection(config, name)
 }
 
 fn empty_report(supported: bool) -> CollectionReport {
@@ -192,6 +215,7 @@ fn empty_report(supported: bool) -> CollectionReport {
         transfer_authorized: false,
         network_contact: false,
         vault_mutated: false,
+        replaced: false,
         downloads_started: false,
         workspace_bytes: None,
     }
@@ -493,7 +517,7 @@ fn parse_categories(table: &toml::Table) -> Result<Vec<String>> {
     Ok(categories)
 }
 
-fn shared_bases(entries: &[CollectionEntry]) -> Vec<SharedBase> {
+pub(crate) fn shared_bases(entries: &[CollectionEntry]) -> Vec<SharedBase> {
     let mut groups: Vec<SharedBase> = Vec::new();
     for entry in entries {
         let Some(repo) = entry.base_repo.as_deref() else {
@@ -1462,5 +1486,279 @@ revision = \"main\"
             unsupported.lines().all(|line| line.chars().count() <= 40),
             "{unsupported}"
         );
+    }
+
+    fn ready() -> (tempfile::TempDir, crate::Config, std::path::PathBuf) {
+        let dir = tempfile::tempdir().unwrap();
+        let root = std::fs::canonicalize(dir.path()).unwrap();
+        let config_path = root.join("config.toml");
+        std::fs::write(&config_path, include_str!("../examples/config.toml")).unwrap();
+        let config = crate::vault::locate(
+            &crate::Config::parse(&std::fs::read_to_string(&config_path).unwrap()).unwrap(),
+            &config_path,
+        )
+        .unwrap();
+        crate::vault::initialize(&config).unwrap();
+        (dir, config, config_path)
+    }
+
+    fn rows(config: &crate::Config, table: &str) -> i64 {
+        let connection =
+            rusqlite::Connection::open(config.catalog_path.join("catalog.sqlite3")).unwrap();
+        connection
+            .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                row.get(0)
+            })
+            .unwrap()
+    }
+
+    #[test]
+    fn store_writes_the_list_and_show_reads_it_without_applying_it() {
+        let (_dir, config, config_path) = ready();
+        let before = [
+            "vault",
+            "volumes",
+            "proposals",
+            "custody",
+            "grants",
+            "replicas",
+            "period_charges",
+        ]
+        .map(|table| rows(&config, table));
+        let body = include_str!("../examples/collection.toml");
+        let path = config_path.parent().unwrap().join("collection.toml");
+        std::fs::write(&path, body).unwrap();
+        let stored = store(&config, body).unwrap();
+        assert_eq!(stored.action, "stored");
+        assert!(stored.vault_mutated);
+        assert!(!stored.replaced);
+        assert!(!stored.transfer_authorized);
+        assert!(!stored.network_contact);
+        assert!(!stored.downloads_started);
+        assert!(stored.workspace_bytes.is_none());
+        assert!(!stored.entries[0].resolved);
+        assert!(!stored.entries[1].provenance_verified);
+        assert!(!stored.ceilings[0].applied);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), body);
+        for (table, count) in [
+            "vault",
+            "volumes",
+            "proposals",
+            "custody",
+            "grants",
+            "replicas",
+            "period_charges",
+        ]
+        .into_iter()
+        .zip(before)
+        {
+            assert_eq!(rows(&config, table), count, "{table}");
+        }
+
+        let shown = show(&config, "offline coding").unwrap();
+        assert_eq!(shown.action, "show");
+        assert!(!shown.vault_mutated);
+        assert!(!shown.replaced);
+        assert_eq!(shown.replica.as_deref(), Some("backup"));
+        assert_eq!(shown.entries.len(), 2);
+        assert!(shown.entries[0].provenance.is_none());
+        assert!(!shown.entries[0].provenance_verified);
+        assert!(shown.entries[0].evidence.is_none());
+        assert!(!shown.entries[0].evidence_checked);
+        assert!(shown.entries[0].evaluation.is_none());
+        assert!(!shown.entries[0].base_preserved);
+        assert_eq!(
+            shown.entries[1].provenance.as_deref(),
+            Some("stated conversion")
+        );
+        assert!(!shown.entries[1].provenance_verified);
+        assert_eq!(shown.entries[1].evidence.as_deref(), Some("missing"));
+        assert!(!shown.entries[1].evidence_checked);
+        assert!(!shown.entries[1].evaluation.as_ref().unwrap().ranked);
+        assert_eq!(
+            shown.entries[1].categories,
+            vec!["coding".to_string(), "text".to_string()]
+        );
+        assert!(!shown.entries[1].base_preserved);
+        assert!(!shown.ceilings[0].applied);
+        assert!(!shown.downloads_started);
+        assert!(shown.workspace_bytes.is_none());
+        assert!(shown.shared_bases.is_empty());
+
+        let shared = "\
+schema_version = 1
+name = \"shared\"
+[[entries]]
+repo_id = \"example/one\"
+revision = \"main\"
+base_repo = \"example/base\"
+base_revision = \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"
+[[entries]]
+repo_id = \"example/two\"
+revision = \"main\"
+base_repo = \"example/base\"
+base_revision = \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"
+";
+        let second = store(&config, shared).unwrap();
+        assert!(!second.replaced);
+        let group = show(&config, "shared").unwrap();
+        assert_eq!(group.shared_bases.len(), 1);
+        assert_eq!(group.shared_bases[0].entry_count, 2);
+        assert!(!group.shared_bases[0].deduplicated);
+        assert_eq!(show(&config, "offline coding").unwrap().entries.len(), 2);
+
+        let replacement = "schema_version = 1\nname = \"offline coding\"\nentries = []\n";
+        let again = store(&config, replacement).unwrap();
+        assert!(again.replaced);
+        assert!(again.entries.is_empty());
+        assert!(show(&config, "offline coding").unwrap().entries.is_empty());
+        assert_eq!(show(&config, "shared").unwrap().entries.len(), 2);
+        assert_eq!(rows(&config, "custody"), before[3]);
+
+        let previewed = preview(body).unwrap();
+        assert_eq!(previewed.action, "preview");
+        assert!(!previewed.vault_mutated);
+        assert!(!previewed.replaced);
+
+        let command = crate::cli::Cli::try_parse_from([
+            "modelprepper",
+            "collection",
+            "store",
+            "--config",
+            config_path.to_str().unwrap(),
+            "--file",
+            path.to_str().unwrap(),
+        ])
+        .unwrap();
+        let output = crate::cli::execute_in(command, crate::cli::View::piped()).unwrap();
+        let crate::cli::CommandOutput::Json(value) = output else {
+            panic!("store is json when stdout is a pipe");
+        };
+        assert_eq!(value["action"], "stored");
+        assert_eq!(value["replaced"], true);
+        assert_eq!(value["vault_mutated"], true);
+        assert_eq!(value["transfer_authorized"], false);
+        assert_eq!(value["downloads_started"], false);
+        assert!(value["workspace_bytes"].is_null());
+        assert_eq!(value["entries"][1]["provenance_verified"], false);
+        assert_eq!(value["ceilings"][0]["applied"], false);
+        assert_eq!(value["schema_version"], 1);
+
+        let text = crate::cli::Cli::try_parse_from([
+            "modelprepper",
+            "collection",
+            "show",
+            "--config",
+            config_path.to_str().unwrap(),
+            "--name",
+            "offline coding",
+        ])
+        .unwrap();
+        let output = crate::cli::execute_in(
+            text,
+            crate::cli::View {
+                text: true,
+                ..crate::cli::View::piped()
+            },
+        )
+        .unwrap();
+        let crate::cli::CommandOutput::Text {
+            body: shown_text,
+            ok,
+        } = output
+        else {
+            panic!("text show");
+        };
+        assert!(ok);
+        assert!(shown_text.contains("shown"), "{shown_text}");
+        assert!(
+            shown_text.contains("this list is not resolved or downloaded"),
+            "{shown_text}"
+        );
+        assert!(
+            shown_text.lines().all(|line| line.chars().count() <= 80),
+            "{shown_text}"
+        );
+        let stored_text = crate::present::render_collection(&again, false, 80);
+        assert!(stored_text.contains("replaced  yes"), "{stored_text}");
+        assert!(
+            stored_text.contains("this list is not resolved or downloaded"),
+            "{stored_text}"
+        );
+        let first_text = crate::present::render_collection(&stored, false, 80);
+        assert!(first_text.contains("replaced  no"), "{first_text}");
+
+        let unsupported = store(&config, "schema_version = 2\n").unwrap();
+        assert!(!unsupported.supported);
+        assert_eq!(unsupported.action, "store");
+        assert!(!unsupported.vault_mutated);
+        let unsupported_text = crate::present::render_collection(&unsupported, false, 80);
+        assert!(
+            unsupported_text.contains("this schema is not stored"),
+            "{unsupported_text}"
+        );
+
+        let empty = tempfile::tempdir().unwrap();
+        let root = std::fs::canonicalize(empty.path()).unwrap();
+        std::fs::create_dir_all(root.join("catalog")).unwrap();
+        std::fs::create_dir_all(root.join("models")).unwrap();
+        let missing = crate::Config::default_for(root.join("catalog"), root.join("models"));
+        assert_eq!(
+            store(&missing, body).unwrap_err().code,
+            "vault_not_initialized"
+        );
+        assert!(!root.join("catalog").join("catalog.sqlite3").exists());
+        assert_eq!(
+            show(&missing, "offline coding").unwrap_err().code,
+            "vault_not_initialized"
+        );
+        assert_eq!(show(&config, "").unwrap_err().code, "invalid_collection");
+        assert_eq!(
+            show(&config, "missing").unwrap_err().code,
+            "collection_not_stored"
+        );
+
+        let mut overflow =
+            preview(&listed("[[ceilings]]\ncategory = \"coding\"\nbytes = 1\n")).unwrap();
+        overflow.ceilings[0].bytes = u64::MAX;
+        assert_eq!(
+            crate::vault::write_collection(&config, &overflow)
+                .unwrap_err()
+                .code,
+            "catalog_failed"
+        );
+        assert_eq!(show(&config, "offline coding").unwrap().entries.len(), 2);
+        assert_eq!(show(&config, "shared").unwrap().entries.len(), 2);
+    }
+
+    #[test]
+    fn an_old_catalog_gains_collection_tables_when_a_list_is_stored() {
+        let (_dir, config, _) = ready();
+        let path = config.catalog_path.join("catalog.sqlite3");
+        let connection = rusqlite::Connection::open(&path).unwrap();
+        connection
+            .execute_batch(
+                "DROP TABLE collection_entry_categories;
+                 DROP TABLE collection_entries;
+                 DROP TABLE collection_ceilings;
+                 DROP TABLE collections;
+                 PRAGMA user_version=6;",
+            )
+            .unwrap();
+        drop(connection);
+        let stored = store(&config, &one("example/model", "main", "pinned")).unwrap();
+        assert_eq!(stored.action, "stored");
+        assert_eq!(show(&config, "offline coding").unwrap().entries.len(), 1);
+        let connection = rusqlite::Connection::open(&path).unwrap();
+        let version: u32 = connection
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .unwrap();
+        assert_eq!(version, 7);
+        let entries: i64 = connection
+            .query_row("SELECT COUNT(*) FROM collection_entries", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(entries, 1);
     }
 }
