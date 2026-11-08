@@ -83,7 +83,7 @@ The volume label is user-facing. volume.json UUID is the identity. Automatic rul
 
 ## Scheduling
 
-`collection preview` lists explicit entries from a local TOML file. An entry may name a representation. The preview records that name and does not apply it. It does not resolve revisions, start a download, or write the catalog. Discovery and ranking are not implemented.
+`collection preview` lists explicit entries from a local TOML file. An entry may name a representation, and the file may name a category ceiling. The preview records both and does not apply them. It does not resolve revisions, start a download, or write the catalog. Discovery and ranking are not implemented.
 
 `schedule preview` shows the command, absolute config path, absolute stage path, working directory, timezone, and removal command. It changes nothing. `schedule install` writes the unit and enables that timer only when `--preview` is the digest of that text. `schedule remove` disables and deletes only the ModelPrepper timer. The timer runs `watch` once and exits. It does not call `decide`. systemd and Task Scheduler use Monday 00:05 UTC. launchd uses local time. The byte ceiling stays the configured UTC-week cap. CI injects the host runner and does not enable a live timer.
 

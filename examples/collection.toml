@@ -3,6 +3,11 @@ schema_version = 1
 name = "offline coding"
 replica = "backup"
 
+# Recorded cap. This preview does not charge entries or reserve these bytes.
+[[ceilings]]
+category = "coding"
+bytes = 500000000000
+
 [[entries]]
 repo_id = "https://huggingface.co/example/model/"
 revision = "0123456789abcdef0123456789abcdef01234567"

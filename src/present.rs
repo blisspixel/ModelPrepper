@@ -764,6 +764,18 @@ pub fn render_collection(
         lines.push(field(columns, "replica", replica));
     }
     lines.push(field(columns, "entries", &report.entries.len().to_string()));
+    lines.push(field(
+        columns,
+        "ceilings",
+        &report.ceilings.len().to_string(),
+    ));
+    for ceiling in &report.ceilings {
+        lines.push(field(
+            columns,
+            "ceiling",
+            &format!("{}  {} bytes  not applied", ceiling.category, ceiling.bytes),
+        ));
+    }
     for entry in &report.entries {
         let note = if entry.note.is_empty() {
             String::new()
