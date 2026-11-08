@@ -1,7 +1,10 @@
-//! Shared collection file. Preview lists explicit entries. Store writes that list and does not download it. Remove deletes one stored list and does not delete archived revisions. Custody reports exact catalog matches and does not hash files.
+//! Shared collection file. Preview lists explicit entries. Store writes that list and does not download it. Remove deletes one stored list and does not delete archived revisions. Custody reports exact catalog matches and does not hash files. Export writes one stored list back to schema 1.
 use crate::{Error, Result};
 use serde::Serialize;
 use std::collections::BTreeSet;
+use std::fs::OpenOptions;
+use std::io::Write;
+use std::path::{Path, PathBuf};
 
 const MAX_ENTRIES: usize = 100;
 const MAX_NAME: usize = 80;
@@ -257,6 +260,171 @@ pub fn custody(config: &crate::Config, name: &str) -> Result<CollectionCustody> 
         downloads_started: false,
         workspace_bytes: None,
     })
+}
+
+#[derive(Debug, PartialEq, Eq, Serialize)]
+pub struct CollectionExport {
+    pub schema_version: u32,
+    pub action: &'static str,
+    pub name: String,
+    pub path: PathBuf,
+    /// The catalog is not rewritten.
+    pub vault_mutated: bool,
+    pub resolved: bool,
+    pub ranked: bool,
+    pub evidence_checked: bool,
+    pub provenance_verified: bool,
+    pub transfer_authorized: bool,
+    pub network_contact: bool,
+    pub downloads_started: bool,
+    pub workspace_bytes: Option<u64>,
+}
+
+/// Write one stored list to a new schema 1 file. The catalog is not changed.
+pub fn export(config: &crate::Config, name: &str, output: &Path) -> Result<CollectionExport> {
+    check_text(name, 1, MAX_NAME, "name")?;
+    let Some(file_name) = output.file_name() else {
+        return Err(Error::new("export_failed", "output path needs a file name"));
+    };
+    let temp = output.with_file_name(format!("{}.export-tmp", file_name.to_string_lossy()));
+    let stored = crate::vault::read_collection(config, name)?;
+    publish_export(output, &temp, &document(&stored))?;
+    Ok(CollectionExport {
+        schema_version: 1,
+        action: "exported",
+        name: stored.name,
+        path: output.to_path_buf(),
+        vault_mutated: false,
+        resolved: false,
+        ranked: false,
+        evidence_checked: false,
+        provenance_verified: false,
+        transfer_authorized: false,
+        network_contact: false,
+        downloads_started: false,
+        workspace_bytes: None,
+    })
+}
+
+fn document(report: &CollectionReport) -> String {
+    let mut lines = vec![
+        "# Stored collection. This file does not resolve or download entries.".to_string(),
+        "schema_version = 1".to_string(),
+        format!("name = {}", toml_basic(&report.name)),
+    ];
+    if let Some(replica) = &report.replica {
+        lines.push(format!("replica = {}", toml_basic(replica)));
+    }
+    for ceiling in &report.ceilings {
+        lines.push(String::new());
+        lines.push("[[ceilings]]".to_string());
+        lines.push(format!("category = {}", toml_basic(&ceiling.category)));
+        lines.push(format!("bytes = {}", ceiling.bytes));
+    }
+    if report.entries.is_empty() {
+        lines.push("entries = []".to_string());
+    }
+    for entry in &report.entries {
+        lines.push(String::new());
+        lines.push("[[entries]]".to_string());
+        lines.push(format!("repo_id = {}", toml_basic(&entry.repo_id)));
+        lines.push(format!("revision = {}", toml_basic(&entry.revision)));
+        if !entry.note.is_empty() {
+            lines.push(format!("note = {}", toml_basic(&entry.note)));
+        }
+        if let Some(representation) = &entry.representation {
+            lines.push(format!("representation = {}", toml_basic(representation)));
+        }
+        if !entry.categories.is_empty() {
+            let categories = entry
+                .categories
+                .iter()
+                .map(|category| toml_basic(category))
+                .collect::<Vec<_>>()
+                .join(", ");
+            lines.push(format!("categories = [{categories}]"));
+        }
+        if let Some(base_repo) = &entry.base_repo {
+            lines.push(format!("base_repo = {}", toml_basic(base_repo)));
+        }
+        if let Some(base_revision) = &entry.base_revision {
+            lines.push(format!("base_revision = {}", toml_basic(base_revision)));
+        }
+        if let Some(evaluation) = &entry.evaluation {
+            lines.push(format!(
+                "evaluation_source = {}",
+                toml_basic(&evaluation.source)
+            ));
+            lines.push(format!(
+                "evaluation_name = {}",
+                toml_basic(&evaluation.name)
+            ));
+            lines.push(format!(
+                "evaluation_value = {}",
+                toml_basic(&evaluation.value)
+            ));
+        }
+        if let Some(evidence) = &entry.evidence {
+            lines.push(format!("evidence = {}", toml_basic(evidence)));
+        }
+        if let Some(provenance) = &entry.provenance {
+            lines.push(format!("provenance = {}", toml_basic(provenance)));
+        }
+    }
+    lines.push(String::new());
+    lines.join("\n")
+}
+
+fn toml_basic(value: &str) -> String {
+    let mut encoded = String::from("\"");
+    for character in value.chars() {
+        match character {
+            '\\' => encoded.push_str("\\\\"),
+            '"' => encoded.push_str("\\\""),
+            other => encoded.push(other),
+        }
+    }
+    encoded.push('"');
+    encoded
+}
+
+fn publish_export(output: &Path, temp: &Path, text: &str) -> Result<()> {
+    let mut file = match OpenOptions::new().write(true).create_new(true).open(temp) {
+        Ok(file) => file,
+        Err(error) => {
+            return Err(Error::new(
+                "export_failed",
+                format!("{}: {error}", output.display()),
+            ));
+        }
+    };
+    if let Err(error) = file
+        .write_all(text.as_bytes())
+        .and_then(|()| file.sync_all())
+    {
+        drop(file);
+        let _ = std::fs::remove_file(temp);
+        return Err(Error::new(
+            "export_failed",
+            format!("{}: {error}", output.display()),
+        ));
+    }
+    drop(file);
+    if let Err(error) = std::fs::hard_link(temp, output) {
+        let _ = std::fs::remove_file(temp);
+        if output.exists() {
+            return Err(Error::new(
+                "output_exists",
+                format!("refusing to overwrite {}", output.display()),
+            ));
+        }
+        return Err(Error::new(
+            "export_failed",
+            format!("{}: {error}", output.display()),
+        ));
+    }
+    let _ = std::fs::remove_file(temp);
+    Ok(())
 }
 
 #[derive(Debug, PartialEq, Eq, Serialize)]
@@ -2269,5 +2437,201 @@ base_revision = \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"
             "vault_not_initialized"
         );
         assert!(!root.join("catalog").join("catalog.sqlite3").exists());
+    }
+
+    #[test]
+    fn export_writes_schema_1_and_does_not_change_the_catalog() {
+        let (_dir, config, config_path) = ready();
+        let root = config_path.parent().unwrap();
+        store(&config, include_str!("../examples/collection.toml")).unwrap();
+        store(
+            &config,
+            r#"
+schema_version = 1
+name = "quoted"
+replica = "backup"
+[[ceilings]]
+category = "text"
+bytes = 0
+[[entries]]
+repo_id = "example/model"
+revision = "0123456789abcdef0123456789abcdef01234567"
+note = "say \"hi\" \\ path"
+representation = "original-required"
+categories = ["text", "coding"]
+base_repo = "example/base"
+base_revision = "abcdef0123456789abcdef0123456789abcdef01"
+evaluation_source = "operator"
+evaluation_name = "manual-review"
+evaluation_value = "not scored"
+evidence = "present"
+provenance = "stated conversion"
+[[entries]]
+repo_id = "example/other"
+revision = "main"
+base_repo = "example/base"
+base_revision = "abcdef0123456789abcdef0123456789abcdef01"
+"#,
+        )
+        .unwrap();
+        store(
+            &config,
+            "schema_version = 1\nname = \"empty\"\nentries = []\n",
+        )
+        .unwrap();
+        let before = [
+            "collections",
+            "collection_entries",
+            "collection_ceilings",
+            "custody",
+        ]
+        .map(|table| rows(&config, table));
+        let output = root.join("quoted.toml");
+        let exported = export(&config, "quoted", &output).unwrap();
+        assert_eq!(exported.action, "exported");
+        assert_eq!(exported.path, output);
+        assert!(!exported.vault_mutated);
+        assert!(!exported.resolved);
+        assert!(!exported.ranked);
+        assert!(!exported.evidence_checked);
+        assert!(!exported.provenance_verified);
+        assert!(!exported.transfer_authorized);
+        assert!(!exported.network_contact);
+        assert!(!exported.downloads_started);
+        assert!(exported.workspace_bytes.is_none());
+        assert!(!output.with_file_name("quoted.toml.export-tmp").exists());
+        let text = std::fs::read_to_string(&output).unwrap();
+        for forbidden in [
+            "resolved",
+            "ranked",
+            "applied",
+            "deduplicated",
+            "base_preserved",
+            "evidence_checked",
+            "provenance_verified",
+            "shared_bases",
+            "vault_mutated",
+        ] {
+            assert!(!text.contains(forbidden), "{forbidden} in {text}");
+        }
+        let shown = show(&config, "quoted").unwrap();
+        let parsed = preview(&text).unwrap();
+        assert_eq!(parsed.name, shown.name);
+        assert_eq!(parsed.replica, shown.replica);
+        assert_eq!(parsed.ceilings, shown.ceilings);
+        assert_eq!(parsed.entries, shown.entries);
+        assert_eq!(parsed.shared_bases, shown.shared_bases);
+        assert!(!parsed.entries[0].resolved);
+        assert!(!parsed.entries[0].evaluation.as_ref().unwrap().ranked);
+        assert!(!parsed.shared_bases[0].deduplicated);
+        assert_eq!(parsed.entries[0].note, "say \"hi\" \\ path");
+        let example_path = root.join("example.toml");
+        export(&config, "offline coding", &example_path).unwrap();
+        let example = preview(&std::fs::read_to_string(&example_path).unwrap()).unwrap();
+        let stored_example = show(&config, "offline coding").unwrap();
+        assert_eq!(example.entries, stored_example.entries);
+        assert_eq!(example.ceilings, stored_example.ceilings);
+        assert_eq!(example.shared_bases, stored_example.shared_bases);
+        let empty_path = root.join("empty.toml");
+        export(&config, "empty", &empty_path).unwrap();
+        let empty = preview(&std::fs::read_to_string(&empty_path).unwrap()).unwrap();
+        assert!(empty.entries.is_empty());
+        assert!(empty.replica.is_none());
+        for (table, count) in [
+            "collections",
+            "collection_entries",
+            "collection_ceilings",
+            "custody",
+        ]
+        .into_iter()
+        .zip(before)
+        {
+            assert_eq!(rows(&config, table), count, "{table}");
+        }
+        let kept = root.join("kept.toml");
+        std::fs::write(&kept, "keep\n").unwrap();
+        assert_eq!(
+            export(&config, "quoted", &kept).unwrap_err().code,
+            "output_exists"
+        );
+        assert_eq!(std::fs::read_to_string(&kept).unwrap(), "keep\n");
+        assert!(!root.join("kept.toml.export-tmp").exists());
+        assert_eq!(
+            export(&config, "missing", &root.join("missing.toml"))
+                .unwrap_err()
+                .code,
+            "collection_not_stored"
+        );
+        assert!(!root.join("missing.toml").exists());
+        assert_eq!(
+            export(&config, "", &kept).unwrap_err().code,
+            "invalid_collection"
+        );
+        assert_eq!(std::fs::read_to_string(&kept).unwrap(), "keep\n");
+        assert_eq!(
+            export(&config, "quoted", Path::new("")).unwrap_err().code,
+            "export_failed"
+        );
+        assert_eq!(
+            export(&config, "quoted", &root.join("missing").join("out.toml"))
+                .unwrap_err()
+                .code,
+            "export_failed"
+        );
+        assert!(!root.join("missing").exists());
+        assert_eq!(
+            export(&config, "quoted", root).unwrap_err().code,
+            "output_exists"
+        );
+        let wide = crate::present::render_collection_export(&exported, false, 160);
+        assert!(wide.contains("exported"), "{wide}");
+        assert!(wide.contains("not resolved or downloaded"), "{wide}");
+        let narrow = crate::present::render_collection_export(&exported, true, 80);
+        assert!(
+            narrow.lines().all(|line| line.chars().count() <= 80),
+            "{narrow}"
+        );
+
+        let command = crate::cli::Cli::try_parse_from([
+            "modelprepper",
+            "collection",
+            "export",
+            "--config",
+            config_path.to_str().unwrap(),
+            "--name",
+            "empty",
+            "--output",
+            root.join("cli.toml").to_str().unwrap(),
+        ])
+        .unwrap();
+        let cli = crate::cli::execute_in(command, crate::cli::View::piped()).unwrap();
+        let crate::cli::CommandOutput::Json(value) = cli else {
+            panic!("export is json when stdout is a pipe");
+        };
+        assert_eq!(value["action"], "exported");
+        assert_eq!(value["vault_mutated"], false);
+        assert!(value["workspace_bytes"].is_null());
+        assert!(root.join("cli.toml").is_file());
+
+        let unready = tempfile::tempdir().unwrap();
+        let unready_root = std::fs::canonicalize(unready.path()).unwrap();
+        std::fs::create_dir_all(unready_root.join("catalog")).unwrap();
+        std::fs::create_dir_all(unready_root.join("models")).unwrap();
+        let missing =
+            crate::Config::default_for(unready_root.join("catalog"), unready_root.join("models"));
+        let unready_output = unready_root.join("out.toml");
+        assert_eq!(
+            export(&missing, "quoted", &unready_output)
+                .unwrap_err()
+                .code,
+            "vault_not_initialized"
+        );
+        assert!(!unready_output.exists());
+        assert!(
+            !unready_root
+                .join("catalog")
+                .join("catalog.sqlite3")
+                .exists()
+        );
     }
 }

@@ -357,7 +357,7 @@ pub enum PreviewCommand {
         #[arg(long)]
         kit: PathBuf,
     },
-    /// Preview, store, list, or remove a shared list, and report matching custody. Nothing is downloaded.
+    /// Preview, store, list, remove, or export a shared list, and report matching custody. Nothing is downloaded.
     Collection {
         #[command(subcommand)]
         command: CollectionAction,
@@ -420,6 +420,18 @@ pub enum CollectionAction {
         /// Collection name to delete from the catalog.
         #[arg(long)]
         name: String,
+    },
+    /// Write one stored list to a new schema 1 file. The catalog is not changed.
+    Export {
+        /// Path to the vault configuration file.
+        #[arg(long)]
+        config: PathBuf,
+        /// Collection name from the catalog.
+        #[arg(long)]
+        name: String,
+        /// New schema 1 file. An existing path is left unchanged.
+        #[arg(long)]
+        output: PathBuf,
     },
     /// Report custody rows that match one stored list. Nothing is hashed.
     Custody {
@@ -765,6 +777,16 @@ pub(crate) fn execute_with(
                 let report = crate::collection::remove(&located_config(&config)?, &name)?;
                 show(&view, &report, true, |report| {
                     crate::present::render_collection(report, view.color, view.columns)
+                })
+            }
+            CollectionAction::Export {
+                config,
+                name,
+                output,
+            } => {
+                let report = crate::collection::export(&located_config(&config)?, &name, &output)?;
+                show(&view, &report, true, |report| {
+                    crate::present::render_collection_export(report, view.color, view.columns)
                 })
             }
             CollectionAction::Custody { config, name } => {
