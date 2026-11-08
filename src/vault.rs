@@ -32,7 +32,7 @@ mod watch;
 pub use crate::filesystem::FilesystemRole;
 pub use adoption::{Adoption, Outcome, PROVENANCE_LOCAL_UPSTREAM, adopt};
 pub(crate) use collection::{
-    list_collections, read_collection, remove_collection, write_collection,
+    custody_matches, list_collections, read_collection, remove_collection, write_collection,
 };
 pub use grant::{Grant, current_grant, record_grant};
 pub use restore::{

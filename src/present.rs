@@ -898,6 +898,44 @@ pub fn render_collection_list(
     lines.join("\n")
 }
 
+pub fn render_collection_custody(
+    report: &crate::collection::CollectionCustody,
+    color: bool,
+    columns: usize,
+) -> String {
+    let word = if report.entries.iter().any(|entry| entry.custody_rows > 0) {
+        "noted"
+    } else {
+        "none"
+    };
+    let mut lines = vec![verdict(color, columns, YELLOW, word, "  offline")];
+    lines.push(field(columns, "name", &report.name));
+    for entry in &report.entries {
+        let detail = if entry.custody_rows == 0 {
+            format!(
+                "{}  {}  custody not recorded  not rehashed",
+                entry.repo_id, entry.revision
+            )
+        } else {
+            format!(
+                "{}  {}  custody {}  {}  not rehashed",
+                entry.repo_id,
+                entry.revision,
+                entry.custody_rows,
+                entry.provenances.join(", ")
+            )
+        };
+        lines.push(field(columns, "entry", &detail));
+    }
+    lines.push(field(columns, "approval", "still blocked"));
+    lines.push(next_line(
+        color,
+        columns,
+        "this match is not a fresh hash or a download",
+    ));
+    lines.join("\n")
+}
+
 pub fn render_proposal(proposal: &crate::vault::Proposal, color: bool, columns: usize) -> String {
     let (code, word) = match proposal.decision {
         crate::vault::Decision::Approved => (GREEN, "approved"),
