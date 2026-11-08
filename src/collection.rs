@@ -60,6 +60,10 @@ pub struct CollectionEntry {
     pub base_preserved: bool,
     /// The operator's written attribution. Absent means the file did not give one.
     pub evaluation: Option<EvaluationAttribution>,
+    /// The operator's statement. Absent means the file did not state it.
+    pub evidence: Option<String>,
+    /// Preview does not open files to check this statement.
+    pub evidence_checked: bool,
     /// Preview does not contact a publisher, so this stays false.
     pub resolved: bool,
 }
@@ -72,6 +76,8 @@ pub struct EvaluationAttribution {
     /// Preview does not order entries by this text.
     pub ranked: bool,
 }
+
+const EVIDENCE: &[&str] = &["present", "missing"];
 
 #[derive(Debug, PartialEq, Eq, Serialize)]
 pub struct CategoryCeiling {
@@ -259,6 +265,7 @@ fn parse_entry(value: &toml::Value) -> Result<CollectionEntry> {
                     | "evaluation_source"
                     | "evaluation_name"
                     | "evaluation_value"
+                    | "evidence"
             )
         },
         "unknown entry field",
@@ -354,6 +361,24 @@ fn parse_entry(value: &toml::Value) -> Result<CollectionEntry> {
         ));
     }
     let evaluation = parse_evaluation(table)?;
+    let evidence = match table.get("evidence") {
+        None => None,
+        Some(toml::Value::String(value)) if EVIDENCE.contains(&value.as_str()) => {
+            Some(value.clone())
+        }
+        Some(toml::Value::String(_)) => {
+            return Err(Error::new(
+                "invalid_collection",
+                "evidence must be present or missing",
+            ));
+        }
+        Some(_) => {
+            return Err(Error::new(
+                "invalid_collection",
+                "evidence must be a string",
+            ));
+        }
+    };
     Ok(CollectionEntry {
         repo_id,
         revision,
@@ -364,6 +389,8 @@ fn parse_entry(value: &toml::Value) -> Result<CollectionEntry> {
         base_revision,
         base_preserved: false,
         evaluation,
+        evidence,
+        evidence_checked: false,
         resolved: false,
     })
 }
@@ -655,6 +682,8 @@ mod tests {
         assert!(report.entries[0].base_repo.is_none());
         assert!(report.entries[0].categories.is_empty());
         assert!(report.entries[0].evaluation.is_none());
+        assert!(report.entries[0].evidence.is_none());
+        assert!(!report.entries[0].evidence_checked);
         assert!(!report.entries[0].base_preserved);
         assert_eq!(
             report.entries[1].base_repo.as_deref(),
@@ -675,6 +704,8 @@ mod tests {
         assert_eq!(evaluation.name, "manual-review");
         assert_eq!(evaluation.value, "not scored");
         assert!(!evaluation.ranked);
+        assert_eq!(report.entries[1].evidence.as_deref(), Some("missing"));
+        assert!(!report.entries[1].evidence_checked);
         assert!(!report.ceilings[0].applied);
         assert!(report.shared_bases.is_empty());
         assert_eq!(report.ceilings.len(), 1);
@@ -996,6 +1027,41 @@ revision = \"main\"
             )),
             "invalid_collection"
         );
+        assert_eq!(
+            code(&entry(
+                "repo_id = \"example/model\"\nrevision = \"main\"\nevidence = 1\n"
+            )),
+            "invalid_collection"
+        );
+        assert_eq!(
+            code(&entry(
+                "repo_id = \"example/model\"\nrevision = \"main\"\nevidence = \"unknown\"\n"
+            )),
+            "invalid_collection"
+        );
+    }
+
+    #[test]
+    fn evidence_is_recorded_and_not_checked() {
+        for value in ["present", "missing"] {
+            let report = preview(&entry(&format!(
+                "repo_id = \"example/model\"\nrevision = \"main\"\nevidence = \"{value}\"\n"
+            )))
+            .unwrap();
+            assert_eq!(report.entries[0].evidence.as_deref(), Some(value));
+            assert!(!report.entries[0].evidence_checked);
+            assert!(!report.downloads_started);
+            assert!(report.workspace_bytes.is_none());
+            let text = crate::present::render_collection(&report, false, 220);
+            assert!(
+                text.contains(&format!("evidence {value} not checked")),
+                "{text}"
+            );
+        }
+        let absent = preview(&entry("repo_id = \"example/model\"\nrevision = \"main\"\n")).unwrap();
+        assert!(absent.entries[0].evidence.is_none());
+        let absent_text = crate::present::render_collection(&absent, false, 220);
+        assert!(absent_text.contains("evidence not stated"), "{absent_text}");
     }
 
     #[test]
@@ -1012,14 +1078,14 @@ revision = \"main\"
         assert!(!report.entries[0].resolved);
         assert!(!report.downloads_started);
         assert!(report.workspace_bytes.is_none());
-        let text = crate::present::render_collection(&report, false, 160);
+        let text = crate::present::render_collection(&report, false, 280);
         assert!(
             text.contains("evaluation operator: manual-review = not scored not ranked"),
             "{text}"
         );
         let absent = preview(&entry("repo_id = \"example/model\"\nrevision = \"main\"\n")).unwrap();
         assert!(absent.entries[0].evaluation.is_none());
-        let absent_text = crate::present::render_collection(&absent, false, 160);
+        let absent_text = crate::present::render_collection(&absent, false, 280);
         assert!(
             absent_text.contains("evaluation not attributed"),
             "{absent_text}"
@@ -1250,6 +1316,10 @@ revision = \"main\"
         assert_eq!(value["entries"][1]["evaluation"]["name"], "manual-review");
         assert_eq!(value["entries"][1]["evaluation"]["value"], "not scored");
         assert_eq!(value["entries"][1]["evaluation"]["ranked"], false);
+        assert!(value["entries"][0]["evidence"].is_null());
+        assert_eq!(value["entries"][0]["evidence_checked"], false);
+        assert_eq!(value["entries"][1]["evidence"], "missing");
+        assert_eq!(value["entries"][1]["evidence_checked"], false);
         assert_eq!(value["ceilings"][0]["applied"], false);
         assert_eq!(value["entries"][1]["resolved"], false);
         assert!(value["shared_bases"].as_array().unwrap().is_empty());

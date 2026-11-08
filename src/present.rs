@@ -796,6 +796,11 @@ pub fn render_collection(
         } else {
             format!("categories {}", entry.categories.join(","))
         };
+        let evidence = match entry.evidence.as_deref() {
+            Some("present") => "evidence present not checked",
+            Some("missing") => "evidence missing not checked",
+            _ => "evidence not stated",
+        };
         let evaluation = match entry.evaluation.as_ref() {
             None => "evaluation not attributed".to_string(),
             Some(evaluation) => format!(
@@ -807,7 +812,7 @@ pub fn render_collection(
             columns,
             "entry",
             &format!(
-                "{}  {}  {representation}  unresolved  {base}  {categories}  {evaluation}{note}",
+                "{}  {}  {representation}  unresolved  {base}  {categories}  {evaluation}  {evidence}{note}",
                 entry.repo_id, entry.revision
             ),
         ));
