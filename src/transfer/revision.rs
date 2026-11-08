@@ -11,7 +11,7 @@ use crate::{
 };
 use serde::{Deserialize, Serialize};
 use std::{
-    fs::{self, File, OpenOptions},
+    fs::{self, OpenOptions},
     io::Write,
     path::Path,
 };
@@ -328,7 +328,10 @@ fn set_location(root: &Path) -> Result<()> {
 
 fn sync_directory(path: &Path) -> Result<()> {
     #[cfg(unix)]
-    File::open(path).map_err(disk)?.sync_all().map_err(disk)?;
+    fs::File::open(path)
+        .map_err(disk)?
+        .sync_all()
+        .map_err(disk)?;
     #[cfg(not(unix))]
     let _ = path;
     Ok(())
