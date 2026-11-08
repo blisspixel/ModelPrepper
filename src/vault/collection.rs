@@ -218,6 +218,8 @@ pub(crate) fn custody_matches(
             plan_ids,
             plans,
             dependents,
+            retired: false,
+            blocks: crate::collection::retirement_blocks(custody_rows, dependents),
             revision_shape: revision_shape(&entry.revision),
             measured_bytes,
             charged: false,

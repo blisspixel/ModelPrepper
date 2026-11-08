@@ -273,6 +273,10 @@ pub struct CollectionCustodyEntry {
     /// Other entries in this stored list that name this repository and revision as a declared base.
     /// The count does not fetch that base and does not retire this entry.
     pub dependents: u64,
+    /// Always false. This report does not retire a copy.
+    pub retired: bool,
+    /// Why this entry is not retired, in fixed order. The list always ends with the missing approval.
+    pub blocks: Vec<&'static str>,
     /// `commit` for 40 lowercase hex characters. `name` for any other accepted revision.
     /// The label is not a publisher resolution.
     pub revision_shape: &'static str,
@@ -281,6 +285,21 @@ pub struct CollectionCustodyEntry {
     pub measured_bytes: Option<u64>,
     /// True only when this measured entry was included in an applied category ceiling.
     pub charged: bool,
+}
+
+/// Reasons a stored entry is not retired. The last reason is always the missing approval.
+pub(crate) fn retirement_blocks(custody_rows: u64, dependents: u64) -> Vec<&'static str> {
+    let mut blocks = Vec::new();
+    if custody_rows == 0 {
+        blocks.push("no sealed copy");
+    } else if custody_rows == 1 {
+        blocks.push("last sealed copy");
+    }
+    if dependents > 0 {
+        blocks.push("declared dependents");
+    }
+    blocks.push("retirement is not approved");
+    blocks
 }
 
 /// Sum `size_bytes` in one stored manifest. A manifest that does not parse is not a size.
@@ -351,8 +370,7 @@ pub(crate) fn charge_ceilings(
         .collect()
 }
 
-/// Count custody rows that match one stored list.
-/// Each plan names its volume, bytes, and replica rows. Dependents are declared bases in this list.
+/// Count custody rows that match one stored list and say why none of them is retired.
 /// Nothing is dropped, merged, hashed, or downloaded.
 pub fn custody(config: &crate::Config, name: &str) -> Result<CollectionCustody> {
     check_text(name, 1, MAX_NAME, "name")?;
@@ -2741,6 +2759,12 @@ base_revision = \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"
         }
         connection
             .execute(
+                "INSERT INTO custody (plan_id, repo_id, resolved_revision, provenance, volume_label, relative_dir, manifest) VALUES (?1, 'example/other', ?2, 'local-baseline', 'models', 'model', '{}')",
+                rusqlite::params!["j".repeat(64), pin],
+            )
+            .unwrap();
+        connection
+            .execute(
                 "INSERT INTO replicas (plan_id, volume_label, relative_dir, manifest) VALUES (?1, 'models', 'other', '{}')",
                 rusqlite::params!["e".repeat(64)],
             )
@@ -2799,11 +2823,19 @@ base_revision = \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"
         assert_eq!(noted.entries[1].revision_shape, "name");
         assert_eq!(noted.entries[1].measured_bytes, None);
         assert_eq!(noted.entries[1].custody_rows, 0);
+        assert_eq!(
+            noted.entries[1].blocks,
+            vec!["no sealed copy", "retirement is not approved"]
+        );
         assert!(noted.entries[1].plan_ids.is_empty());
         assert!(noted.entries[1].provenances.is_empty());
         assert_eq!(noted.entries[2].repo_id, "example/other");
         assert_eq!(noted.entries[2].revision_shape, "commit");
-        assert_eq!(noted.entries[2].custody_rows, 0);
+        assert_eq!(noted.entries[2].custody_rows, 1);
+        assert_eq!(
+            noted.entries[2].blocks,
+            vec!["last sealed copy", "retirement is not approved"]
+        );
         assert_eq!(noted.entries[3].revision_shape, "name");
         assert_eq!(noted.entries[4].revision_shape, "name");
         assert_eq!(rows(&config, "custody"), before);
@@ -2840,8 +2872,18 @@ base_revision = \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"
         assert_eq!(noted.entries[0].plans[0].replica_rows, 1);
         assert_eq!(noted.entries[0].plans[1].replica_rows, 0);
         assert_eq!(noted.entries[0].dependents, 0);
+        assert!(!noted.entries[0].retired);
+        assert_eq!(noted.entries[0].blocks, vec!["retirement is not approved"]);
         assert_eq!(noted.entries[0].plans.len(), 3);
         assert!(!wide.contains(&"e".repeat(64)), "{wide}");
+        assert!(
+            wide.contains("blocked  last sealed copy, retirement is not approved"),
+            "{wide}"
+        );
+        assert!(
+            wide.contains("blocked  no sealed copy, retirement is not approved"),
+            "{wide}"
+        );
         let sized = custody(&config, "sized").unwrap();
         assert_eq!(sized.entries[0].measured_bytes, Some(120));
         assert_eq!(sized.entries[0].custody_rows, 2);
@@ -2852,9 +2894,15 @@ base_revision = \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"
         assert_eq!(sized.entries[0].plans[0].measured_bytes, Some(120));
         assert_eq!(sized.entries[0].plans[1].measured_bytes, Some(120));
         assert_eq!(sized.entries[0].dependents, 1);
+        assert!(!sized.entries[0].retired);
+        assert_eq!(
+            sized.entries[0].blocks,
+            vec!["declared dependents", "retirement is not approved"]
+        );
         assert_eq!(sized.entries[1].plans[0].measured_bytes, Some(10));
         assert_eq!(sized.entries[1].plans[1].measured_bytes, Some(11));
         assert_eq!(sized.entries[1].dependents, 0);
+        assert_eq!(sized.entries[1].blocks, vec!["retirement is not approved"]);
         assert_eq!(sized.entries[2].custody_rows, 0);
         assert_eq!(sized.entries[2].dependents, 0);
         assert_eq!(sized.entries[0].revision_shape, "commit");
@@ -2864,7 +2912,7 @@ base_revision = \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"
         let sized_text = crate::present::render_collection_custody(&sized, false, 220);
         assert!(sized_text.contains("measured 120"), "{sized_text}");
         assert!(
-            sized_text.contains("dependents  1  not retired"),
+            sized_text.contains("blocked  declared dependents, retirement is not approved"),
             "{sized_text}"
         );
         assert!(
@@ -2932,6 +2980,11 @@ base_revision = \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"
         assert!(value["entries"][0]["plans"][0]["measured_bytes"].is_null());
         assert_eq!(value["entries"][0]["plans"][0]["replica_rows"], 1);
         assert_eq!(value["entries"][0]["dependents"], 0);
+        assert!(!value["entries"][0]["retired"].as_bool().unwrap());
+        assert_eq!(
+            value["entries"][0]["blocks"][0],
+            "retirement is not approved"
+        );
         assert_eq!(value["entries"][0]["plan_ids"][2], "c".repeat(64));
         assert!(
             value["entries"][1]["plan_ids"]
