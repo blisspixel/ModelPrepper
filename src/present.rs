@@ -791,11 +791,16 @@ pub fn render_collection(
         } else {
             "base not declared".to_string()
         };
+        let categories = if entry.categories.is_empty() {
+            "uncategorized".to_string()
+        } else {
+            format!("categories {}", entry.categories.join(","))
+        };
         lines.push(field(
             columns,
             "entry",
             &format!(
-                "{}  {}  {representation}  unresolved  {base}{note}",
+                "{}  {}  {representation}  unresolved  {base}  {categories}{note}",
                 entry.repo_id, entry.revision
             ),
         ));

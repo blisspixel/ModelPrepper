@@ -50,6 +50,8 @@ pub struct CollectionEntry {
     pub note: String,
     /// The operator's written choice. Absent means the file did not choose.
     pub representation: Option<String>,
+    /// Kit slot names the operator wrote. Empty means the file did not assign any.
+    pub categories: Vec<String>,
     /// Declared base repository. Absent means the file did not name one.
     pub base_repo: Option<String>,
     /// Declared base revision. Absent means the file did not establish one.
@@ -236,7 +238,13 @@ fn parse_entry(value: &toml::Value) -> Result<CollectionEntry> {
         |key| {
             matches!(
                 key,
-                "repo_id" | "revision" | "note" | "representation" | "base_repo" | "base_revision"
+                "repo_id"
+                    | "revision"
+                    | "note"
+                    | "representation"
+                    | "categories"
+                    | "base_repo"
+                    | "base_revision"
             )
         },
         "unknown entry field",
@@ -293,6 +301,7 @@ fn parse_entry(value: &toml::Value) -> Result<CollectionEntry> {
             ));
         }
     };
+    let categories = parse_categories(table)?;
     let base_repo = match table.get("base_repo") {
         None => None,
         Some(toml::Value::String(value)) => Some(crate::validation::normalize_repo(value)?),
@@ -335,11 +344,57 @@ fn parse_entry(value: &toml::Value) -> Result<CollectionEntry> {
         revision,
         note,
         representation,
+        categories,
         base_repo,
         base_revision,
         base_preserved: false,
         resolved: false,
     })
+}
+
+fn parse_categories(table: &toml::Table) -> Result<Vec<String>> {
+    let Some(value) = table.get("categories") else {
+        return Ok(Vec::new());
+    };
+    let Some(items) = value.as_array() else {
+        return Err(Error::new(
+            "invalid_collection",
+            "categories must be an array",
+        ));
+    };
+    if items.len() > CATEGORIES.len() {
+        return Err(Error::new(
+            "invalid_collection",
+            format!("an entry lists at most {} categories", CATEGORIES.len()),
+        ));
+    }
+    let mut categories = Vec::with_capacity(items.len());
+    let mut seen = BTreeSet::new();
+    for item in items {
+        let category = match item {
+            toml::Value::String(value) if CATEGORIES.contains(&value.as_str()) => value.clone(),
+            toml::Value::String(_) => {
+                return Err(Error::new(
+                    "invalid_collection",
+                    "category must be text, coding, vision, image_generation, video_generation, speech_to_text, text_to_speech, embeddings, or reference",
+                ));
+            }
+            _ => {
+                return Err(Error::new(
+                    "invalid_collection",
+                    "categories must contain strings",
+                ));
+            }
+        };
+        if !seen.insert(category.clone()) {
+            return Err(Error::new(
+                "invalid_collection",
+                format!("duplicate category {category}"),
+            ));
+        }
+        categories.push(category);
+    }
+    Ok(categories)
 }
 
 fn shared_bases(entries: &[CollectionEntry]) -> Vec<SharedBase> {
@@ -502,7 +557,7 @@ mod tests {
         let report = preview(&same_repo).unwrap();
         assert!(report.entries[0].note.is_empty());
         assert_eq!(report.entries.len(), report.entry_count);
-        let text = crate::present::render_collection(&report, false, 120);
+        let text = crate::present::render_collection(&report, false, 160);
         assert!(text.contains("unspecified"), "{text}");
         assert!(text.contains("unresolved"), "{text}");
         assert!(text.contains("base not declared"), "{text}");
@@ -549,6 +604,7 @@ mod tests {
             Some("original-required")
         );
         assert!(report.entries[0].base_repo.is_none());
+        assert!(report.entries[0].categories.is_empty());
         assert!(!report.entries[0].base_preserved);
         assert_eq!(
             report.entries[1].base_repo.as_deref(),
@@ -560,6 +616,11 @@ mod tests {
         );
         assert!(!report.entries[1].base_preserved);
         assert!(!report.entries[1].resolved);
+        assert_eq!(
+            report.entries[1].categories,
+            ["coding".to_string(), "text".to_string()]
+        );
+        assert!(!report.ceilings[0].applied);
         assert!(report.shared_bases.is_empty());
         assert_eq!(report.ceilings.len(), 1);
         assert_eq!(report.ceilings[0].category, "coding");
@@ -799,6 +860,88 @@ revision = \"main\"
         ))
         .unwrap_err();
         assert!(itself.message.contains("cannot name itself"));
+        assert_eq!(
+            code(&entry(
+                "repo_id = \"example/model\"\nrevision = \"main\"\ncategories = 1\n"
+            )),
+            "invalid_collection"
+        );
+        assert_eq!(
+            code(&entry(
+                "repo_id = \"example/model\"\nrevision = \"main\"\ncategories = [1]\n"
+            )),
+            "invalid_collection"
+        );
+        assert_eq!(
+            code(&entry(
+                "repo_id = \"example/model\"\nrevision = \"main\"\ncategories = [\"reasoning\"]\n"
+            )),
+            "invalid_collection"
+        );
+        let duplicate_category = preview(&entry(
+            "repo_id = \"example/model\"\nrevision = \"main\"\ncategories = [\"coding\", \"coding\"]\n",
+        ))
+        .unwrap_err();
+        assert!(
+            duplicate_category
+                .message
+                .contains("duplicate category coding")
+        );
+        let mut too_many_categories =
+            String::from("repo_id = \"example/model\"\nrevision = \"main\"\ncategories = [");
+        for _ in 0..10 {
+            too_many_categories.push_str("\"coding\",");
+        }
+        too_many_categories.push_str("]\n");
+        assert!(
+            preview(&entry(&too_many_categories))
+                .unwrap_err()
+                .message
+                .contains("at most 9")
+        );
+    }
+
+    #[test]
+    fn categories_are_recorded_and_do_not_charge_a_ceiling() {
+        let absent = preview(&entry("repo_id = \"example/model\"\nrevision = \"main\"\n")).unwrap();
+        assert!(absent.entries[0].categories.is_empty());
+        let absent_text = crate::present::render_collection(&absent, false, 160);
+        assert!(absent_text.contains("uncategorized"), "{absent_text}");
+        let empty = preview(&entry(
+            "repo_id = \"example/model\"\nrevision = \"main\"\ncategories = []\n",
+        ))
+        .unwrap();
+        assert!(empty.entries[0].categories.is_empty());
+        let mut names = String::new();
+        for (index, category) in CATEGORIES.iter().enumerate() {
+            if index > 0 {
+                names.push_str(", ");
+            }
+            names.push('"');
+            names.push_str(category);
+            names.push('"');
+        }
+        let listed = preview(&format!(
+            "schema_version = 1\nname = \"ok\"\n[[ceilings]]\ncategory = \"coding\"\nbytes = 8\n[[entries]]\nrepo_id = \"example/model\"\nrevision = \"main\"\ncategories = [{names}]\n"
+        ))
+        .unwrap();
+        assert_eq!(listed.entries[0].categories.len(), CATEGORIES.len());
+        for (got, expected) in listed.entries[0].categories.iter().zip(CATEGORIES) {
+            assert_eq!(got, expected);
+        }
+        assert!(!listed.ceilings[0].applied);
+        assert!(!listed.downloads_started);
+        assert!(listed.workspace_bytes.is_none());
+        let overlap = preview(&entry(
+            "repo_id = \"example/model\"\nrevision = \"main\"\ncategories = [\"coding\", \"text\"]\n",
+        ))
+        .unwrap();
+        assert_eq!(
+            overlap.entries[0].categories,
+            ["coding".to_string(), "text".to_string()]
+        );
+        let text = crate::present::render_collection(&overlap, false, 160);
+        assert!(text.contains("categories coding,text"), "{text}");
     }
 
     #[test]
@@ -813,7 +956,7 @@ revision = \"main\"
         assert!(!named.entries[0].resolved);
         assert!(!named.downloads_started);
         assert!(named.workspace_bytes.is_none());
-        let text = crate::present::render_collection(&named, false, 120);
+        let text = crate::present::render_collection(&named, false, 160);
         assert!(
             text.contains("base example/base@v1 not preserved"),
             "{text}"
@@ -825,7 +968,7 @@ revision = \"main\"
         assert_eq!(open.entries[0].base_repo.as_deref(), Some("example/model"));
         assert!(open.entries[0].base_revision.is_none());
         assert!(!open.entries[0].base_preserved);
-        let open_text = crate::present::render_collection(&open, false, 120);
+        let open_text = crate::present::render_collection(&open, false, 160);
         assert!(
             open_text.contains("base example/model revision not established"),
             "{open_text}"
@@ -855,7 +998,7 @@ revision = \"main\"
         assert!(!one.shared_bases[0].deduplicated);
         assert!(!one.downloads_started);
         assert!(one.workspace_bytes.is_none());
-        let text = crate::present::render_collection(&one, false, 120);
+        let text = crate::present::render_collection(&one, false, 160);
         assert!(
             text.contains("example/base@v1  2 entries  not deduplicated"),
             "{text}"
@@ -960,6 +1103,12 @@ revision = \"main\"
         assert!(value["workspace_bytes"].is_null());
         assert_eq!(value["entries"][0]["resolved"], false);
         assert_eq!(value["entries"][0]["representation"], "original-required");
+        assert!(
+            value["entries"][0]["categories"]
+                .as_array()
+                .unwrap()
+                .is_empty()
+        );
         assert!(value["entries"][0]["base_repo"].is_null());
         assert!(value["entries"][0]["base_revision"].is_null());
         assert_eq!(value["entries"][0]["base_preserved"], false);
@@ -969,6 +1118,9 @@ revision = \"main\"
             "0123456789abcdef0123456789abcdef01234567"
         );
         assert_eq!(value["entries"][1]["base_preserved"], false);
+        assert_eq!(value["entries"][1]["categories"][0], "coding");
+        assert_eq!(value["entries"][1]["categories"][1], "text");
+        assert_eq!(value["ceilings"][0]["applied"], false);
         assert_eq!(value["entries"][1]["resolved"], false);
         assert!(value["shared_bases"].as_array().unwrap().is_empty());
         assert_eq!(value["ceilings"][0]["category"], "coding");

@@ -75,7 +75,7 @@ Use a deterministic, inspectable selection algorithm before an optional agent. I
 
 Category membership may overlap. Reports distinguish category attribution from physical bytes so one model is not charged twice to the same disk. Replica copies, staging, and independently stored derivatives do consume additional physical capacity. NAS RAID is not an independent second copy.
 
-Recompute after every completed reservation or admission change. Concurrent jobs must not each spend the same free bytes. Report policy ceilings separately from a filesystem quota: current configuration is not an OS-enforced quota. `budget` and `kit` compare pinned inventory sizes with `max_stored_bytes` and leave `workspace_bytes` null. They do not reserve bytes, track occupancy, or enforce category ceilings. A collection may record one byte ceiling for each kit slot. `collection preview` shows that number and does not charge entries against it, assign an entry to a slot, or reserve bytes.
+Recompute after every completed reservation or admission change. Concurrent jobs must not each spend the same free bytes. Report policy ceilings separately from a filesystem quota: current configuration is not an OS-enforced quota. `budget` and `kit` compare pinned inventory sizes with `max_stored_bytes` and leave `workspace_bytes` null. They do not reserve bytes, track occupancy, or enforce category ceilings. A collection may record one byte ceiling for each kit slot. An entry may name one or more of those slots. `collection preview` shows both and does not charge the ceiling or reserve bytes.
 
 ## Latest without losing history
 
