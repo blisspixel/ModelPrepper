@@ -7,6 +7,11 @@ const MAX_ENTRIES: usize = 100;
 const MAX_NAME: usize = 80;
 const MAX_NOTE: usize = 200;
 const MAX_LABEL: usize = 64;
+const REPRESENTATIONS: &[&str] = &[
+    "original-required",
+    "original-preferred",
+    "selected-derivative",
+];
 
 #[derive(Debug, PartialEq, Eq, Serialize)]
 pub struct CollectionReport {
@@ -29,6 +34,8 @@ pub struct CollectionEntry {
     pub repo_id: String,
     pub revision: String,
     pub note: String,
+    /// The operator's written choice. Absent means the file did not choose.
+    pub representation: Option<String>,
     /// Preview does not contact a publisher, so this stays false.
     pub resolved: bool,
 }
@@ -177,7 +184,7 @@ fn parse_entry(value: &toml::Value) -> Result<CollectionEntry> {
     };
     reject_unknown(
         table.keys(),
-        |key| matches!(key, "repo_id" | "revision" | "note"),
+        |key| matches!(key, "repo_id" | "revision" | "note" | "representation"),
         "unknown entry field",
     )?;
     let repo_id = match table.get("repo_id") {
@@ -214,10 +221,29 @@ fn parse_entry(value: &toml::Value) -> Result<CollectionEntry> {
     if !note.is_empty() {
         check_text(&note, 1, MAX_NOTE, "note")?;
     }
+    let representation = match table.get("representation") {
+        None => None,
+        Some(toml::Value::String(value)) if REPRESENTATIONS.contains(&value.as_str()) => {
+            Some(value.clone())
+        }
+        Some(toml::Value::String(_)) => {
+            return Err(Error::new(
+                "invalid_collection",
+                "representation must be original-required, original-preferred, or selected-derivative",
+            ));
+        }
+        Some(_) => {
+            return Err(Error::new(
+                "invalid_collection",
+                "representation must be a string",
+            ));
+        }
+    };
     Ok(CollectionEntry {
         repo_id,
         revision,
         note,
+        representation,
         resolved: false,
     })
 }
@@ -255,6 +281,7 @@ mod tests {
         assert_eq!(report.replica.as_deref(), Some("backup"));
         assert_eq!(report.entry_count, 1);
         assert_eq!(report.entries[0].repo_id, "example/model");
+        assert!(report.entries[0].representation.is_none());
         assert!(!report.entries[0].resolved);
         assert!(!report.transfer_authorized);
         assert!(!report.network_contact);
@@ -270,8 +297,39 @@ mod tests {
         assert!(report.entries[0].note.is_empty());
         assert_eq!(report.entries.len(), report.entry_count);
         let text = crate::present::render_collection(&report, false, 80);
+        assert!(text.contains("unspecified"), "{text}");
         assert!(text.contains("unresolved"), "{text}");
         assert!(!text.contains("pinned"), "{text}");
+        let chosen = format!(
+            "{}\nrepresentation = \"original-required\"\n",
+            one(
+                "example/model",
+                "0123456789abcdef0123456789abcdef01234567",
+                "pinned",
+            )
+        );
+        for value in [
+            "original-required",
+            "original-preferred",
+            "selected-derivative",
+        ] {
+            let report = preview(&chosen.replace("original-required", value)).unwrap();
+            assert_eq!(report.entries[0].representation.as_deref(), Some(value));
+            assert!(!report.downloads_started);
+            assert!(!report.entries[0].resolved);
+        }
+        assert_eq!(
+            code(&chosen.replace("original-required", "original")),
+            "invalid_collection"
+        );
+        assert_eq!(
+            code(&chosen.replacen(
+                "representation = \"original-required\"",
+                "representation = 1",
+                1
+            )),
+            "invalid_collection"
+        );
     }
 
     #[test]
@@ -279,6 +337,10 @@ mod tests {
         let report = preview(include_str!("../examples/collection.toml")).unwrap();
         assert!(report.supported);
         assert_eq!(report.entries.len(), 1);
+        assert_eq!(
+            report.entries[0].representation.as_deref(),
+            Some("original-required")
+        );
         assert!(!report.downloads_started);
         assert!(report.workspace_bytes.is_none());
     }
@@ -462,6 +524,7 @@ revision = \"main\"
         assert_eq!(value["downloads_started"], false);
         assert!(value["workspace_bytes"].is_null());
         assert_eq!(value["entries"][0]["resolved"], false);
+        assert_eq!(value["entries"][0]["representation"], "original-required");
         assert_eq!(std::fs::read_to_string(&path).unwrap(), body);
 
         let text = crate::cli::Cli::try_parse_from([

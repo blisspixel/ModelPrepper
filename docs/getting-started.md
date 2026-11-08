@@ -71,7 +71,7 @@ The recipe is local JSON. The directory is the retained files. A missing directo
 
 ## Shared collection
 
-`collection preview --file <file>` lists the repositories in a shared TOML file. It does not resolve those revisions, download them, or write them into the catalog. See [examples/collection.toml](../examples/collection.toml). A collection is not imported by this command.
+`collection preview --file <file>` lists the repositories in a shared TOML file. An entry may name `original-required`, `original-preferred`, or `selected-derivative`. The preview does not apply that name. It does not resolve those revisions, download them, or write them into the catalog. See [examples/collection.toml](../examples/collection.toml). A collection is not imported by this command.
 
 ## Weekly timer
 
