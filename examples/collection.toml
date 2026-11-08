@@ -24,4 +24,5 @@ categories = ["coding", "text"]
 evaluation_source = "operator"
 evaluation_name = "manual-review"
 evaluation_value = "not scored"
-note = "declared base; this preview does not resolve, preserve, charge, or rank it"
+evidence = "missing"
+note = "declared base; this preview does not resolve, preserve, charge, rank, or check it"

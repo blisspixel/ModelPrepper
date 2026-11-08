@@ -46,7 +46,7 @@ Adding a watch does not approve every future revision. Approval rules constrain 
 
 A collection names a user-maintained group, such as "offline coding" or "speech tools," and may set a replica target.
 
-Shared collection definitions are inspectable data. `collection preview` lists those entries and does not resolve them, download them, or write the catalog. A representation name on an entry is recorded and not applied. Category names and a category ceiling are recorded and the ceiling is not charged. An evaluation attribution is recorded and not ranked. A declared base is recorded and is not treated as preserved. A repeated declared base is listed and not merged. Each installation still has to resolve current source and license evidence itself.
+Shared collection definitions are inspectable data. `collection preview` lists those entries and does not resolve them, download them, or write the catalog. A representation name on an entry is recorded and not applied. Category names and a category ceiling are recorded and the ceiling is not charged. An evaluation attribution is recorded and not ranked. An evidence statement is recorded and not checked. A declared base is recorded and is not treated as preserved. A repeated declared base is listed and not merged. Each installation still has to resolve current source and license evidence itself.
 
 ### Optional discovery
 
