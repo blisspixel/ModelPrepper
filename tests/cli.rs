@@ -845,3 +845,54 @@ fn budget_and_kit_compare_pinned_sizes_without_rewriting_or_reserving() {
     assert_eq!(stale_body["vault_mutated"], false);
     assert_eq!(fs::read(&stale).unwrap(), stale_before);
 }
+
+#[test]
+fn getting_started_offline_commands_use_shipped_examples() {
+    let doc = fs::read_to_string("docs/getting-started.md").unwrap();
+    let mut ran = Vec::new();
+    for line in doc.lines() {
+        let Some(command) = line.strip_prefix("cargo run --locked --release -- ") else {
+            continue;
+        };
+        let skip = command.contains('<')
+            || command.contains('~')
+            || command.contains("config.local.toml")
+            || command.starts_with("resolve ")
+            || command.starts_with("verify-local ")
+            || command.starts_with("adopt ");
+        if skip {
+            continue;
+        }
+        let args: Vec<&str> = command.split_whitespace().collect();
+        let output = binary(&args);
+        assert!(
+            output.status.success(),
+            "{command}\nstdout {}\nstderr {}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        ran.push(command);
+    }
+    assert_eq!(
+        ran,
+        vec![
+            "plan --config examples/config.toml --inventory tests/fixtures/inventory.json --available-bytes 500000000000",
+            "budget --config examples/config.toml --request examples/budget.json",
+            "kit --config examples/config.toml --kit examples/kit.toml",
+            "readiness --recipe examples/recipe.json --path examples/readiness",
+        ]
+    );
+    for (command, needle) in [
+        ("budget", "examples/budget.json"),
+        ("readiness", "examples/recipe.json"),
+    ] {
+        let text = String::from_utf8(binary(&[command, "--help"]).stdout).unwrap();
+        assert!(text.contains(needle), "{text}");
+        for line in text.lines() {
+            assert!(
+                line.chars().count() <= 80,
+                "wide {command} help line: {line}"
+            );
+        }
+    }
+}

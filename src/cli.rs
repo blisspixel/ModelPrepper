@@ -238,7 +238,7 @@ pub enum PreviewCommand {
         /// Path to the vault configuration file.
         #[arg(long)]
         config: PathBuf,
-        /// Budget request JSON. Unknown schema versions are reported and not rewritten.
+        /// Budget request JSON. See examples/budget.json. Unknown schemas are reported.
         #[arg(long)]
         request: PathBuf,
     },
@@ -253,7 +253,7 @@ pub enum PreviewCommand {
     },
     /// Read a local recipe and report offline readiness.
     Readiness {
-        /// Versioned runtime recipe JSON. Unknown schema versions are rejected.
+        /// Versioned runtime recipe JSON. See examples/recipe.json.
         #[arg(long)]
         recipe: PathBuf,
         /// Directory of retained model files. A missing directory is reported and not created.
