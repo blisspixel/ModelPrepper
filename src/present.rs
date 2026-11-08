@@ -796,11 +796,18 @@ pub fn render_collection(
         } else {
             format!("categories {}", entry.categories.join(","))
         };
+        let evaluation = match entry.evaluation.as_ref() {
+            None => "evaluation not attributed".to_string(),
+            Some(evaluation) => format!(
+                "evaluation {}: {} = {} not ranked",
+                evaluation.source, evaluation.name, evaluation.value
+            ),
+        };
         lines.push(field(
             columns,
             "entry",
             &format!(
-                "{}  {}  {representation}  unresolved  {base}  {categories}{note}",
+                "{}  {}  {representation}  unresolved  {base}  {categories}  {evaluation}{note}",
                 entry.repo_id, entry.revision
             ),
         ));
