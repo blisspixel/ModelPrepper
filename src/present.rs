@@ -251,6 +251,18 @@ pub fn render_status(status: &crate::vault::Status, color: bool, columns: usize)
             ));
         }
     }
+    for copy in &status.replicas {
+        lines.push(field(
+            columns,
+            "replica",
+            &format!(
+                "{} @ {}  {}",
+                copy.repo_id,
+                short_id(&copy.resolved_revision),
+                copy.volume_label
+            ),
+        ));
+    }
     let command = if status
         .volumes
         .iter()
@@ -470,6 +482,134 @@ pub fn render_seal(seal: &crate::vault::Seal, color: bool, columns: usize) -> St
         ),
     ]
     .join("\n")
+}
+
+pub fn render_replica(replica: &crate::vault::Replica, color: bool, columns: usize) -> String {
+    [
+        verdict(
+            color,
+            columns,
+            GREEN,
+            "replicated",
+            &format!(
+                "  {} @ {}",
+                replica.repo_id,
+                short_id(&replica.resolved_revision)
+            ),
+        ),
+        field(
+            columns,
+            "files",
+            &format!(
+                "{} files  {}  bundle SHA-256",
+                replica.file_count,
+                human_pair(replica.size_bytes)
+            ),
+        ),
+        field(columns, "replica", &replica.path.display().to_string()),
+        field(columns, "provenance", &replica.provenance),
+        field(columns, "failure domain", replica.failure_domain),
+        field(columns, "approval", "still blocked"),
+        next_line(color, columns, "modelprepper rebuild --config <file>"),
+    ]
+    .join("\n")
+}
+
+pub fn render_rebuild(rebuild: &crate::vault::Rebuild, color: bool, columns: usize) -> String {
+    let mut lines = vec![
+        verdict(
+            color,
+            columns,
+            GREEN,
+            "rebuilt",
+            &format!("  vault {}", short_id(&rebuild.vault_id)),
+        ),
+        field(
+            columns,
+            "custody",
+            &format!("{} sealed", rebuild.custody_count),
+        ),
+        field(
+            columns,
+            "replicas",
+            &format!("{} healthy", rebuild.replica_count),
+        ),
+        field(
+            columns,
+            "damaged",
+            &if rebuild.damaged.is_empty() {
+                "none".into()
+            } else {
+                rebuild.damaged.join(", ")
+            },
+        ),
+        field(
+            columns,
+            "conflicts",
+            &if rebuild.conflicts.is_empty() {
+                "none".into()
+            } else {
+                rebuild.conflicts.join(", ")
+            },
+        ),
+        field(columns, "approval", "not transferred"),
+        next_line(color, columns, "modelprepper status --config <file>"),
+    ];
+    if !rebuild.offline_volumes.is_empty() {
+        lines.insert(
+            5,
+            field(columns, "offline", &rebuild.offline_volumes.join(", ")),
+        );
+    }
+    lines.join("\n")
+}
+
+pub fn render_import(
+    imported: &crate::vault::BaselineImport,
+    color: bool,
+    columns: usize,
+) -> String {
+    let mut lines = vec![
+        verdict(
+            color,
+            columns,
+            GREEN,
+            "imported",
+            &format!(
+                "  {} @ {}",
+                imported.repo_id,
+                short_id(&imported.resolved_revision)
+            ),
+        ),
+        field(
+            columns,
+            "files",
+            &format!(
+                "{} files  {}",
+                imported.file_count,
+                human_pair(imported.size_bytes)
+            ),
+        ),
+        field(columns, "path", &imported.path.display().to_string()),
+        field(columns, "provenance", imported.provenance),
+        field(columns, "approval", "still blocked"),
+    ];
+    if let Some(plan) = &imported.consistent_with {
+        lines.insert(
+            4,
+            field(
+                columns,
+                "consistent",
+                &format!("bytes match {}", short_id(plan)),
+            ),
+        );
+    }
+    lines.push(next_line(
+        color,
+        columns,
+        "modelprepper status --config <file>",
+    ));
+    lines.join("\n")
 }
 
 pub fn render_proposal(proposal: &crate::vault::Proposal, color: bool, columns: usize) -> String {
@@ -1175,6 +1315,7 @@ mod tests {
                 available_bytes: Some(463_856_467_968),
             }],
             preserved: Vec::new(),
+            replicas: Vec::new(),
         };
         let text = render_status(&status, false, 80);
         assert!(
@@ -1416,6 +1557,7 @@ mod tests {
                 provenance: crate::vault::PROVENANCE_LOCAL_UPSTREAM.into(),
                 volume_label: "primary".into(),
             }],
+            replicas: Vec::new(),
         };
         let blocked_text = render_status(&blocked, true, 40);
         assert!(blocked_text.contains("offline"), "{blocked_text}");

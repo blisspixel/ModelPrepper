@@ -19,10 +19,15 @@ mod grant;
 #[cfg(all(test, unix))]
 #[path = "vault/tests/ownership.rs"]
 mod ownership_tests;
+mod restore;
 mod review;
 mod seal;
 pub use adoption::{Adoption, Outcome, PROVENANCE_LOCAL_UPSTREAM, adopt};
 pub use grant::{Grant, current_grant, record_grant};
+pub use restore::{
+    BaselineImport, PROVENANCE_LOCAL_BASELINE, PROVENANCE_UNRECORDED, Rebuild, Replica,
+    ReplicaStop, import_baseline, rebuild, replica,
+};
 pub use review::{Decision, Proposal, ProposalPage, decide, proposals, propose, show_proposal};
 #[cfg(test)]
 pub(crate) use review::{ProposalSummary, SourceReview};
@@ -44,6 +49,7 @@ pub struct Status {
     pub vault_id: String,
     pub volumes: Vec<VolumeStatus>,
     pub preserved: Vec<PreservedCopy>,
+    pub replicas: Vec<PreservedCopy>,
 }
 
 #[derive(Debug, Serialize)]
@@ -203,6 +209,22 @@ fn only_entries(path: &Path, allowed: &[&str]) -> Result<()> {
 }
 
 fn open_catalog(config: &Config, create: bool) -> Result<Catalog> {
+    open_catalog_mode(config, create, false)
+}
+
+/// Create a catalog from volume markers after the database file is gone.
+/// Volumes may already hold preserved trees. Unrelated files are still refused.
+fn open_recovered_catalog(config: &Config) -> Result<Catalog> {
+    if config.catalog_path.join("catalog.sqlite3").exists() {
+        return Err(Error::new(
+            "catalog_exists",
+            "catalog recovery is for a missing database",
+        ));
+    }
+    open_catalog_mode(config, true, true)
+}
+
+fn open_catalog_mode(config: &Config, create: bool, recover: bool) -> Result<Catalog> {
     config.validate()?;
     validate_locations(config)?;
     check_path(&config.catalog_path)?;
@@ -214,10 +236,15 @@ fn open_catalog(config: &Config, create: bool) -> Result<Catalog> {
             "initialize the vault before reading its catalog",
         ));
     }
+    let volume_names: &[&str] = if recover {
+        &[MARKER, PENDING, "preserved", ".modelprepper-adopt"]
+    } else {
+        &[]
+    };
     if new {
         only_entries(&config.catalog_path, &["writer.lock"])?;
         for volume in &config.volumes {
-            only_entries(&volume.path, &[])?;
+            only_entries(&volume.path, volume_names)?;
         }
         fs::create_dir_all(&config.catalog_path).map_err(io)?;
     }
@@ -250,7 +277,7 @@ fn open_catalog(config: &Config, create: bool) -> Result<Catalog> {
     let version: u32 = connection
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .map_err(db)?;
-    if (!new && !matches!(version, 1..=4)) || (new && version != 0) {
+    if (!new && !matches!(version, 1..=5)) || (new && version != 0) {
         return Err(Error::new(
             "unsupported_catalog_schema",
             "catalog schema is not supported",
@@ -262,13 +289,30 @@ fn open_catalog(config: &Config, create: bool) -> Result<Catalog> {
     if new {
         for volume in &config.volumes {
             check_path(&volume.path)?;
-            only_entries(&volume.path, &[])?;
+            only_entries(&volume.path, volume_names)?;
         }
+        let recovered = if recover {
+            let rows = recovered_identities(config)?;
+            if rows.is_empty() {
+                return Err(Error::new(
+                    "invalid_config",
+                    "catalog recovery needs a volume",
+                ));
+            }
+            Some(rows)
+        } else {
+            None
+        };
         connection.execute_batch("BEGIN IMMEDIATE; CREATE TABLE vault (id TEXT PRIMARY KEY, state TEXT NOT NULL); CREATE TABLE volumes (label TEXT PRIMARY KEY, id TEXT NOT NULL UNIQUE, path TEXT NOT NULL UNIQUE); PRAGMA user_version=1;").map_err(db)?;
+        let vault_id = recovered
+            .as_ref()
+            .map(|rows| rows[0].vault_id.clone())
+            .unwrap_or_else(|| Uuid::new_v4().to_string());
+        let state = if recover { "ready" } else { "initializing" };
         connection
             .execute(
-                "INSERT INTO vault VALUES (?1, 'initializing')",
-                [Uuid::new_v4().to_string()],
+                "INSERT INTO vault VALUES (?1, ?2)",
+                params![vault_id, state],
             )
             .map_err(db)?;
         for volume in &config.volumes {
@@ -276,10 +320,15 @@ fn open_catalog(config: &Config, create: bool) -> Result<Catalog> {
                 .path
                 .to_str()
                 .ok_or_else(|| Error::new("unsafe_vault_path", "vault paths must be UTF-8"))?;
+            let volume_id = recovered
+                .as_ref()
+                .and_then(|rows| rows.iter().find(|row| row.label == volume.label))
+                .map(|row| row.volume_id.clone())
+                .unwrap_or_else(|| Uuid::new_v4().to_string());
             connection
                 .execute(
                     "INSERT INTO volumes VALUES (?1, ?2, ?3)",
-                    params![volume.label, Uuid::new_v4().to_string(), path],
+                    params![volume.label, volume_id, path],
                 )
                 .map_err(db)?;
         }
@@ -331,10 +380,63 @@ fn open_catalog(config: &Config, create: bool) -> Result<Catalog> {
             )
             .map_err(db)?;
     }
+    if version < 5 {
+        connection
+            .execute_batch(
+                "BEGIN IMMEDIATE;
+            CREATE TABLE IF NOT EXISTS replicas (
+                plan_id TEXT NOT NULL CHECK(length(plan_id)=64),
+                volume_label TEXT NOT NULL,
+                relative_dir TEXT NOT NULL,
+                manifest TEXT NOT NULL,
+                PRIMARY KEY (plan_id, volume_label)
+            );
+            PRAGMA user_version=5;
+            COMMIT;",
+            )
+            .map_err(db)?;
+    }
     Ok(Catalog {
         db: connection,
         _writer: writer,
     })
+}
+
+fn recovered_identities(config: &Config) -> Result<Vec<Identity>> {
+    let mut vault_id = None;
+    let mut rows = Vec::new();
+    for volume in &config.volumes {
+        let marker = volume.path.join(MARKER);
+        if !marker.is_file() {
+            return Err(Error::new(
+                "volume_identity_missing",
+                "catalog recovery needs each volume marker; a missing disk is not adopted",
+            ));
+        }
+        let identity = read_identity(&marker)?;
+        if identity.schema_version != 1 || identity.label != volume.label {
+            return Err(Error::new(
+                "volume_identity_mismatch",
+                "volume marker does not match this configuration",
+            ));
+        }
+        Uuid::parse_str(&identity.vault_id)
+            .map_err(|_| Error::new("invalid_volume_identity", "volume identity is invalid"))?;
+        Uuid::parse_str(&identity.volume_id)
+            .map_err(|_| Error::new("invalid_volume_identity", "volume identity is invalid"))?;
+        if let Some(seen) = &vault_id {
+            if seen != &identity.vault_id {
+                return Err(Error::new(
+                    "volume_identity_mismatch",
+                    "volume markers name different vaults",
+                ));
+            }
+        } else {
+            vault_id = Some(identity.vault_id.clone());
+        }
+        rows.push(identity);
+    }
+    Ok(rows)
 }
 
 fn identities(catalog: &Catalog, config: &Config) -> Result<CatalogIdentity> {
@@ -507,7 +609,30 @@ fn report(catalog: &Catalog, config: &Config) -> Result<Status> {
         vault_id,
         volumes: reports,
         preserved: preserved_copies(catalog)?,
+        replicas: replica_copies(catalog)?,
     })
+}
+
+fn replica_copies(catalog: &Catalog) -> Result<Vec<PreservedCopy>> {
+    let mut query = catalog
+        .db
+        .prepare(
+            "SELECT custody.repo_id, custody.resolved_revision, custody.provenance, replicas.volume_label
+             FROM replicas JOIN custody ON custody.plan_id = replicas.plan_id
+             ORDER BY custody.repo_id, custody.resolved_revision, replicas.volume_label",
+        )
+        .map_err(db)?;
+    let rows = query
+        .query_map([], |row| {
+            Ok(PreservedCopy {
+                repo_id: row.get(0)?,
+                resolved_revision: row.get(1)?,
+                provenance: row.get(2)?,
+                volume_label: row.get(3)?,
+            })
+        })
+        .map_err(db)?;
+    rows.collect::<std::result::Result<Vec<_>, _>>().map_err(db)
 }
 
 fn preserved_copies(catalog: &Catalog) -> Result<Vec<PreservedCopy>> {

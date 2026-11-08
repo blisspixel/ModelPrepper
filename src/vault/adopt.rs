@@ -514,7 +514,7 @@ pub(crate) fn record_custody(catalog: &super::Catalog, record: &CustodyRecord<'_
     Ok(())
 }
 
-fn checked_source(config: &Config, source: &Path) -> Result<PathBuf> {
+pub(crate) fn checked_source(config: &Config, source: &Path) -> Result<PathBuf> {
     let meta = fs::symlink_metadata(source)
         .map_err(|error| Error::new("path_not_found", format!("{}: {error}", source.display())))?;
     let linked = meta.file_type().is_symlink();

@@ -156,7 +156,7 @@ Initialization commits disk identities to the catalog before publishing volume m
 
 Once initialization reaches ready, init never recreates a missing volume or adopts a replacement. Existing user payload files are retained. Status reports mounted, offline, identity_missing, or identity_mismatch per volume. Invalid marker text is an application error. The top-level ready state means catalog initialization completed; availability is reported separately for each disk.
 
-status is offline, acquires the writer lock, opens only an existing catalog, and checks identities before measuring free bytes. It can update SQLite journal bookkeeping, so it is not a read-only media command. It also lists preserved copies: repository id, resolved commit, volume label, and provenance. `upstream-verified (local source)` means the bytes matched a resolved commit and its captured license evidence. It is not a downloaded seal and not a local-baseline import. Changing a configured disk path or label fails with volume_configuration_changed. Relocating a volume requires a future explicit operation.
+status is offline, acquires the writer lock, opens only an existing catalog, and checks identities before measuring free bytes. It can update SQLite journal bookkeeping, so it is not a read-only media command. It also lists preserved copies and, when a healthy replica row exists, that replica's volume. `upstream-verified (local source)` means the bytes matched a resolved commit and its captured license evidence. `local-baseline` means `import` recorded the bytes without upstream proof. A replica line is another volume copy, not a separate failure domain. Changing a configured disk path or label fails with volume_configuration_changed. Relocating a volume requires a future explicit operation.
 
 An optional Omarchy bar widget in [plugins/omarchy-presence](../plugins/omarchy-presence/README.md) projects this status object. It is not part of the CLI, it is not installed with the binary, and it is not a second custody verdict. Its only command is `status`. A refresh passes `--json`. Open inspection uses the same command without `--json` and shows that output as a transcript, not as a new snapshot. A transcript does not clear a failed status or turn text into a malformed snapshot. A timed-out or capped inspection likewise leaves the snapshot and its failure in place. The projection keeps writer-busy, missing config, invalid config, malformed output, timeout, and stale data distinct, and it labels catalog rows as historical provenance. An Omarchy session has not validated the widget.
 
@@ -164,11 +164,9 @@ An optional Omarchy bar widget in [plugins/omarchy-presence](../plugins/omarchy-
 
 The [source review contract](source-reviews.md) describes propose, proposals list/show, and decide. Reviews bind original evidence in a distinct identity domain; transfer approval remains unavailable. Rejected reviews are retained. A source review is not the future executable transfer plan or a manifest.
 
-The durable manifest in [preservation.md](preservation.md) will contain schema version, bundle identity, source identity, original rights evidence, file hashes/sizes, selected profile, excluded dependencies, seal timestamp, and operation identity.
+The durable manifest in [preservation.md](preservation.md) contains schema version, bundle identity, source identity, rights, file hashes and sizes, the selected profile, excluded paths, and dependencies. `fetch` writes `modelprepper-bundle.json` inside the sealed folder, including provenance `upstream-verified (ranged https)`. The file has no timestamp, so a repeated seal can match the same bytes.
 
-A trusted seal is created only after downloaded bytes have been fully verified. Imported local-baseline bytes cannot acquire upstream provenance merely by resembling a known layout.
-
-Finalize executable manifest parsing and crash-consistency tests before M3; no current command produces a sealed manifest.
+A trusted seal is created only after the selected bytes have been fully hashed. `import` records `local-baseline` and cannot acquire upstream provenance by matching a known layout. `rebuild` reads published bundles and does not copy grants or approval decisions. Catalog schema 5 adds the replicas table. A replica row exists only after the destination hashes match.
 
 ## Future job-state contract
 

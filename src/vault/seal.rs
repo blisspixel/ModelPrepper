@@ -65,6 +65,9 @@ struct BundleDocument {
     files: Vec<BundleFile>,
     excluded: Vec<String>,
     dependencies: Vec<String>,
+    /// Absent on a seal written before provenance was stored in the bundle.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    provenance: String,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -80,7 +83,22 @@ struct BundleFile {
     path: String,
     size_bytes: u64,
     sha256: String,
-    upstream_hash: UpstreamHash,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    upstream_hash: Option<UpstreamHash>,
+}
+
+pub(crate) struct PublishedBundle {
+    pub bundle_id: String,
+    pub repo_id: String,
+    pub resolved_revision: String,
+    pub provenance: String,
+    pub files: Vec<PublishedFile>,
+}
+
+pub(crate) struct PublishedFile {
+    pub path: String,
+    pub size_bytes: u64,
+    pub sha256: String,
 }
 
 struct Prepared {
@@ -469,7 +487,7 @@ fn write_bundle(
             path: path.clone(),
             size_bytes: *size,
             sha256: sha.clone(),
-            upstream_hash,
+            upstream_hash: Some(upstream_hash),
         });
     }
     let document = BundleDocument {
@@ -484,6 +502,7 @@ fn write_bundle(
         files,
         excluded: prepared.excluded.clone(),
         dependencies: Vec::new(),
+        provenance: PROVENANCE_RANGED_HTTPS.into(),
     };
     let mut bytes = serde_json::to_vec_pretty(&document)
         .map_err(|error| Error::new("output_failed", error.to_string()))?;
@@ -592,6 +611,7 @@ fn bundle_agrees(path: &Path, prepared: &Prepared, hashes: &[(String, u64, Strin
         || document.source.repo_id != prepared.source.repo_id
         || document.source.resolved_revision != prepared.source.resolved_revision
         || document.files.len() != hashes.len()
+        || !(document.provenance.is_empty() || document.provenance == PROVENANCE_RANGED_HTTPS)
     {
         return Err(conflict());
     }
@@ -603,6 +623,74 @@ fn bundle_agrees(path: &Path, prepared: &Prepared, hashes: &[(String, u64, Strin
         }
     }
     Ok(())
+}
+
+pub(crate) fn read_published_bundle(path: &Path) -> Result<PublishedBundle> {
+    let bytes = read_capped(path, BUNDLE_CAP)?;
+    let document: BundleDocument = serde_json::from_slice(&bytes)
+        .map_err(|_| Error::new("not_sealed", "the bundle manifest is missing or unreadable"))?;
+    if document.schema_version != 1 || !hex_len(&document.bundle_id, 64) {
+        return Err(Error::new(
+            "not_sealed",
+            "the bundle manifest is missing or unreadable",
+        ));
+    }
+    if !hex_len(&document.source.resolved_revision, 40) || document.source.repo_id.is_empty() {
+        return Err(Error::new(
+            "not_sealed",
+            "the bundle manifest is missing or unreadable",
+        ));
+    }
+    if document.files.is_empty() || document.files.len() > 1024 {
+        return Err(Error::new(
+            "not_sealed",
+            "the bundle manifest is missing or unreadable",
+        ));
+    }
+    let mut files = Vec::with_capacity(document.files.len());
+    for file in document.files {
+        if !safe_relative(&file.path) || !hex_len(&file.sha256, 64) {
+            return Err(Error::new(
+                "not_sealed",
+                "the bundle manifest is missing or unreadable",
+            ));
+        }
+        files.push(PublishedFile {
+            path: file.path,
+            size_bytes: file.size_bytes,
+            sha256: file.sha256,
+        });
+    }
+    files.sort_by(|left, right| left.path.cmp(&right.path));
+    if files.windows(2).any(|pair| pair[0].path == pair[1].path) {
+        return Err(Error::new(
+            "not_sealed",
+            "the bundle manifest is missing or unreadable",
+        ));
+    }
+    Ok(PublishedBundle {
+        bundle_id: document.bundle_id,
+        repo_id: document.source.repo_id,
+        resolved_revision: document.source.resolved_revision,
+        provenance: document.provenance,
+        files,
+    })
+}
+
+fn hex_len(value: &str, length: usize) -> bool {
+    value.len() == length
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
+fn safe_relative(path: &str) -> bool {
+    !path.is_empty()
+        && !path.starts_with('/')
+        && !path.contains('\\')
+        && path
+            .split('/')
+            .all(|part| !part.is_empty() && part != "." && part != "..")
 }
 
 fn read_bundle(path: &Path) -> Result<Option<BundleDocument>> {
