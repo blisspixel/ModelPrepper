@@ -1133,6 +1133,9 @@ pub fn render_collection_custody(
             )
         };
         lines.push(field(columns, "entry", &detail));
+        for plan_id in &entry.plan_ids {
+            lines.push(field(columns, "plan", &format!("{plan_id}  not dropped")));
+        }
     }
     lines.push(field(columns, "approval", "still blocked"));
     lines.push(next_line(
