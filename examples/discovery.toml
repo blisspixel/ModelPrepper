@@ -1,0 +1,3 @@
+# Explicit constraints for the reviewed source catalog. This search does not download or approve.
+schema_version = 1
+role = "discovery"

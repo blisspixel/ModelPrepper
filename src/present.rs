@@ -186,6 +186,7 @@ fn next_for(error: &Error) -> String {
         "invalid_budget" => "modelprepper budget --config <file> --request <file>".into(),
         "invalid_kit" => "modelprepper kit --config <file> --kit <file>".into(),
         "invalid_collection" => "modelprepper collection preview --file <file>".into(),
+        "invalid_discovery" => "modelprepper discover --file <file>".into(),
         "output_exists" => "choose a new output path".into(),
         "export_failed" => "choose a writable directory and a new output path".into(),
         "collection_not_stored" => {
@@ -897,6 +898,58 @@ pub fn render_collection_list(
         "modelprepper collection show --config <file> --name <name>"
     };
     lines.push(next_line(color, columns, next));
+    lines.join("\n")
+}
+
+pub fn render_discovery(
+    report: &crate::discover::DiscoveryReport,
+    color: bool,
+    columns: usize,
+) -> String {
+    let word = if !report.supported {
+        "unsupported"
+    } else if report.matches.is_empty() {
+        "none"
+    } else {
+        "matched"
+    };
+    let mut lines = vec![verdict(color, columns, YELLOW, word, "  offline")];
+    if report.supported {
+        if let Some(role) = &report.role {
+            lines.push(field(columns, "constraint", &format!("role {role}")));
+        }
+        if let Some(status) = &report.status {
+            lines.push(field(columns, "constraint", &format!("status {status}")));
+        }
+        if let Some(source_id) = &report.source_id {
+            lines.push(field(columns, "constraint", &format!("source {source_id}")));
+        }
+        lines.push(field(columns, "matches", &report.matches.len().to_string()));
+        if let Some(next) = &report.next_after {
+            lines.push(field(columns, "next", next));
+        }
+        for item in &report.matches {
+            lines.push(field(
+                columns,
+                "match",
+                &format!(
+                    "{}  {}  {}  not a download",
+                    item.id,
+                    item.roles.join(", "),
+                    item.status
+                ),
+            ));
+        }
+    }
+    lines.push(next_line(
+        color,
+        columns,
+        if report.supported {
+            "this search is not a download or an approval"
+        } else {
+            "this schema is not searched"
+        },
+    ));
     lines.join("\n")
 }
 
@@ -2066,6 +2119,7 @@ mod tests {
             "invalid_budget",
             "invalid_kit",
             "invalid_collection",
+            "invalid_discovery",
             "output_exists",
             "export_failed",
             "collection_not_stored",
