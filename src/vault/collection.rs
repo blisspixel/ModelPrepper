@@ -150,6 +150,10 @@ pub(crate) fn custody_matches(
              ORDER BY plan_id",
         )
         .map_err(db)?;
+    let mut replica_count = catalog
+        .db
+        .prepare("SELECT COUNT(*) FROM replicas WHERE plan_id = ?1")
+        .map_err(db)?;
     let mut entries = Vec::with_capacity(stored.entries.len());
     for entry in &stored.entries {
         let rows = statement
@@ -173,10 +177,14 @@ pub(crate) fn custody_matches(
             custody_rows += 1;
             plan_ids.push(plan_id.clone());
             let bytes = measured_total(&manifest);
+            let replica_rows: i64 = replica_count
+                .query_row(params![plan_id], |row| row.get(0))
+                .map_err(db)?;
             plans.push(crate::collection::CustodyPlan {
                 plan_id,
                 volume_label,
                 measured_bytes: bytes,
+                replica_rows: u64::try_from(replica_rows).unwrap_or(0),
             });
             if !provenances.contains(&provenance) {
                 provenances.push(provenance);
@@ -194,6 +202,14 @@ pub(crate) fn custody_matches(
         } else {
             None
         };
+        let dependents = stored
+            .entries
+            .iter()
+            .filter(|other| {
+                other.base_repo.as_deref() == Some(entry.repo_id.as_str())
+                    && other.base_revision.as_deref() == Some(entry.revision.as_str())
+            })
+            .count() as u64;
         entries.push(CollectionCustodyEntry {
             repo_id: entry.repo_id.clone(),
             revision: entry.revision.clone(),
@@ -201,6 +217,7 @@ pub(crate) fn custody_matches(
             provenances,
             plan_ids,
             plans,
+            dependents,
             revision_shape: revision_shape(&entry.revision),
             measured_bytes,
             charged: false,
