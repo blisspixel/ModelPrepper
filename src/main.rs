@@ -108,6 +108,8 @@ fn group_root_help(text: &str) -> String {
             out.push_str("\nLocal copies:\n");
         } else if name == "plan" {
             out.push_str("\nPreview:\n");
+        } else if name == "watch" {
+            out.push_str("\nWatches:\n");
         } else if name == "help" {
             out.push('\n');
         }

@@ -99,6 +99,9 @@ pub enum Command {
     #[command(flatten)]
     #[command(next_help_heading = "Preview")]
     Preview(PreviewCommand),
+    #[command(flatten)]
+    #[command(next_help_heading = "Watches")]
+    Watches(WatchCommand),
 }
 
 #[derive(Debug, Subcommand)]
@@ -166,6 +169,20 @@ pub enum ReviewCommand {
         /// approve or reject. Approval stays blocked until transfer is qualified.
         #[arg(long, value_enum)]
         decision: DecisionChoice,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+#[command(term_width = 80)]
+pub enum WatchCommand {
+    /// Run one bounded pass over configured watches.
+    Watch {
+        /// Path to the vault configuration file.
+        #[arg(long)]
+        config: PathBuf,
+        /// Absolute staging directory outside the catalog and volumes.
+        #[arg(long)]
+        stage: PathBuf,
     },
 }
 
@@ -604,6 +621,12 @@ pub fn execute_in(cli: Cli, view: View) -> Result<CommandOutput> {
             let report = crate::readiness::preflight(&recipe, &path)?;
             show(&view, &report, true, |report| {
                 crate::present::render_readiness(report, view.color, view.columns)
+            })
+        }
+        Command::Watches(WatchCommand::Watch { config, stage }) => {
+            let report = crate::vault::run_watches(&located_config(&config)?, &stage)?;
+            show(&view, &report, true, |report| {
+                crate::present::render_watch(report, view.color, view.columns)
             })
         }
     }

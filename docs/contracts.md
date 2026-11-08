@@ -166,7 +166,7 @@ The [source review contract](source-reviews.md) describes propose, proposals lis
 
 The durable manifest in [preservation.md](preservation.md) contains schema version, bundle identity, source identity, rights, file hashes and sizes, the selected profile, excluded paths, and dependencies. `fetch` writes `modelprepper-bundle.json` inside the sealed folder, including provenance `upstream-verified (ranged https)`. The file has no timestamp, so a repeated seal can match the same bytes.
 
-A trusted seal is created only after the selected bytes have been fully hashed. `import` records `local-baseline` and cannot acquire upstream provenance by matching a known layout. `rebuild` reads published bundles and does not copy grants or approval decisions. Catalog schema 5 adds the replicas table. A replica row exists only after the destination hashes match.
+A trusted seal is created only after the selected bytes have been fully hashed. `import` records `local-baseline` and cannot acquire upstream provenance by matching a known layout. `rebuild` reads published bundles and does not copy grants or approval decisions. Catalog schema 5 adds the replicas table. A replica row exists only after the destination hashes match. Catalog schema 6 adds `period_charges`, one UTC-week payload total per plan. That counter is not `workspace_bytes`. `watch` writes a row only after a fetch newly seals.
 
 ## Future job-state contract
 

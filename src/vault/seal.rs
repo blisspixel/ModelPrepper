@@ -752,7 +752,7 @@ fn remove_file_if_present(path: &Path) -> Result<()> {
     }
 }
 
-fn checked_stage(config: &Config, stage: &Path) -> Result<PathBuf> {
+pub(crate) fn checked_stage(config: &Config, stage: &Path) -> Result<PathBuf> {
     if !stage.is_absolute()
         || stage.to_str().is_none()
         || stage.components().any(|component| {
