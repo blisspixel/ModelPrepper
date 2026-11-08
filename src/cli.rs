@@ -357,7 +357,7 @@ pub enum PreviewCommand {
         #[arg(long)]
         kit: PathBuf,
     },
-    /// Preview a shared list of repositories. Nothing is downloaded.
+    /// Preview or store a shared list of repositories. Nothing is downloaded.
     Collection {
         #[command(subcommand)]
         command: CollectionAction,
@@ -381,6 +381,24 @@ pub enum CollectionAction {
         /// Collection TOML. See examples/collection.toml.
         #[arg(long)]
         file: PathBuf,
+    },
+    /// Write the parsed list into the catalog. Archived revisions stay put.
+    Store {
+        /// Path to the vault configuration file.
+        #[arg(long)]
+        config: PathBuf,
+        /// Collection TOML. See examples/collection.toml.
+        #[arg(long)]
+        file: PathBuf,
+    },
+    /// Read one stored list. The catalog is not rewritten.
+    Show {
+        /// Path to the vault configuration file.
+        #[arg(long)]
+        config: PathBuf,
+        /// Collection name from the file.
+        #[arg(long)]
+        name: String,
     },
 }
 
@@ -685,6 +703,19 @@ pub(crate) fn execute_with(
         Command::Preview(PreviewCommand::Collection { command }) => match command {
             CollectionAction::Preview { file } => {
                 let report = crate::collection::preview(&read_text(&file)?)?;
+                show(&view, &report, true, |report| {
+                    crate::present::render_collection(report, view.color, view.columns)
+                })
+            }
+            CollectionAction::Store { config, file } => {
+                let report =
+                    crate::collection::store(&located_config(&config)?, &read_text(&file)?)?;
+                show(&view, &report, true, |report| {
+                    crate::present::render_collection(report, view.color, view.columns)
+                })
+            }
+            CollectionAction::Show { config, name } => {
+                let report = crate::collection::show(&located_config(&config)?, &name)?;
                 show(&view, &report, true, |report| {
                     crate::present::render_collection(report, view.color, view.columns)
                 })

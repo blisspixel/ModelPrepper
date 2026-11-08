@@ -27,9 +27,11 @@ mod restore;
 mod review;
 mod seal;
 pub(crate) use seal::checked_stage;
+mod collection;
 mod watch;
 pub use crate::filesystem::FilesystemRole;
 pub use adoption::{Adoption, Outcome, PROVENANCE_LOCAL_UPSTREAM, adopt};
+pub(crate) use collection::{read_collection, write_collection};
 pub use grant::{Grant, current_grant, record_grant};
 pub use restore::{
     BaselineImport, PROVENANCE_LOCAL_BASELINE, PROVENANCE_UNRECORDED, Rebuild, Replica,
@@ -289,7 +291,7 @@ fn open_catalog_mode(config: &Config, create: bool, recover: bool) -> Result<Cat
     let version: u32 = connection
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .map_err(db)?;
-    if (!new && !matches!(version, 1..=6)) || (new && version != 0) {
+    if (!new && !matches!(version, 1..=7)) || (new && version != 0) {
         return Err(Error::new(
             "unsupported_catalog_schema",
             "catalog schema is not supported",
@@ -419,6 +421,58 @@ fn open_catalog_mode(config: &Config, create: bool, recover: bool) -> Result<Cat
                 PRIMARY KEY (period_start, plan_id)
             );
             PRAGMA user_version=6;
+            COMMIT;",
+            )
+            .map_err(db)?;
+    }
+    if version < 7 {
+        connection
+            .execute_batch(
+                "BEGIN IMMEDIATE;
+            CREATE TABLE IF NOT EXISTS collections (
+                name TEXT PRIMARY KEY CHECK(length(name) BETWEEN 1 AND 80),
+                replica TEXT CHECK(replica IS NULL OR length(replica) BETWEEN 1 AND 64)
+            );
+            CREATE TABLE IF NOT EXISTS collection_ceilings (
+                name TEXT NOT NULL REFERENCES collections(name) ON DELETE CASCADE,
+                ordinal INTEGER NOT NULL CHECK(ordinal >= 0 AND ordinal < 9),
+                category TEXT NOT NULL CHECK(category IN ('text','coding','vision','image_generation','video_generation','speech_to_text','text_to_speech','embeddings','reference')),
+                bytes INTEGER NOT NULL CHECK(bytes >= 0),
+                PRIMARY KEY (name, category),
+                UNIQUE (name, ordinal)
+            );
+            CREATE TABLE IF NOT EXISTS collection_entries (
+                name TEXT NOT NULL REFERENCES collections(name) ON DELETE CASCADE,
+                position INTEGER NOT NULL CHECK(position >= 0 AND position < 100),
+                repo_id TEXT NOT NULL CHECK(length(repo_id) > 0),
+                revision TEXT NOT NULL CHECK(length(revision) > 0),
+                note TEXT NOT NULL CHECK(length(note) <= 200),
+                representation TEXT CHECK(representation IS NULL OR representation IN ('original-required','original-preferred','selected-derivative')),
+                base_repo TEXT,
+                base_revision TEXT,
+                evaluation_source TEXT,
+                evaluation_name TEXT,
+                evaluation_value TEXT,
+                evidence TEXT CHECK(evidence IS NULL OR evidence IN ('present','missing')),
+                provenance TEXT CHECK(provenance IS NULL OR (length(provenance) BETWEEN 1 AND 200)),
+                PRIMARY KEY (name, position),
+                UNIQUE (name, repo_id, revision),
+                CHECK(base_revision IS NULL OR base_repo IS NOT NULL),
+                CHECK(
+                    (evaluation_source IS NULL AND evaluation_name IS NULL AND evaluation_value IS NULL)
+                    OR (evaluation_source IS NOT NULL AND evaluation_name IS NOT NULL AND evaluation_value IS NOT NULL)
+                )
+            );
+            CREATE TABLE IF NOT EXISTS collection_entry_categories (
+                name TEXT NOT NULL,
+                position INTEGER NOT NULL,
+                ordinal INTEGER NOT NULL CHECK(ordinal >= 0 AND ordinal < 9),
+                category TEXT NOT NULL CHECK(category IN ('text','coding','vision','image_generation','video_generation','speech_to_text','text_to_speech','embeddings','reference')),
+                PRIMARY KEY (name, position, category),
+                UNIQUE (name, position, ordinal),
+                FOREIGN KEY (name, position) REFERENCES collection_entries(name, position) ON DELETE CASCADE
+            );
+            PRAGMA user_version=7;
             COMMIT;",
             )
             .map_err(db)?;
