@@ -12,6 +12,18 @@ const REPRESENTATIONS: &[&str] = &[
     "original-preferred",
     "selected-derivative",
 ];
+/// Kit slot names. A ceiling does not fill a slot or assign an entry to one.
+const CATEGORIES: &[&str] = &[
+    "text",
+    "coding",
+    "vision",
+    "image_generation",
+    "video_generation",
+    "speech_to_text",
+    "text_to_speech",
+    "embeddings",
+    "reference",
+];
 
 #[derive(Debug, PartialEq, Eq, Serialize)]
 pub struct CollectionReport {
@@ -20,6 +32,7 @@ pub struct CollectionReport {
     pub supported: bool,
     pub name: String,
     pub replica: Option<String>,
+    pub ceilings: Vec<CategoryCeiling>,
     pub entries: Vec<CollectionEntry>,
     pub entry_count: usize,
     pub transfer_authorized: bool,
@@ -40,6 +53,14 @@ pub struct CollectionEntry {
     pub resolved: bool,
 }
 
+#[derive(Debug, PartialEq, Eq, Serialize)]
+pub struct CategoryCeiling {
+    pub category: String,
+    pub bytes: u64,
+    /// The operator's written cap. Preview does not charge entries against it.
+    pub applied: bool,
+}
+
 pub fn preview(text: &str) -> Result<CollectionReport> {
     let table: toml::Table = toml::from_str(text)
         .map_err(|error| Error::new("invalid_collection", error.to_string()))?;
@@ -52,7 +73,12 @@ pub fn preview(text: &str) -> Result<CollectionReport> {
     }
     reject_unknown(
         table.keys(),
-        |key| matches!(key, "schema_version" | "name" | "replica" | "entries"),
+        |key| {
+            matches!(
+                key,
+                "schema_version" | "name" | "replica" | "entries" | "ceilings"
+            )
+        },
         "unknown field",
     )?;
     let name = required_string(&table, "name")?;
@@ -70,6 +96,7 @@ pub fn preview(text: &str) -> Result<CollectionReport> {
             ));
         }
     };
+    let ceilings = parse_ceilings(&table)?;
     let Some(items) = table.get("entries").and_then(toml::Value::as_array) else {
         return Err(Error::new("invalid_collection", "entries must be an array"));
     };
@@ -98,6 +125,7 @@ pub fn preview(text: &str) -> Result<CollectionReport> {
         supported: true,
         name,
         replica,
+        ceilings,
         entries,
         entry_count,
         transfer_authorized: false,
@@ -115,6 +143,7 @@ fn empty_report(supported: bool) -> CollectionReport {
         supported,
         name: String::new(),
         replica: None,
+        ceilings: Vec::new(),
         entries: Vec::new(),
         entry_count: 0,
         transfer_authorized: false,
@@ -248,6 +277,87 @@ fn parse_entry(value: &toml::Value) -> Result<CollectionEntry> {
     })
 }
 
+fn parse_ceilings(table: &toml::Table) -> Result<Vec<CategoryCeiling>> {
+    let Some(value) = table.get("ceilings") else {
+        return Ok(Vec::new());
+    };
+    let Some(items) = value.as_array() else {
+        return Err(Error::new(
+            "invalid_collection",
+            "ceilings must be an array",
+        ));
+    };
+    if items.len() > CATEGORIES.len() {
+        return Err(Error::new(
+            "invalid_collection",
+            format!("a collection lists at most {} ceilings", CATEGORIES.len()),
+        ));
+    }
+    let mut ceilings = Vec::with_capacity(items.len());
+    let mut seen = BTreeSet::new();
+    for item in items {
+        let ceiling = parse_ceiling(item)?;
+        if !seen.insert(ceiling.category.clone()) {
+            return Err(Error::new(
+                "invalid_collection",
+                format!("duplicate ceiling {}", ceiling.category),
+            ));
+        }
+        ceilings.push(ceiling);
+    }
+    Ok(ceilings)
+}
+
+fn parse_ceiling(value: &toml::Value) -> Result<CategoryCeiling> {
+    let Some(table) = value.as_table() else {
+        return Err(Error::new(
+            "invalid_collection",
+            "a ceiling must be a table",
+        ));
+    };
+    reject_unknown(
+        table.keys(),
+        |key| matches!(key, "category" | "bytes"),
+        "unknown ceiling field",
+    )?;
+    let category = match table.get("category") {
+        Some(toml::Value::String(value)) if CATEGORIES.contains(&value.as_str()) => value.clone(),
+        Some(toml::Value::String(_)) => {
+            return Err(Error::new(
+                "invalid_collection",
+                "category must be text, coding, vision, image_generation, video_generation, speech_to_text, text_to_speech, embeddings, or reference",
+            ));
+        }
+        Some(_) => {
+            return Err(Error::new(
+                "invalid_collection",
+                "category must be a string",
+            ));
+        }
+        None => {
+            return Err(Error::new("invalid_collection", "category is required"));
+        }
+    };
+    let bytes = match table.get("bytes") {
+        Some(toml::Value::Integer(value)) if *value >= 0 => *value as u64,
+        Some(toml::Value::Integer(_)) => {
+            return Err(Error::new(
+                "invalid_collection",
+                "bytes must be zero or greater",
+            ));
+        }
+        Some(_) => {
+            return Err(Error::new("invalid_collection", "bytes must be an integer"));
+        }
+        None => return Err(Error::new("invalid_collection", "bytes is required")),
+    };
+    Ok(CategoryCeiling {
+        category,
+        bytes,
+        applied: false,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -282,6 +392,7 @@ mod tests {
         assert_eq!(report.entry_count, 1);
         assert_eq!(report.entries[0].repo_id, "example/model");
         assert!(report.entries[0].representation.is_none());
+        assert!(report.ceilings.is_empty());
         assert!(!report.entries[0].resolved);
         assert!(!report.transfer_authorized);
         assert!(!report.network_contact);
@@ -341,6 +452,10 @@ mod tests {
             report.entries[0].representation.as_deref(),
             Some("original-required")
         );
+        assert_eq!(report.ceilings.len(), 1);
+        assert_eq!(report.ceilings[0].category, "coding");
+        assert_eq!(report.ceilings[0].bytes, 500_000_000_000);
+        assert!(!report.ceilings[0].applied);
         assert!(!report.downloads_started);
         assert!(report.workspace_bytes.is_none());
     }
@@ -355,6 +470,7 @@ mod tests {
             let report = preview(text).unwrap();
             assert!(!report.supported, "{text}");
             assert!(report.entries.is_empty());
+            assert!(report.ceilings.is_empty());
             assert!(!report.transfer_authorized);
             assert!(report.workspace_bytes.is_none());
         }
@@ -483,6 +599,88 @@ revision = \"main\"
         let error = preview(duplicate).unwrap_err();
         assert_eq!(error.code, "invalid_collection");
         assert!(error.message.contains("duplicate entry example/model@main"));
+        assert_eq!(code(&listed("ceilings = 1\n")), "invalid_collection");
+        assert_eq!(code(&listed("ceilings = [1]\n")), "invalid_collection");
+        assert_eq!(
+            code(&listed("[[ceilings]]\nbytes = 1\n")),
+            "invalid_collection"
+        );
+        assert_eq!(
+            code(&listed("[[ceilings]]\ncategory = 1\nbytes = 1\n")),
+            "invalid_collection"
+        );
+        assert_eq!(
+            code(&listed(
+                "[[ceilings]]\ncategory = \"reasoning\"\nbytes = 1\n"
+            )),
+            "invalid_collection"
+        );
+        assert_eq!(
+            code(&listed("[[ceilings]]\ncategory = \"coding\"\n")),
+            "invalid_collection"
+        );
+        assert_eq!(
+            code(&listed("[[ceilings]]\ncategory = \"coding\"\nbytes = -1\n")),
+            "invalid_collection"
+        );
+        assert_eq!(
+            code(&listed(
+                "[[ceilings]]\ncategory = \"coding\"\nbytes = 1.0\n"
+            )),
+            "invalid_collection"
+        );
+        assert_eq!(
+            code(&listed(
+                "[[ceilings]]\ncategory = \"coding\"\nbytes = 1\nextra = 1\n"
+            )),
+            "invalid_collection"
+        );
+        let duplicate_ceiling = listed(
+            "[[ceilings]]\ncategory = \"coding\"\nbytes = 1\n[[ceilings]]\ncategory = \"coding\"\nbytes = 2\n",
+        );
+        let error = preview(&duplicate_ceiling).unwrap_err();
+        assert_eq!(error.code, "invalid_collection");
+        assert!(error.message.contains("duplicate ceiling coding"));
+        let mut too_many = String::from("schema_version = 1\nname = \"ok\"\nentries = []\n");
+        for _ in 0..10 {
+            too_many.push_str("[[ceilings]]\ncategory = \"coding\"\nbytes = 1\n");
+        }
+        assert!(
+            preview(&too_many)
+                .unwrap_err()
+                .message
+                .contains("at most 9")
+        );
+    }
+
+    #[test]
+    fn a_ceiling_is_recorded_and_not_applied() {
+        let absent = preview(&listed("")).unwrap();
+        assert!(absent.ceilings.is_empty());
+        let absent_text = crate::present::render_collection(&absent, false, 80);
+        assert!(absent_text.contains("ceilings  0"), "{absent_text}");
+        let zero = preview(&listed("[[ceilings]]\ncategory = \"text\"\nbytes = 0\n")).unwrap();
+        assert_eq!(zero.ceilings[0].bytes, 0);
+        assert!(!zero.ceilings[0].applied);
+        let mut body = String::new();
+        for category in CATEGORIES {
+            body.push_str(&format!(
+                "[[ceilings]]\ncategory = \"{category}\"\nbytes = 8\n"
+            ));
+        }
+        let report = preview(&listed(&body)).unwrap();
+        assert_eq!(report.ceilings.len(), CATEGORIES.len());
+        for (ceiling, category) in report.ceilings.iter().zip(CATEGORIES) {
+            assert_eq!(ceiling.category, *category);
+            assert_eq!(ceiling.bytes, 8);
+            assert!(!ceiling.applied);
+        }
+        assert!(!report.transfer_authorized);
+        assert!(report.workspace_bytes.is_none());
+        assert!(!report.downloads_started);
+        let text = crate::present::render_collection(&report, false, 80);
+        assert!(text.contains("coding  8 bytes  not applied"), "{text}");
+        assert!(text.contains("not applied"), "{text}");
     }
 
     fn entries(count: usize) -> String {
@@ -525,6 +723,9 @@ revision = \"main\"
         assert!(value["workspace_bytes"].is_null());
         assert_eq!(value["entries"][0]["resolved"], false);
         assert_eq!(value["entries"][0]["representation"], "original-required");
+        assert_eq!(value["ceilings"][0]["category"], "coding");
+        assert_eq!(value["ceilings"][0]["bytes"], 500_000_000_000_u64);
+        assert_eq!(value["ceilings"][0]["applied"], false);
         assert_eq!(std::fs::read_to_string(&path).unwrap(), body);
 
         let text = crate::cli::Cli::try_parse_from([
