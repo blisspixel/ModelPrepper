@@ -201,6 +201,59 @@ pub fn show(config: &crate::Config, name: &str) -> Result<CollectionReport> {
     crate::vault::read_collection(config, name)
 }
 
+#[derive(Debug, PartialEq, Eq, Serialize)]
+pub struct CollectionList {
+    pub schema_version: u32,
+    pub action: &'static str,
+    pub collections: Vec<CollectionSummary>,
+    pub next_after: Option<String>,
+    /// Name order is not an evaluation rank.
+    pub ranked: bool,
+    pub transfer_authorized: bool,
+    pub network_contact: bool,
+    pub vault_mutated: bool,
+    pub downloads_started: bool,
+    pub workspace_bytes: Option<u64>,
+}
+
+#[derive(Debug, PartialEq, Eq, Serialize)]
+pub struct CollectionSummary {
+    pub name: String,
+    pub replica: Option<String>,
+    pub entry_count: u64,
+}
+
+/// Page stored names in name order. This does not rank or download them.
+pub fn list(config: &crate::Config, after: Option<&str>, limit: u32) -> Result<CollectionList> {
+    if !(1..=100).contains(&limit) {
+        return Err(Error::new(
+            "invalid_collection",
+            "collection page limit must be 1 through 100",
+        ));
+    }
+    if let Some(after) = after {
+        check_text(after, 1, MAX_NAME, "name")?;
+    }
+    let rows = crate::vault::list_collections(config, after.unwrap_or(""), limit + 1)?;
+    let next_after = if rows.len() > limit as usize {
+        Some(rows[limit as usize - 1].name.clone())
+    } else {
+        None
+    };
+    Ok(CollectionList {
+        schema_version: 1,
+        action: "list",
+        collections: rows.into_iter().take(limit as usize).collect(),
+        next_after,
+        ranked: false,
+        transfer_authorized: false,
+        network_contact: false,
+        vault_mutated: false,
+        downloads_started: false,
+        workspace_bytes: None,
+    })
+}
+
 fn empty_report(supported: bool) -> CollectionReport {
     CollectionReport {
         schema_version: 1,
@@ -1760,5 +1813,125 @@ base_revision = \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"
             })
             .unwrap();
         assert_eq!(entries, 1);
+    }
+
+    #[test]
+    fn list_pages_stored_names_in_name_order_and_does_not_rank_them() {
+        let (_dir, config, config_path) = ready();
+        let empty = list(&config, None, 20).unwrap();
+        assert!(empty.collections.is_empty());
+        assert!(empty.next_after.is_none());
+        assert!(!empty.ranked);
+        assert!(!empty.vault_mutated);
+        assert!(empty.workspace_bytes.is_none());
+        let none = crate::present::render_collection_list(&empty, false, 80);
+        assert!(none.contains("none"), "{none}");
+        assert!(none.contains("collection store"), "{none}");
+
+        store(&config, "schema_version = 1\nname = \"b-list\"\nreplica = \"backup\"\n[[entries]]\nrepo_id = \"example/b\"\nrevision = \"main\"\n").unwrap();
+        store(
+            &config,
+            "schema_version = 1\nname = \"a-list\"\nentries = []\n",
+        )
+        .unwrap();
+        store(
+            &config,
+            "schema_version = 1\nname = \"c-list\"\n[[entries]]\nrepo_id = \"example/c1\"\nrevision = \"main\"\n[[entries]]\nrepo_id = \"example/c2\"\nrevision = \"main\"\n",
+        )
+        .unwrap();
+        let page = list(&config, None, 2).unwrap();
+        assert_eq!(page.action, "list");
+        assert!(!page.ranked);
+        assert!(!page.transfer_authorized);
+        assert!(!page.downloads_started);
+        assert_eq!(page.collections.len(), 2);
+        assert_eq!(page.collections[0].name, "a-list");
+        assert!(page.collections[0].replica.is_none());
+        assert_eq!(page.collections[0].entry_count, 0);
+        assert_eq!(page.collections[1].name, "b-list");
+        assert_eq!(page.collections[1].replica.as_deref(), Some("backup"));
+        assert_eq!(page.collections[1].entry_count, 1);
+        assert_eq!(page.next_after.as_deref(), Some("b-list"));
+        let text = crate::present::render_collection_list(&page, false, 160);
+        assert!(text.contains("not ranked"), "{text}");
+        assert!(text.contains("no replica"), "{text}");
+        assert!(text.contains("after"), "{text}");
+
+        let rest = list(&config, page.next_after.as_deref(), 2).unwrap();
+        assert_eq!(rest.collections.len(), 1);
+        assert_eq!(rest.collections[0].name, "c-list");
+        assert_eq!(rest.collections[0].entry_count, 2);
+        assert!(rest.next_after.is_none());
+        assert_eq!(rows(&config, "custody"), 0);
+
+        assert_eq!(
+            list(&config, None, 0).unwrap_err().code,
+            "invalid_collection"
+        );
+        assert_eq!(
+            list(&config, None, 101).unwrap_err().code,
+            "invalid_collection"
+        );
+        assert_eq!(
+            list(&config, Some(""), 20).unwrap_err().code,
+            "invalid_collection"
+        );
+
+        let command = crate::cli::Cli::try_parse_from([
+            "modelprepper",
+            "collection",
+            "list",
+            "--config",
+            config_path.to_str().unwrap(),
+            "--limit",
+            "1",
+        ])
+        .unwrap();
+        let output = crate::cli::execute_in(command, crate::cli::View::piped()).unwrap();
+        let crate::cli::CommandOutput::Json(value) = output else {
+            panic!("list is json when stdout is a pipe");
+        };
+        assert_eq!(value["action"], "list");
+        assert_eq!(value["ranked"], false);
+        assert_eq!(value["vault_mutated"], false);
+        assert!(value["workspace_bytes"].is_null());
+        assert_eq!(value["collections"][0]["name"], "a-list");
+        assert_eq!(value["next_after"], "a-list");
+
+        let text_command = crate::cli::Cli::try_parse_from([
+            "modelprepper",
+            "collection",
+            "list",
+            "--config",
+            config_path.to_str().unwrap(),
+        ])
+        .unwrap();
+        let output = crate::cli::execute_in(
+            text_command,
+            crate::cli::View {
+                text: true,
+                ..crate::cli::View::piped()
+            },
+        )
+        .unwrap();
+        let crate::cli::CommandOutput::Text { body, ok } = output else {
+            panic!("text list");
+        };
+        assert!(ok);
+        assert!(body.contains("listed"), "{body}");
+        assert!(
+            body.lines().all(|line| line.chars().count() <= 80),
+            "{body}"
+        );
+
+        let unready = tempfile::tempdir().unwrap();
+        let root = std::fs::canonicalize(unready.path()).unwrap();
+        std::fs::create_dir_all(root.join("catalog")).unwrap();
+        std::fs::create_dir_all(root.join("models")).unwrap();
+        let missing = crate::Config::default_for(root.join("catalog"), root.join("models"));
+        assert_eq!(
+            list(&missing, None, 20).unwrap_err().code,
+            "vault_not_initialized"
+        );
     }
 }

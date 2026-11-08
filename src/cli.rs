@@ -357,7 +357,7 @@ pub enum PreviewCommand {
         #[arg(long)]
         kit: PathBuf,
     },
-    /// Preview or store a shared list of repositories. Nothing is downloaded.
+    /// Preview, store, or list a shared list of repositories. Nothing is downloaded.
     Collection {
         #[command(subcommand)]
         command: CollectionAction,
@@ -390,6 +390,18 @@ pub enum CollectionAction {
         /// Collection TOML. See examples/collection.toml.
         #[arg(long)]
         file: PathBuf,
+    },
+    /// Page stored collection names. Name order is not a rank.
+    List {
+        /// Path to the vault configuration file.
+        #[arg(long)]
+        config: PathBuf,
+        /// Return collections after this name.
+        #[arg(long)]
+        after: Option<String>,
+        /// Page size from 1 to 100.
+        #[arg(long, default_value_t = 20, value_parser = clap::value_parser!(u32).range(1..=100))]
+        limit: u32,
     },
     /// Read one stored list. The catalog is not rewritten.
     Show {
@@ -712,6 +724,17 @@ pub(crate) fn execute_with(
                     crate::collection::store(&located_config(&config)?, &read_text(&file)?)?;
                 show(&view, &report, true, |report| {
                     crate::present::render_collection(report, view.color, view.columns)
+                })
+            }
+            CollectionAction::List {
+                config,
+                after,
+                limit,
+            } => {
+                let report =
+                    crate::collection::list(&located_config(&config)?, after.as_deref(), limit)?;
+                show(&view, &report, true, |report| {
+                    crate::present::render_collection_list(report, view.color, view.columns)
                 })
             }
             CollectionAction::Show { config, name } => {

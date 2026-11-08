@@ -4,7 +4,7 @@ The first question is "what do you want to keep?" The second is "what else shoul
 
 ## Watchlists
 
-Add exact repositories or pinned commits. A shared collection file can be previewed. A category ceiling in that file is recorded and not charged. Category names on an entry are recorded and do not charge that ceiling. An evaluation attribution is recorded and is not a rank. An evidence statement is recorded and is not a file check. A provenance statement is recorded and is not verified. A declared base is recorded and is not treated as preserved. A repeated declared base is listed and not merged. `collection store` can write that list into the catalog. It does not download, and storing does not apply the recorded fields. A watched branch proposes a new revision when it changes and retains old sealed copies.
+Add exact repositories or pinned commits. A shared collection file can be previewed. A category ceiling in that file is recorded and not charged. Category names on an entry are recorded and do not charge that ceiling. An evaluation attribution is recorded and is not a rank. An evidence statement is recorded and is not a file check. A provenance statement is recorded and is not verified. A declared base is recorded and is not treated as preserved. A repeated declared base is listed and not merged. `collection store` can write that list into the catalog. `collection list` can page the stored names and does not rank them. Storing does not download or apply the recorded fields. A watched branch proposes a new revision when it changes and retains old sealed copies.
 
 A watch does not grant unlimited approval. License evidence, selected files, representation, capacity, and transfer budget still apply.
 
