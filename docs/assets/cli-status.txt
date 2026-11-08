@@ -1,5 +1,5 @@
 ready  vault b608c40c
-  primary  mounted  btrfs  1.3 TB (1.2 TiB) free
+  primary  mounted  btrfs  1.3 TB (1.1 TiB) free
   path  /home/pueo/Work/modelprepper-adopt...ix-oct13/target/docs-capture/models
   preserved  none yet
 next: modelprepper resolve --repo <org/model>

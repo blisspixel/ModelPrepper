@@ -4,7 +4,7 @@ The first question is "what do you want to keep?" The second is "what else shoul
 
 ## Watchlists
 
-Add exact repositories or pinned commits. A shared collection file can be previewed. A category ceiling in that file is recorded and not applied. The file is not stored in the catalog and it does not download. A watched branch proposes a new revision when it changes and retains old sealed copies.
+Add exact repositories or pinned commits. A shared collection file can be previewed. A category ceiling in that file is recorded and not applied. A declared base is recorded and is not treated as preserved. The file is not stored in the catalog and it does not download. A watched branch proposes a new revision when it changes and retains old sealed copies.
 
 A watch does not grant unlimited approval. License evidence, selected files, representation, capacity, and transfer budget still apply.
 

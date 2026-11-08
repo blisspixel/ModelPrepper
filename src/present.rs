@@ -783,11 +783,19 @@ pub fn render_collection(
             format!("  {}", entry.note)
         };
         let representation = entry.representation.as_deref().unwrap_or("unspecified");
+        let base = if let Some(repo) = entry.base_repo.as_deref() {
+            match entry.base_revision.as_deref() {
+                Some(revision) => format!("base {repo}@{revision} not preserved"),
+                None => format!("base {repo} revision not established"),
+            }
+        } else {
+            "base not declared".to_string()
+        };
         lines.push(field(
             columns,
             "entry",
             &format!(
-                "{}  {}  {representation}  unresolved{note}",
+                "{}  {}  {representation}  unresolved  {base}{note}",
                 entry.repo_id, entry.revision
             ),
         ));
