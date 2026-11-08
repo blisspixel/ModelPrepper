@@ -1,6 +1,6 @@
 # Personal archival policies
 
-This is a product and engineering contract for collection maintenance. `collection preview` can list an explicit shared file. `collection store` can write that list into the catalog. Current commands still cannot download or maintain a collection end to end. See [implementation status](implementation-status.md).
+This is a product and engineering contract for collection maintenance. `collection preview` can list an explicit shared file. `collection store` can write that list into the catalog. `collection list` can page the stored names and does not rank them. Current commands still cannot download or maintain a collection end to end. See [implementation status](implementation-status.md).
 
 ## The archive you actually want
 

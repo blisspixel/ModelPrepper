@@ -861,6 +861,41 @@ pub fn render_collection(
     lines.join("\n")
 }
 
+pub fn render_collection_list(
+    page: &crate::collection::CollectionList,
+    color: bool,
+    columns: usize,
+) -> String {
+    let word = if page.collections.is_empty() {
+        "none"
+    } else {
+        "listed"
+    };
+    let mut lines = vec![verdict(color, columns, YELLOW, word, "  offline")];
+    for item in &page.collections {
+        let replica = item.replica.as_deref().unwrap_or("no replica");
+        lines.push(field(
+            columns,
+            "collection",
+            &format!(
+                "{}  {} entries  {replica}  not ranked",
+                item.name, item.entry_count
+            ),
+        ));
+    }
+    if let Some(after) = &page.next_after {
+        lines.push(field(columns, "after", after));
+    }
+    lines.push(field(columns, "approval", "still blocked"));
+    let next = if page.collections.is_empty() {
+        "modelprepper collection store --config <file> --file <file>"
+    } else {
+        "modelprepper collection show --config <file> --name <name>"
+    };
+    lines.push(next_line(color, columns, next));
+    lines.join("\n")
+}
+
 pub fn render_proposal(proposal: &crate::vault::Proposal, color: bool, columns: usize) -> String {
     let (code, word) = match proposal.decision {
         crate::vault::Decision::Approved => (GREEN, "approved"),

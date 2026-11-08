@@ -1,7 +1,7 @@
 //! Catalog rows for one shared list. Writing them does not download or apply the list.
 use super::{db, open_catalog};
 use crate::collection::{
-    CategoryCeiling, CollectionEntry, CollectionReport, EvaluationAttribution,
+    CategoryCeiling, CollectionEntry, CollectionReport, CollectionSummary, EvaluationAttribution,
 };
 use crate::{Config, Error, Result};
 use rusqlite::{OptionalExtension, params};
@@ -78,6 +78,36 @@ pub(crate) fn write_collection(config: &Config, report: &CollectionReport) -> Re
     }
     transaction.commit().map_err(db)?;
     Ok(replaced > 0)
+}
+
+pub(crate) fn list_collections(
+    config: &Config,
+    after: &str,
+    limit: u32,
+) -> Result<Vec<CollectionSummary>> {
+    let catalog = open_catalog(config, false)?;
+    let mut statement = catalog
+        .db
+        .prepare(
+            "SELECT c.name, c.replica, COUNT(e.position)
+             FROM collections c
+             LEFT JOIN collection_entries e ON e.name = c.name
+             WHERE c.name > ?1
+             GROUP BY c.name, c.replica
+             ORDER BY c.name
+             LIMIT ?2",
+        )
+        .map_err(db)?;
+    let rows = statement
+        .query_map(params![after, limit], |row| {
+            Ok(CollectionSummary {
+                name: row.get(0)?,
+                replica: row.get(1)?,
+                entry_count: row.get::<_, i64>(2)? as u64,
+            })
+        })
+        .map_err(db)?;
+    rows.collect::<std::result::Result<Vec<_>, _>>().map_err(db)
 }
 
 pub(crate) fn read_collection(config: &Config, name: &str) -> Result<CollectionReport> {
