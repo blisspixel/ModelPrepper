@@ -68,7 +68,7 @@ BagIt, git-annex, Software Heritage, ORAS, restic, and Borg treat a URL as a loc
 | --- | --- | --- |
 | Build graph | `hf-hub` 1.0.0 inspected and rejected as the downloader. | Re-inspect before any later decision to wrap `hf-xet`. |
 | Local HTTP fixture | Range, truncation, bad status, and rollback are in the transfer library. A ranged GET omits `Accept-Encoding`. A 200 that answers a partial range is not appended. | Live hub expiry stays out of the fixture waves. |
-| Interrupted ordinary download | Single-file checkpoint and tail recovery exist. | The same rules across every file of one frozen set, including license and notice. |
+| Interrupted ordinary download | One frozen set, including license and notice, uses the single-file checkpoint rules. Part files stay part files. | A seal and a fetch command stay in later waves. |
 | Expired source URL | One fixture refresh from the original URL. | Live hub expiry and credentialed refresh stay out of the fixture waves. |
 | Resource limits | Plaintext HTTP sizes for one refreshed segment exceed the charged allowance. TLS input, output, received-plaintext, and send buffers are recorded. Kernel receive and send buffers are measured on a loopback socket. | `workspace_bytes` stays null until those figures also cover every selected file. |
 | Xet download | Not started. Not next. | After one HTTPS revision restores with the hub unreachable, and only for a file the bridge cannot serve. Wrap `hf-xet`. Do not write a client. |

@@ -20,11 +20,13 @@ use std::{
 };
 use url::Url;
 
+mod revision;
 mod session;
 pub use crate::buffers::{
     KernelSocketBuffers, RecordedTransferBuffers, http_agent_matches_recorded_buffers,
     measure_kernel_socket_buffers, recorded_transfer_buffers,
 };
+pub use revision::{RevisionSegment, RevisionStage};
 pub use session::{StagingSession, staging_workspace_bound};
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

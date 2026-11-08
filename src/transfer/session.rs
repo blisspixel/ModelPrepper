@@ -306,7 +306,12 @@ impl StagingSession {
         tx.commit().map_err(journal)
     }
 
-    fn stage_with(&mut self, http: &Http, base: &str, allowance: u64) -> Result<Segment> {
+    pub(crate) fn stage_with(
+        &mut self,
+        http: &Http,
+        base: &str,
+        allowance: u64,
+    ) -> Result<Segment> {
         if allowance == 0 {
             return Err(Error::new(
                 "invalid_limit",
