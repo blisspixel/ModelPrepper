@@ -770,10 +770,14 @@ pub fn render_collection(
         } else {
             format!("  {}", entry.note)
         };
+        let representation = entry.representation.as_deref().unwrap_or("unspecified");
         lines.push(field(
             columns,
             "entry",
-            &format!("{}  {}  unresolved{note}", entry.repo_id, entry.revision),
+            &format!(
+                "{}  {}  {representation}  unresolved{note}",
+                entry.repo_id, entry.revision
+            ),
         ));
     }
     lines.push(field(columns, "approval", "still blocked"));

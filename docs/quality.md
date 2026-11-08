@@ -2,7 +2,7 @@
 
 ## Current repository
 
-This repository contains the Rust vault foundation, public-source inspection, persisted source reviews/rejection, offline preview planning, installer scripts, and design documents. Tests cover ownership/migration, disk substitution, initialization recovery, source-review persistence/pagination, pinned metadata, rights evidence, shard closure, HTTP failures, byte integrity, CLI behavior, offline installer failures/upgrades, offline readiness preflight, ranged seals, replicas, catalog rebuild, and one bounded watch pass. `decide` still cannot approve a transfer. `schedule` preview, install, and remove are covered with an injected host runner. A live timer is not enabled. `collection preview` reads a local file and does not contact a publisher.
+This repository contains the Rust vault foundation, public-source inspection, persisted source reviews/rejection, offline preview planning, installer scripts, and design documents. Tests cover ownership/migration, disk substitution, initialization recovery, source-review persistence/pagination, pinned metadata, rights evidence, shard closure, HTTP failures, byte integrity, CLI behavior, offline installer failures/upgrades, offline readiness preflight, ranged seals, replicas, catalog rebuild, and one bounded watch pass. `decide` still cannot approve a transfer. `schedule` preview, install, and remove are covered with an injected host runner. A live timer is not enabled. `collection preview` reads a local file, records a representation name without applying it, and does not contact a publisher.
 
 Development Node tooling is not a dependency of the planned native product.
 

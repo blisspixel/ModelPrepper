@@ -24,6 +24,8 @@ The planner offers three explicit representation policies:
 | Original preferred | Offer a clearly labeled derivative as a separate decision; never substitute silently. |
 | Selected derivative | Preserve the user's chosen artifact and report any missing original or base. |
 
+A collection entry may record one of these three names. `collection preview` shows that name, or null when the file leaves it out. It does not defer a candidate, offer a substitute, or reserve bytes.
+
 Publisher-original status needs evidence. A filename, repository name, or model-card dtype claim alone is insufficient. Qualification must check bounded safetensors headers, dtype/shape declarations, shard closure, source identity, and captured publisher evidence without executing repository code. Current inspection does not verify tensor headers or establish that every selected file is original precision.
 
 For scale, 40 billion two-byte parameters alone occupy about 80 GB before supporting files. A 500 GB budget cannot hold every frontier original. Mixture-of-experts storage follows all stored expert parameters, not just the number active during inference. Plans use actual file sizes, not parameter-count estimates, for admission.
