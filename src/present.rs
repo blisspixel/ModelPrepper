@@ -801,6 +801,10 @@ pub fn render_collection(
             Some("missing") => "evidence missing not checked",
             _ => "evidence not stated",
         };
+        let provenance = match entry.provenance.as_deref() {
+            Some(text) => format!("provenance {text} not verified"),
+            None => "provenance not stated".to_string(),
+        };
         let evaluation = match entry.evaluation.as_ref() {
             None => "evaluation not attributed".to_string(),
             Some(evaluation) => format!(
@@ -812,7 +816,7 @@ pub fn render_collection(
             columns,
             "entry",
             &format!(
-                "{}  {}  {representation}  unresolved  {base}  {categories}  {evaluation}  {evidence}{note}",
+                "{}  {}  {representation}  unresolved  {base}  {categories}  {evaluation}  {evidence}  {provenance}{note}",
                 entry.repo_id, entry.revision
             ),
         ));

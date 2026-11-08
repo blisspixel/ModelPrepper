@@ -64,6 +64,10 @@ pub struct CollectionEntry {
     pub evidence: Option<String>,
     /// Preview does not open files to check this statement.
     pub evidence_checked: bool,
+    /// Conversion or training statement. Absent means the file did not give one.
+    pub provenance: Option<String>,
+    /// Preview does not check this statement.
+    pub provenance_verified: bool,
     /// Preview does not contact a publisher, so this stays false.
     pub resolved: bool,
 }
@@ -266,6 +270,7 @@ fn parse_entry(value: &toml::Value) -> Result<CollectionEntry> {
                     | "evaluation_name"
                     | "evaluation_value"
                     | "evidence"
+                    | "provenance"
             )
         },
         "unknown entry field",
@@ -379,6 +384,19 @@ fn parse_entry(value: &toml::Value) -> Result<CollectionEntry> {
             ));
         }
     };
+    let provenance = match table.get("provenance") {
+        None => None,
+        Some(toml::Value::String(value)) => {
+            check_text(value, 1, MAX_NOTE, "provenance")?;
+            Some(value.clone())
+        }
+        Some(_) => {
+            return Err(Error::new(
+                "invalid_collection",
+                "provenance must be a string",
+            ));
+        }
+    };
     Ok(CollectionEntry {
         repo_id,
         revision,
@@ -391,6 +409,8 @@ fn parse_entry(value: &toml::Value) -> Result<CollectionEntry> {
         evaluation,
         evidence,
         evidence_checked: false,
+        provenance,
+        provenance_verified: false,
         resolved: false,
     })
 }
@@ -684,6 +704,8 @@ mod tests {
         assert!(report.entries[0].evaluation.is_none());
         assert!(report.entries[0].evidence.is_none());
         assert!(!report.entries[0].evidence_checked);
+        assert!(report.entries[0].provenance.is_none());
+        assert!(!report.entries[0].provenance_verified);
         assert!(!report.entries[0].base_preserved);
         assert_eq!(
             report.entries[1].base_repo.as_deref(),
@@ -706,6 +728,11 @@ mod tests {
         assert!(!evaluation.ranked);
         assert_eq!(report.entries[1].evidence.as_deref(), Some("missing"));
         assert!(!report.entries[1].evidence_checked);
+        assert_eq!(
+            report.entries[1].provenance.as_deref(),
+            Some("stated conversion")
+        );
+        assert!(!report.entries[1].provenance_verified);
         assert!(!report.ceilings[0].applied);
         assert!(report.shared_bases.is_empty());
         assert_eq!(report.ceilings.len(), 1);
@@ -1039,6 +1066,58 @@ revision = \"main\"
             )),
             "invalid_collection"
         );
+        assert_eq!(
+            code(&entry(
+                "repo_id = \"example/model\"\nrevision = \"main\"\nprovenance = 1\n"
+            )),
+            "invalid_collection"
+        );
+        assert_eq!(
+            code(&entry(
+                "repo_id = \"example/model\"\nrevision = \"main\"\nprovenance = \"\"\n"
+            )),
+            "invalid_collection"
+        );
+        assert_eq!(
+            code(&entry(&format!(
+                "repo_id = \"example/model\"\nrevision = \"main\"\nprovenance = \"{}\"\n",
+                "p".repeat(201)
+            ))),
+            "invalid_collection"
+        );
+        assert_eq!(
+            code(&entry(
+                "repo_id = \"example/model\"\nrevision = \"main\"\nprovenance = \"bad\\ntext\"\n"
+            )),
+            "invalid_collection"
+        );
+    }
+
+    #[test]
+    fn provenance_is_recorded_and_not_verified() {
+        let report = preview(&entry(
+            "repo_id = \"example/model\"\nrevision = \"main\"\nprovenance = \"stated conversion\"\n",
+        ))
+        .unwrap();
+        assert_eq!(
+            report.entries[0].provenance.as_deref(),
+            Some("stated conversion")
+        );
+        assert!(!report.entries[0].provenance_verified);
+        assert!(!report.downloads_started);
+        assert!(report.workspace_bytes.is_none());
+        let text = crate::present::render_collection(&report, false, 280);
+        assert!(
+            text.contains("provenance stated conversion not verified"),
+            "{text}"
+        );
+        let absent = preview(&entry("repo_id = \"example/model\"\nrevision = \"main\"\n")).unwrap();
+        assert!(absent.entries[0].provenance.is_none());
+        let absent_text = crate::present::render_collection(&absent, false, 280);
+        assert!(
+            absent_text.contains("provenance not stated"),
+            "{absent_text}"
+        );
     }
 
     #[test]
@@ -1320,6 +1399,10 @@ revision = \"main\"
         assert_eq!(value["entries"][0]["evidence_checked"], false);
         assert_eq!(value["entries"][1]["evidence"], "missing");
         assert_eq!(value["entries"][1]["evidence_checked"], false);
+        assert!(value["entries"][0]["provenance"].is_null());
+        assert_eq!(value["entries"][0]["provenance_verified"], false);
+        assert_eq!(value["entries"][1]["provenance"], "stated conversion");
+        assert_eq!(value["entries"][1]["provenance_verified"], false);
         assert_eq!(value["ceilings"][0]["applied"], false);
         assert_eq!(value["entries"][1]["resolved"], false);
         assert!(value["shared_bases"].as_array().unwrap().is_empty());
