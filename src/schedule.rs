@@ -866,7 +866,7 @@ mod tests {
         assert!(unit_directory(Host::Systemd, Some(Path::new("relative")), None, None).is_err());
         assert_eq!(
             unit_directory(Host::Systemd, Some(&home), Some(Path::new("")), None).unwrap(),
-            PathBuf::from("/home/keeper/.config/systemd/user")
+            home.join(".config/systemd/user")
         );
         assert!(
             preview(&SchedulePlan {
