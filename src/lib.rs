@@ -5,6 +5,7 @@ mod buffers;
 pub mod cli;
 pub mod config;
 pub mod error;
+mod filesystem;
 mod http;
 pub mod hub;
 pub mod integrity;

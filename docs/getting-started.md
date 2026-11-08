@@ -21,7 +21,7 @@ The generator refuses to overwrite its output. Catalog and volume paths resolve 
 
 On macOS, some system paths such as /var and /tmp are symlink aliases. Relative paths resolve against the canonical config location. For explicit absolute paths, use the real filesystem location; ownership checks reject symlink ancestors.
 
-Use a local catalog filesystem and separate storage directories. First initialization adopts empty directories; existing collection import is a future explicit operation. The identity marker connects each storage directory to this vault.
+Use a local catalog filesystem and separate storage directories. ext4, APFS, and NTFS are the baseline. btrfs, xfs, tmpfs, and zfs also work locally. A network share cannot hold the catalog. FAT and exFAT are refused. First initialization adopts empty directories. `import` records an existing local folder as a baseline. The identity marker connects each storage directory to this vault. `status` names the filesystem of a mounted volume.
 
 Storage/transfer limits are configuration, not preallocated space. Init stays offline even with configured watches. Status reports free bytes for a matching mounted volume. `budget` and `kit` compare pinned sizes and do not reserve space or account for jobs.
 

@@ -31,7 +31,7 @@ The shell installer now limits each extracted entry to 128 MiB plus one detectio
 
 ## Local NTFS vault
 
-A dedicated empty test directory on a fixed NTFS H: volume was initialized with a 500,000,000,000-byte storage quota and a 50,000,000,000-byte free-space reserve. Its local configuration and catalog are excluded from Git; the catalog is outside the build directory.
+A dedicated empty test directory on a fixed NTFS H: volume was initialized with a 500,000,000,000-byte storage quota and a 50,000,000,000-byte free-space reserve. Its local configuration and catalog are excluded from Git; the catalog is outside the build directory. These notes are not the wave 8 filesystem qualification. That wave classifies the runner's own temporary directory and does not treat this renamed directory as a network share, a filled disk, or an HDD timing measurement.
 
 Observed live checks:
 

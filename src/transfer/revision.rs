@@ -318,6 +318,7 @@ fn set_location(root: &Path) -> Result<()> {
         ));
     }
     check_path(root)?;
+    crate::filesystem::admit(root, crate::filesystem::Purpose::Staging)?;
     for name in OWNED {
         check_path(&root.join(name))?;
     }

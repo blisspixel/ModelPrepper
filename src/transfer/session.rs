@@ -72,6 +72,7 @@ fn location(root: &Path) -> Result<()> {
         ));
     }
     check_path(root)?;
+    crate::filesystem::admit(root, crate::filesystem::Purpose::Staging)?;
     for entry in ENTRIES {
         let path = root.join(entry);
         check_path(&path)?;

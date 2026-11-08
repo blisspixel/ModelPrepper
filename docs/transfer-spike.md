@@ -72,7 +72,7 @@ BagIt, git-annex, Software Heritage, ORAS, restic, and Borg treat a URL as a loc
 | Expired source URL | One fixture refresh from the original URL. | Live hub expiry and credentialed refresh stay out of the fixture waves. |
 | Resource limits | Plaintext HTTP sizes for one refreshed segment exceed the charged allowance. TLS input, output, received-plaintext, and send buffers are recorded. Kernel receive and send buffers are measured on a loopback socket. A grant records those figures and the per-file staging bound. | `workspace_bytes` stays null. The grant is not a transfer authorization. |
 | Xet download | Not started. Not next. | After one HTTPS revision restores with the hub unreachable, and only for a file the bridge cannot serve. Wrap `hf-xet`. Do not write a client. |
-| Cross-platform execution | CI runs the fixtures on Windows, macOS, and Linux. | Clean-machine qualification stays in M6 and M7. |
+| Cross-platform execution | CI runs the fixtures on Windows, macOS, and Linux, and checks the runner temporary directory is ext4, APFS, or NTFS. | Clean-machine qualification stays in M7. A live network share and HDD timing were not measured in M6. |
 | Opt-in live comparison | Not started. | One small public safetensors repository, outside CI. The fixture `fetch` is not that drill. |
 
 `workspace_bytes` stays null on plans, budgets, and kits. `fetch` performs one granted transfer and does not authorize it: `decide` still blocks, and `transfer_authorized` stays false. A grant can record measured bounds for one review and is dropped when those bounds, the volume, or the policy change. The current CLI can initialize a vault, inspect sources, and seal one granted revision from a fixture or a ranged HTTPS source.

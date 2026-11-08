@@ -91,6 +91,7 @@ pub(crate) fn adopt_stopping(
             "connect the configured destination disk with its original identity",
         ));
     }
+    crate::filesystem::admit(&volume.path, crate::filesystem::Purpose::Payload)?;
     let volume_path = fs::canonicalize(&volume.path).map_err(io)?;
     let volume_label = volume.label.clone();
     let repo = inventory.source.repo_id.clone();
