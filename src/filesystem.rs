@@ -209,6 +209,7 @@ fn observe_windows(path: &Path) -> Result<Observed> {
     })
 }
 
+#[cfg(any(test, target_os = "linux"))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Mount {
     point: String,
@@ -218,6 +219,7 @@ struct Mount {
 
 /// Pick the longest mount in a `/proc/self/mountinfo` table. A later row of
 /// the same length wins. `ro` counts only as a mount option, not a super option.
+#[cfg(any(test, target_os = "linux"))]
 fn mount_from_table(table: &str, path: &Path) -> io::Result<Observed> {
     let path = path
         .to_str()
@@ -250,6 +252,7 @@ fn mount_from_table(table: &str, path: &Path) -> io::Result<Observed> {
     })
 }
 
+#[cfg(any(test, target_os = "linux"))]
 fn parse_mount(line: &str) -> Option<Mount> {
     let fields: Vec<&str> = line.split_whitespace().collect();
     let separator = fields.iter().position(|field| *field == "-")?;
@@ -264,10 +267,12 @@ fn parse_mount(line: &str) -> Option<Mount> {
     })
 }
 
+#[cfg(any(test, target_os = "linux"))]
 fn covers(mount: &str, path: &str) -> bool {
     mount == "/" || path == mount || path.starts_with(&format!("{mount}/"))
 }
 
+#[cfg(any(test, target_os = "linux"))]
 fn unescape(field: &str) -> String {
     let bytes = field.as_bytes();
     let mut out = String::with_capacity(field.len());
