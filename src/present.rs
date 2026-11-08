@@ -190,6 +190,9 @@ fn next_for(error: &Error) -> String {
             "modelprepper collection select --config <file> --name <name> --file <file>".into()
         }
         "invalid_discovery" => "modelprepper discover --file <file>".into(),
+        "invalid_plan" | "plan_not_stored" => {
+            "modelprepper verify-sealed --config <file> --plan <id>".into()
+        }
         "output_exists" => "choose a new output path".into(),
         "export_failed" => "choose a writable directory and a new output path".into(),
         "collection_not_stored" => {
@@ -901,6 +904,51 @@ pub fn render_collection_list(
         "modelprepper collection show --config <file> --name <name>"
     };
     lines.push(next_line(color, columns, next));
+    lines.join("\n")
+}
+
+pub fn render_sealed(
+    report: &crate::vault::SealedVerification,
+    color: bool,
+    columns: usize,
+) -> String {
+    let word = if report.action == "offline" {
+        "offline"
+    } else if report.matched {
+        "matched"
+    } else {
+        "differ"
+    };
+    let mut lines = vec![verdict(color, columns, YELLOW, word, "  offline")];
+    lines.push(field(columns, "plan", &report.plan_id));
+    lines.push(field(
+        columns,
+        "revision",
+        &format!("{}  {}", report.repo_id, report.resolved_revision),
+    ));
+    if report.files.is_empty() {
+        lines.push(field(
+            columns,
+            "files",
+            if report.action == "offline" {
+                "not hashed"
+            } else {
+                "nothing sealed to hash"
+            },
+        ));
+    }
+    for file in &report.files {
+        lines.push(field(
+            columns,
+            "file",
+            &format!("{}  {}", file.path, file.status),
+        ));
+    }
+    lines.push(next_line(
+        color,
+        columns,
+        "this hash is one plan and not a collection custody rehash",
+    ));
     lines.join("\n")
 }
 
@@ -2197,6 +2245,8 @@ mod tests {
             "invalid_collection",
             "invalid_selection",
             "invalid_discovery",
+            "invalid_plan",
+            "plan_not_stored",
             "output_exists",
             "export_failed",
             "collection_not_stored",

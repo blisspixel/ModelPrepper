@@ -37,7 +37,7 @@ pub(crate) use collection::{
 pub use grant::{Grant, current_grant, record_grant};
 pub use restore::{
     BaselineImport, PROVENANCE_LOCAL_BASELINE, PROVENANCE_UNRECORDED, Rebuild, Replica,
-    ReplicaStop, import_baseline, rebuild, replica,
+    ReplicaStop, SealedVerification, import_baseline, rebuild, replica, verify_sealed,
 };
 pub use review::{Decision, Proposal, ProposalPage, decide, proposals, propose, show_proposal};
 #[cfg(test)]

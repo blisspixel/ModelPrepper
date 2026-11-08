@@ -1160,3 +1160,77 @@ fn rebuild_names_damage_offline_disks_and_marker_loss_without_inventing_rows() {
         b"keep"
     );
 }
+
+#[test]
+fn one_sealed_plan_is_hashed_and_custody_is_not_rewritten() {
+    let (_dir, config, _stage) = setup();
+    let plan = "ab".repeat(32);
+    let other = "cd".repeat(32);
+    let bytes = b"sealed weights";
+    let hashed = crate::integrity::hash_exact(&bytes[..], bytes.len() as u64, |_| {}).unwrap();
+    let revision = REVISION;
+    let directory = config.volumes[0]
+        .path
+        .join("preserved")
+        .join("example")
+        .join("model")
+        .join(revision);
+    fs::create_dir_all(&directory).unwrap();
+    fs::write(directory.join("weights.bin"), bytes).unwrap();
+    let manifest = format!(
+        r#"[{{"path":"weights.bin","sha256":"{}","size_bytes":{}}}]"#,
+        hashed.sha256,
+        bytes.len()
+    );
+    let connection =
+        rusqlite::Connection::open(config.catalog_path.join("catalog.sqlite3")).unwrap();
+    connection
+        .execute(
+            "INSERT INTO custody (plan_id, repo_id, resolved_revision, provenance, volume_label, relative_dir, manifest) VALUES (?1, 'example/model', ?2, 'upstream-verified (ranged https)', 'primary', ?3, ?4)",
+            rusqlite::params![plan, revision, format!("preserved/example/model/{revision}"), manifest],
+        )
+        .unwrap();
+    connection
+        .execute(
+            "INSERT INTO custody (plan_id, repo_id, resolved_revision, provenance, volume_label, relative_dir, manifest) VALUES (?1, 'example/other', ?2, 'upstream-verified (ranged https)', 'primary', 'preserved/example/other/rev', '[{\"path\":\"other.bin\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"size_bytes\":1}]')",
+            rusqlite::params![other, revision],
+        )
+        .unwrap();
+    drop(connection);
+    let before = count(&config, "SELECT COUNT(*) FROM custody");
+    let report = verify_sealed(&config, &plan).unwrap();
+    assert_eq!(report.action, "verified");
+    assert!(report.matched);
+    assert!(!report.vault_mutated);
+    assert!(!report.network_contact);
+    assert!(report.workspace_bytes.is_none());
+    assert_eq!(report.files.len(), 1);
+    assert_eq!(report.files[0].status, "match");
+    assert_eq!(count(&config, "SELECT COUNT(*) FROM custody"), before);
+    fs::write(directory.join("weights.bin"), b"changed weights").unwrap();
+    let changed = verify_sealed(&config, &plan).unwrap();
+    assert!(!changed.matched);
+    assert_eq!(changed.files[0].status, "mismatch");
+    fs::remove_file(directory.join("weights.bin")).unwrap();
+    let missing = verify_sealed(&config, &plan).unwrap();
+    assert_eq!(missing.files[0].status, "missing");
+    assert_eq!(
+        verify_sealed(&config, &other).unwrap().files[0].status,
+        "missing"
+    );
+    assert_eq!(
+        verify_sealed(&config, "nope").unwrap_err().code,
+        "invalid_plan"
+    );
+    assert_eq!(
+        verify_sealed(&config, &"ef".repeat(32)).unwrap_err().code,
+        "plan_not_stored"
+    );
+    let text = crate::present::render_sealed(&report, false, 80);
+    assert!(text.contains("matched"), "{text}");
+    assert!(text.contains("not a collection custody rehash"), "{text}");
+    assert!(
+        text.lines().all(|line| line.chars().count() <= 80),
+        "{text}"
+    );
+}

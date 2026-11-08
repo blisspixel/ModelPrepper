@@ -1,4 +1,4 @@
-//! Offline replica, catalog rebuild, and local-baseline import.
+//! Offline replica, catalog rebuild, local-baseline import, and one-plan verification.
 //! These paths do not open a socket, do not require a grant, and do not copy one.
 use super::{adoption, check_path, open_catalog, open_recovered_catalog, report, seal, status};
 use crate::{Config, Error, Result, inventory::Source, plan::digest, validation::normalize_repo};
@@ -553,6 +553,111 @@ fn insert_replica(
                 .map_err(super::db)?;
             Ok(())
         }
+    }
+}
+
+#[derive(Debug, Serialize, PartialEq, Eq)]
+pub struct SealedVerification {
+    pub schema_version: u32,
+    pub action: &'static str,
+    pub plan_id: String,
+    pub repo_id: String,
+    pub resolved_revision: String,
+    /// True only when every sealed file matches. An empty manifest is not a match.
+    pub matched: bool,
+    pub files: Vec<SealedFile>,
+    pub network_contact: bool,
+    pub transfer_authorized: bool,
+    pub vault_mutated: bool,
+    pub downloads_started: bool,
+    pub workspace_bytes: Option<u64>,
+}
+
+#[derive(Debug, Serialize, PartialEq, Eq)]
+pub struct SealedFile {
+    pub path: String,
+    pub status: &'static str,
+}
+
+/// Hash one sealed plan with the existing file hash. Other plans are not read.
+pub fn verify_sealed(config: &Config, plan_id: &str) -> Result<SealedVerification> {
+    if plan_id.len() != 64
+        || !plan_id
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    {
+        return Err(Error::new(
+            "invalid_plan",
+            "a plan id is 64 lowercase hex characters",
+        ));
+    }
+    let catalog = open_catalog(config, false)?;
+    let Some(row) = load_custody(&catalog, plan_id)? else {
+        return Err(Error::new("plan_not_stored", "that plan is not in custody"));
+    };
+    drop(catalog);
+    let files: Vec<ManifestFile> = serde_json::from_str(&row.manifest)
+        .map_err(|_| Error::new("invalid_catalog", "custody manifest is invalid"))?;
+    let current = status(config)?;
+    let volume = current
+        .volumes
+        .iter()
+        .find(|volume| volume.label == row.volume_label)
+        .ok_or_else(|| Error::new("unknown_volume", "the named volume is not in this vault"))?;
+    if volume.state != "mounted" {
+        return Ok(sealed_report(&row, "offline", false, Vec::new()));
+    }
+    let root = fs::canonicalize(&volume.path).map_err(super::io)?;
+    let directory = adoption::publish_dir(&root, &row.repo, &row.revision);
+    let mut checked = Vec::with_capacity(files.len());
+    let mut matched = !files.is_empty();
+    for file in &files {
+        let status = sealed_status(&directory, file);
+        if status != "match" {
+            matched = false;
+        }
+        checked.push(SealedFile {
+            path: file.path.clone(),
+            status,
+        });
+    }
+    Ok(sealed_report(&row, "verified", matched, checked))
+}
+
+fn sealed_report(
+    row: &CustodyRow,
+    action: &'static str,
+    matched: bool,
+    files: Vec<SealedFile>,
+) -> SealedVerification {
+    SealedVerification {
+        schema_version: 1,
+        action,
+        plan_id: row.plan_id.clone(),
+        repo_id: row.repo.clone(),
+        resolved_revision: row.revision.clone(),
+        matched,
+        files,
+        network_contact: false,
+        transfer_authorized: false,
+        vault_mutated: false,
+        downloads_started: false,
+        workspace_bytes: None,
+    }
+}
+
+fn sealed_status(directory: &Path, file: &ManifestFile) -> &'static str {
+    if !safe_relative(&file.path) {
+        return "mismatch";
+    }
+    let path = crate::verify::local_path(directory, &file.path);
+    match hash_file(&path, file) {
+        Ok(()) => "match",
+        Err(error) if error.code == "hash_mismatch" && fs::symlink_metadata(&path).is_err() => {
+            "missing"
+        }
+        Err(error) if error.code == "hash_mismatch" => "mismatch",
+        Err(_) => "unreadable",
     }
 }
 
