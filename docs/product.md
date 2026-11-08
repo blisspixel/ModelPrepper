@@ -83,7 +83,7 @@ Text and JSON come first. A local web UI comes after the stable CLI. No remote d
 
 ## Scope
 
-The first release supports local catalogs, mounted volumes, one writer, explicit watches, preservation bundles, verification, replicas, recovery, and native scheduling. Build order is the wave list in the [roadmap](roadmap.md). `watch` can fetch one granted revision on an operator-invoked pass. A native schedule is still later.
+The first release supports local catalogs, mounted volumes, one writer, explicit watches, preservation bundles, verification, replicas, recovery, and native scheduling. Build order is the wave list in the [roadmap](roadmap.md). `watch` can fetch one granted revision on an operator-invoked pass. `schedule` can preview a weekly timer for that pass and install it only after the preview digest matches. A live scheduler was not enabled by the fixture.
 
 Later candidates are discovery, collections, MCP, a local UI, other sources, datasets, software releases, and runtime kits. They consume the same contracts.
 

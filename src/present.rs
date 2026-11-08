@@ -202,6 +202,16 @@ fn next_for(error: &Error) -> String {
         "unsupported_staging_filesystem" => {
             "put the checkpoint directory on a local disk, not a network share".into()
         }
+        "schedule_preview_mismatch" => {
+            "modelprepper schedule preview --config <file> --stage <dir>".into()
+        }
+        "schedule_install_failed" => {
+            "the timer was not left behind; rerun schedule preview".into()
+        }
+        "schedule_remove_failed" => "modelprepper schedule remove".into(),
+        "schedule_unreadable" => {
+            "pass absolute paths; the config file and its parent must be readable".into()
+        }
         "vault_not_ready" => "modelprepper init --config <file>".into(),
         "repository_not_found_or_private" => {
             "check the repository id; private and missing repos look the same".into()
@@ -675,6 +685,63 @@ pub fn render_watch(report: &crate::vault::WatchReport, color: bool, columns: us
         columns,
         "modelprepper status --config <file>",
     ));
+    lines.join("\n")
+}
+
+pub fn render_schedule(
+    report: &crate::schedule::ScheduleReport,
+    color: bool,
+    columns: usize,
+) -> String {
+    let word = match report.action.as_str() {
+        "installed" => "installed",
+        "removed" => "removed",
+        "absent" => "absent",
+        _ => "preview",
+    };
+    let mut lines = vec![verdict(color, columns, GREEN, word, "")];
+    lines.push(field(
+        columns,
+        "host",
+        match report.host {
+            crate::schedule::Host::Systemd => "systemd",
+            crate::schedule::Host::Launchd => "launchd",
+            crate::schedule::Host::TaskScheduler => "task scheduler",
+        },
+    ));
+    if !report.calendar.is_empty() {
+        let when = if report.timezone.is_empty() {
+            report.calendar.clone()
+        } else {
+            format!("{} {}", report.calendar, report.timezone)
+        };
+        lines.push(field(columns, "when", &when));
+    }
+    if !report.command.is_empty() {
+        lines.push(field(columns, "command", &report.command.join(" ")));
+    }
+    if !report.config.is_empty() {
+        lines.push(field(columns, "config", &report.config));
+    }
+    if !report.stage.is_empty() {
+        lines.push(field(columns, "stage", &report.stage));
+    }
+    if !report.working_directory.is_empty() {
+        lines.push(field(columns, "workdir", &report.working_directory));
+    }
+    if !report.process_limit.is_empty() {
+        lines.push(field(columns, "limit", &report.process_limit));
+    }
+    if !report.preview.is_empty() {
+        lines.push(field(columns, "preview", &report.preview));
+    }
+    lines.push(field(columns, "approval", "still blocked"));
+    let next = if report.action == "preview" {
+        "modelprepper schedule install --config <file> --stage <dir> --preview <digest>"
+    } else {
+        "modelprepper schedule remove"
+    };
+    lines.push(next_line(color, columns, next));
     lines.join("\n")
 }
 
@@ -1723,6 +1790,10 @@ mod tests {
             "unsupported_filesystem",
             "unsupported_catalog_filesystem",
             "unsupported_staging_filesystem",
+            "schedule_preview_mismatch",
+            "schedule_install_failed",
+            "schedule_remove_failed",
+            "schedule_unreadable",
         ] {
             let text = error_text(&Error::new(code, "details"), false, 80);
             assert!(text.starts_with("error:"), "{code}: {text}");

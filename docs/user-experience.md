@@ -87,10 +87,10 @@ Acceptance: disabling internet access does not prevent local status, verificatio
 | Protect that revision | M4 | Replica, fixity, catalog rebuild with the hub unreachable, and local-baseline import. |
 | Bounded automation | M5 | `watch` creates a new plan for a new commit, keeps old revisions, and fetches only inside a current grant and the weekly byte ceiling. |
 | Disk qualification | M6 | Status names the filesystem. Unsupported and read-only mounts fail before a write. A live share and HDD timing are still unmeasured. |
-| Release usability | M7 | Native install and build guides, schedule preview and install, current CLI captures, clean-machine and persona drills. |
+| Release usability | M7 | `schedule` previews a weekly timer and installs it only when the digest matches. CI injects the host runner. Clean-machine setup and persona drills remain open. |
 | Later conveniences | M8 onward | Collections, optional discovery, local web UI, optional MCP, interoperable archival exports, and runtime kits. |
 
-Setup, readable output, and explainable plans are M2 and stay available while later milestones are open. A watch entry that only records intent is M2. `watch` fetches that entry only inside a current grant. Scheduling is still M7. The [roadmap](roadmap.md) wave list is the same order.
+Setup, readable output, and explainable plans are M2 and stay available while later milestones are open. A watch entry that only records intent is M2. `watch` fetches that entry only inside a current grant. `schedule` previews the weekly timer and installs it only when the digest matches. A live scheduler was not enabled. The [roadmap](roadmap.md) wave list is the same order.
 
 The first release should be small enough to trust. Do not hold core recovery hostage to a dashboard or make every convenience part of version one.
 

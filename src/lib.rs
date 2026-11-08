@@ -16,6 +16,7 @@ pub mod plan;
 mod present;
 mod readiness;
 mod runtime;
+mod schedule;
 pub mod transfer;
 pub mod validation;
 pub mod vault;
