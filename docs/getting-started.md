@@ -69,6 +69,10 @@ cargo run --locked --release -- readiness --recipe examples/recipe.json --path e
 
 The recipe is local JSON. The directory is the retained files. A missing directory is reported and is not created. The report keeps integrity, capability closure, rights, and readiness separate. Matching small files still leave readiness `untested` until a real network-disabled drill is recorded. A package name or URL is not a retained runtime. A retained runtime larger than 2 MiB is `unverified`, and a present runtime that does not match its declared bytes is `damaged`. Neither is called missing. See [preservation](preservation.md).
 
+## Shared collection
+
+`collection preview --file <file>` lists the repositories in a shared TOML file. It does not resolve those revisions, download them, or write them into the catalog. See [examples/collection.toml](../examples/collection.toml). A collection is not imported by this command.
+
 ## Weekly timer
 
 `schedule preview` shows the weekly timer that would run one `watch` pass, including the command, the config path, the stage path, and a digest. `schedule install` writes that timer only when the digest matches. `schedule remove` deletes that timer and no other job. This guide does not install one. The CI fixture injects the host command and does not enable a live scheduler. Approval stays manual.

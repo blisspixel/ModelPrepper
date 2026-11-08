@@ -4,7 +4,7 @@ This file routes work to the canonical documents. It does not replace them.
 
 ## Orientation
 
-Read [README](README.md) and [implementation status](docs/implementation-status.md) first, then [contracts](docs/contracts.md) and the matching gate in the [roadmap](docs/roadmap.md). `fetch`, grants, seals, replicas, rebuild, import, one bounded `watch` pass, and `schedule` preview/install/remove are implemented. `decide` still cannot approve a transfer. The schedule CI uses an injected host runner and does not enable a live timer. Do not describe an approval or a live installed timer as current behavior.
+Read [README](README.md) and [implementation status](docs/implementation-status.md) first, then [contracts](docs/contracts.md) and the matching gate in the [roadmap](docs/roadmap.md). `fetch`, grants, seals, replicas, rebuild, import, one bounded `watch` pass, `schedule` preview/install/remove, and `collection preview` are implemented. `decide` still cannot approve a transfer. The schedule CI uses an injected host runner and does not enable a live timer. A collection preview does not resolve, download, or store entries. Do not describe an approval, a live installed timer, or a maintained collection as current behavior.
 
 ## Start tidy, stop tidy
 

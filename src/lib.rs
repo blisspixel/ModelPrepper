@@ -3,6 +3,7 @@
 pub mod budget;
 mod buffers;
 pub mod cli;
+mod collection;
 pub mod config;
 pub mod error;
 mod filesystem;

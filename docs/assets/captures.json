@@ -1,16 +1,16 @@
 {
   "schema_version": 1,
-  "captured_at": "2026-11-08T11:04:23.971145+00:00",
+  "captured_at": "2026-11-08T11:28:29.552906+00:00",
   "platform": "Linux",
   "version": "modelprepper 0.1.0",
-  "source_digest": "eff686237de415f8467aa537c8702f1468e669b92e1c85a76f1c87574e89f78f",
+  "source_digest": "6652ee243498a594dc798abacee2169942e4c32b1e924fd6c65e7a66e340bcb5",
   "captures": [
     {
       "command": "modelprepper --help",
       "output": "cli-help.txt",
       "image": "cli-help.png",
-      "output_sha256": "ed9797e2d4dc0c9e4a15486fc42ed2b0637a4a57d09c262997f3fc0ca15243a6",
-      "image_sha256": "2a14bd15c7823b212fe3a7121796a2c6d3b0c9392b17f842a1e3f3e21433eb60"
+      "output_sha256": "5eaa62f0fa999d5dcbc989cdea574c42c71921b6d9832629d84183926f1927e2",
+      "image_sha256": "13686305b14b37393acf34dd737e79f39d9717fb7837b9dd9253f0274635767f"
     },
     {
       "command": "modelprepper status --config target/docs-capture/config.toml",

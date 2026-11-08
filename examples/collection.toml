@@ -1,0 +1,9 @@
+# Shared collection. Preview lists these entries and does not download them.
+schema_version = 1
+name = "offline coding"
+replica = "backup"
+
+[[entries]]
+repo_id = "https://huggingface.co/example/model/"
+revision = "0123456789abcdef0123456789abcdef01234567"
+note = "pinned example; this preview does not resolve it"

@@ -1,6 +1,6 @@
 # Interfaces
 
-The executable implements config init/check, init with an existing config, offline status, resolve for public models, plan against an untrusted local inventory, `fetch` for one granted revision, `watch` for one pass over configured watches, `schedule` preview/install/remove for one weekly timer, and offline `replica`, `rebuild`, and `import`. Resolve fetches bounded metadata and license evidence. `fetch` downloads one granted plan. `watch` can download a newly resolved revision, and only when that plan already has a current grant and the UTC-week byte ceiling still has room. `decide` still cannot approve. See [contracts.md](contracts.md). The table below describes the target interface; commands that are not implemented, and broader behavior, remain proposed. The implemented watch command is `watch --config --stage`. `watch add`, `watch list`, and `watch remove` are not implemented. The implemented schedule commands are `schedule preview`, `schedule install --preview`, and `schedule remove`. Watches are entries in the config file.
+The executable implements config init/check, init with an existing config, offline status, resolve for public models, plan against an untrusted local inventory, `fetch` for one granted revision, `watch` for one pass over configured watches, `schedule` preview/install/remove for one weekly timer, and offline `replica`, `rebuild`, and `import`. Resolve fetches bounded metadata and license evidence. `fetch` downloads one granted plan. `watch` can download a newly resolved revision, and only when that plan already has a current grant and the UTC-week byte ceiling still has room. `decide` still cannot approve. See [contracts.md](contracts.md). The table below describes the target interface; commands that are not implemented, and broader behavior, remain proposed. The implemented watch command is `watch --config --stage`. `watch add`, `watch list`, and `watch remove` are not implemented. The implemented schedule commands are `schedule preview`, `schedule install --preview`, and `schedule remove`. The implemented collection command is `collection preview --file`. It does not resolve or download entries. Watches are entries in the config file.
 
 ## CLI
 
@@ -82,6 +82,8 @@ Replace paths for your OS. Tokens come from explicitly selected environment or O
 The volume label is user-facing. volume.json UUID is the identity. Automatic rules require a separate explicit rule with source, license, profile, and size bounds; a size threshold alone is insufficient.
 
 ## Scheduling
+
+`collection preview` lists explicit entries from a local TOML file. It does not resolve revisions, start a download, or write the catalog. Discovery and ranking are not implemented.
 
 `schedule preview` shows the command, absolute config path, absolute stage path, working directory, timezone, and removal command. It changes nothing. `schedule install` writes the unit and enables that timer only when `--preview` is the digest of that text. `schedule remove` disables and deletes only the ModelPrepper timer. The timer runs `watch` once and exits. It does not call `decide`. systemd and Task Scheduler use Monday 00:05 UTC. launchd uses local time. The byte ceiling stays the configured UTC-week cap. CI injects the host runner and does not enable a live timer.
 
