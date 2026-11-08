@@ -247,6 +247,15 @@ pub struct CollectionCustodyCeiling {
 }
 
 #[derive(Debug, PartialEq, Eq, Serialize)]
+pub struct CustodyPlan {
+    pub plan_id: String,
+    pub volume_label: String,
+    /// This plan's manifest total. Absent when that manifest does not parse.
+    /// Not a charge and not a reason to drop the plan.
+    pub measured_bytes: Option<u64>,
+}
+
+#[derive(Debug, PartialEq, Eq, Serialize)]
 pub struct CollectionCustodyEntry {
     pub repo_id: String,
     pub revision: String,
@@ -256,6 +265,9 @@ pub struct CollectionCustodyEntry {
     pub provenances: Vec<String>,
     /// Custody plan ids in plan id order. Listing an id does not drop or merge that plan.
     pub plan_ids: Vec<String>,
+    /// The same plans, with the stored volume and that plan's own manifest total.
+    /// A missing total does not drop the plan.
+    pub plans: Vec<CustodyPlan>,
     /// `commit` for 40 lowercase hex characters. `name` for any other accepted revision.
     /// The label is not a publisher resolution.
     pub revision_shape: &'static str,
@@ -334,7 +346,7 @@ pub(crate) fn charge_ceilings(
         .collect()
 }
 
-/// Count custody rows that match one stored list and name their plan ids.
+/// Count custody rows that match one stored list and name each plan's volume and bytes.
 /// Nothing is dropped, merged, hashed, or downloaded.
 pub fn custody(config: &crate::Config, name: &str) -> Result<CollectionCustody> {
     check_text(name, 1, MAX_NAME, "name")?;
@@ -2803,9 +2815,15 @@ base_revision = \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"
         assert!(wide.contains("measured unavailable"), "{wide}");
         assert!(wide.contains("not charged"), "{wide}");
         assert!(
-            wide.contains(&format!("{}  not dropped", "a".repeat(64))),
+            wide.contains(&format!(
+                "{}  models  measured unavailable  not dropped",
+                "a".repeat(64)
+            )),
             "{wide}"
         );
+        assert_eq!(noted.entries[0].plans[0].volume_label, "models");
+        assert!(noted.entries[0].plans[0].measured_bytes.is_none());
+        assert_eq!(noted.entries[0].plans.len(), 3);
         assert!(!wide.contains(&"e".repeat(64)), "{wide}");
         let sized = custody(&config, "sized").unwrap();
         assert_eq!(sized.entries[0].measured_bytes, Some(120));
@@ -2814,12 +2832,25 @@ base_revision = \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"
             sized.entries[0].plan_ids,
             vec!["f".repeat(64), "g".repeat(64)]
         );
+        assert_eq!(sized.entries[0].plans[0].measured_bytes, Some(120));
+        assert_eq!(sized.entries[0].plans[1].measured_bytes, Some(120));
+        assert_eq!(sized.entries[1].plans[0].measured_bytes, Some(10));
+        assert_eq!(sized.entries[1].plans[1].measured_bytes, Some(11));
         assert_eq!(sized.entries[0].revision_shape, "commit");
         assert_eq!(sized.entries[1].measured_bytes, None);
         assert_eq!(sized.entries[1].custody_rows, 2);
         assert!(!sized.vault_mutated);
         let sized_text = crate::present::render_collection_custody(&sized, false, 220);
         assert!(sized_text.contains("measured 120"), "{sized_text}");
+        assert!(
+            sized_text.contains(&format!(
+                "{}  models  measured 120  not dropped",
+                "f".repeat(64)
+            )),
+            "{sized_text}"
+        );
+        assert!(sized_text.contains("measured 10"), "{sized_text}");
+        assert!(sized_text.contains("measured 11"), "{sized_text}");
         assert!(sized_text.contains("measured unavailable"), "{sized_text}");
         assert!(sized_text.contains("not charged"), "{sized_text}");
         assert_eq!(measured_total("[]"), Some(0));
@@ -2868,6 +2899,8 @@ base_revision = \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"
         assert_eq!(value["evidence_checked"], false);
         assert_eq!(value["entries"][0]["custody_rows"], 3);
         assert_eq!(value["entries"][0]["plan_ids"][0], "a".repeat(64));
+        assert_eq!(value["entries"][0]["plans"][0]["volume_label"], "models");
+        assert!(value["entries"][0]["plans"][0]["measured_bytes"].is_null());
         assert_eq!(value["entries"][0]["plan_ids"][2], "c".repeat(64));
         assert!(
             value["entries"][1]["plan_ids"]

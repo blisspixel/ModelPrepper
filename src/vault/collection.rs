@@ -145,7 +145,7 @@ pub(crate) fn custody_matches(
     let mut statement = catalog
         .db
         .prepare(
-            "SELECT plan_id, provenance, manifest FROM custody
+            "SELECT plan_id, volume_label, provenance, manifest FROM custody
              WHERE repo_id = ?1 AND resolved_revision = ?2
              ORDER BY plan_id",
         )
@@ -158,22 +158,30 @@ pub(crate) fn custody_matches(
                     row.get::<_, String>(0)?,
                     row.get::<_, String>(1)?,
                     row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
                 ))
             })
             .map_err(db)?;
         let mut plan_ids = Vec::new();
+        let mut plans = Vec::new();
         let mut provenances = Vec::new();
         let mut totals = Vec::new();
         let mut measurable = true;
         let mut custody_rows = 0u64;
         for row in rows {
-            let (plan_id, provenance, manifest) = row.map_err(db)?;
+            let (plan_id, volume_label, provenance, manifest) = row.map_err(db)?;
             custody_rows += 1;
-            plan_ids.push(plan_id);
+            plan_ids.push(plan_id.clone());
+            let bytes = measured_total(&manifest);
+            plans.push(crate::collection::CustodyPlan {
+                plan_id,
+                volume_label,
+                measured_bytes: bytes,
+            });
             if !provenances.contains(&provenance) {
                 provenances.push(provenance);
             }
-            match measured_total(&manifest) {
+            match bytes {
                 Some(total) => totals.push(total),
                 None => measurable = false,
             }
@@ -192,6 +200,7 @@ pub(crate) fn custody_matches(
             custody_rows,
             provenances,
             plan_ids,
+            plans,
             revision_shape: revision_shape(&entry.revision),
             measured_bytes,
             charged: false,

@@ -1133,8 +1133,19 @@ pub fn render_collection_custody(
             )
         };
         lines.push(field(columns, "entry", &detail));
-        for plan_id in &entry.plan_ids {
-            lines.push(field(columns, "plan", &format!("{plan_id}  not dropped")));
+        for plan in &entry.plans {
+            let measured = match plan.measured_bytes {
+                Some(bytes) => format!("measured {bytes}"),
+                None => "measured unavailable".to_string(),
+            };
+            lines.push(field(
+                columns,
+                "plan",
+                &format!(
+                    "{}  {}  {measured}  not dropped",
+                    plan.plan_id, plan.volume_label
+                ),
+            ));
         }
     }
     lines.push(field(columns, "approval", "still blocked"));
