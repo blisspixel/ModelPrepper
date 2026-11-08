@@ -136,7 +136,10 @@ pub(crate) fn read_collection(config: &Config, name: &str) -> Result<CollectionR
 pub(crate) fn custody_matches(
     config: &Config,
     name: &str,
-) -> Result<(String, Vec<CollectionCustodyEntry>)> {
+) -> Result<(
+    crate::collection::CollectionReport,
+    Vec<CollectionCustodyEntry>,
+)> {
     let catalog = open_catalog(config, false)?;
     let stored = load_collection(&catalog.db, name)?;
     let mut statement = catalog
@@ -184,9 +187,10 @@ pub(crate) fn custody_matches(
             provenances,
             revision_shape: revision_shape(&entry.revision),
             measured_bytes,
+            charged: false,
         });
     }
-    Ok((stored.name, entries))
+    Ok((stored, entries))
 }
 
 fn load_collection(connection: &rusqlite::Connection, name: &str) -> Result<CollectionReport> {

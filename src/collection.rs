@@ -1,4 +1,4 @@
-//! Shared collection file. Preview lists explicit entries. Store writes that list and does not download it. Remove deletes one stored list and does not delete archived revisions. Custody reports exact catalog matches and does not hash files. A 40-character lowercase hex revision is named `commit`; any other accepted revision is named `name`. That label is not a resolution. When every matching manifest records `size_bytes` and those totals agree, the report shows that sum and does not charge a ceiling. Export writes one stored list back to schema 1. Diff compares one schema 1 file with the stored list and does not change either.
+//! Shared collection file. Preview lists explicit entries. Store writes that list and does not download it. Remove deletes one stored list and does not delete archived revisions. Custody reports exact catalog matches and does not hash files. A 40-character lowercase hex revision is named `commit`; any other accepted revision is named `name`. That label is not a resolution. When every matching manifest records `size_bytes` and those totals agree, the report shows that sum. A category ceiling is charged only when every entry that names it has that sum. An unmeasured entry is not charged, and a partial sum is not reported. Export writes one stored list back to schema 1. Diff compares one schema 1 file with the stored list and does not change either.
 use crate::{Error, Result};
 use serde::Serialize;
 use std::collections::BTreeSet;
@@ -229,6 +229,21 @@ pub struct CollectionCustody {
     pub vault_mutated: bool,
     pub downloads_started: bool,
     pub workspace_bytes: Option<u64>,
+    /// Written caps. A ceiling is applied only when every entry that names it is measured.
+    pub ceilings: Vec<CollectionCustodyCeiling>,
+}
+
+#[derive(Debug, PartialEq, Eq, Serialize)]
+pub struct CollectionCustodyCeiling {
+    pub category: String,
+    pub bytes: u64,
+    /// Sum of `measured_bytes` when every entry that names this category is measured.
+    /// Absent when no entry names it, any named entry is unmeasured, or the sum overflows.
+    pub charged_bytes: Option<u64>,
+    /// True only when `charged_bytes` is present. Not a reservation and not an approval.
+    pub applied: bool,
+    /// Present only when applied. True when the sum is at most the written cap.
+    pub within_written_cap: Option<bool>,
 }
 
 #[derive(Debug, PartialEq, Eq, Serialize)]
@@ -243,8 +258,10 @@ pub struct CollectionCustodyEntry {
     /// The label is not a publisher resolution.
     pub revision_shape: &'static str,
     /// Sum of stored `size_bytes` when every matching manifest parses and the totals agree.
-    /// Absent when nothing is recorded or the manifests do not agree. Not a charge.
+    /// Absent when nothing is recorded or the manifests do not agree. Not a charge by itself.
     pub measured_bytes: Option<u64>,
+    /// True only when this measured entry was included in an applied category ceiling.
+    pub charged: bool,
 }
 
 /// Sum `size_bytes` in one stored manifest. A manifest that does not parse is not a size.
@@ -268,15 +285,73 @@ pub(crate) fn revision_shape(revision: &str) -> &'static str {
     }
 }
 
+/// Charge each written ceiling from measured entries that name its category.
+/// An unmeasured entry is omitted. A partial sum is not a charge.
+pub(crate) fn charge_ceilings(
+    ceilings: &[CategoryCeiling],
+    entries: &[CollectionEntry],
+    measured: &[Option<u64>],
+) -> Vec<CollectionCustodyCeiling> {
+    ceilings
+        .iter()
+        .map(|ceiling| {
+            let mut charged = None;
+            if measured.len() == entries.len() {
+                let mut sum = 0u64;
+                let mut named = false;
+                let mut complete = true;
+                for (entry, size) in entries.iter().zip(measured) {
+                    if !entry
+                        .categories
+                        .iter()
+                        .any(|category| category == &ceiling.category)
+                    {
+                        continue;
+                    }
+                    named = true;
+                    match size {
+                        Some(size) => match sum.checked_add(*size) {
+                            Some(next) => sum = next,
+                            None => complete = false,
+                        },
+                        None => complete = false,
+                    }
+                }
+                if named && complete {
+                    charged = Some(sum);
+                }
+            }
+            CollectionCustodyCeiling {
+                category: ceiling.category.clone(),
+                bytes: ceiling.bytes,
+                charged_bytes: charged,
+                applied: charged.is_some(),
+                within_written_cap: charged.map(|sum| sum <= ceiling.bytes),
+            }
+        })
+        .collect()
+}
+
 /// Count custody rows that match one stored list. Nothing is hashed or downloaded.
 pub fn custody(config: &crate::Config, name: &str) -> Result<CollectionCustody> {
     check_text(name, 1, MAX_NAME, "name")?;
-    let (name, entries) = crate::vault::custody_matches(config, name)?;
+    let (stored, mut entries) = crate::vault::custody_matches(config, name)?;
+    let measured: Vec<Option<u64>> = entries.iter().map(|entry| entry.measured_bytes).collect();
+    let ceilings = charge_ceilings(&stored.ceilings, &stored.entries, &measured);
+    for (entry, stored_entry) in entries.iter_mut().zip(&stored.entries) {
+        entry.charged = entry.measured_bytes.is_some()
+            && stored_entry.categories.iter().any(|category| {
+                ceilings
+                    .iter()
+                    .any(|ceiling| ceiling.applied && ceiling.category == *category)
+            });
+    }
     Ok(CollectionCustody {
         schema_version: 1,
         action: "custody",
-        name,
+        name: stored.name,
         entries,
+        ceilings,
         resolved: false,
         provenance_verified: false,
         evidence_checked: false,
@@ -2567,6 +2642,8 @@ base_revision = \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"
         assert_eq!(value["entries"][0]["custody_rows"], 3);
         assert_eq!(value["entries"][0]["revision_shape"], "commit");
         assert!(value["entries"][0]["measured_bytes"].is_null());
+        assert_eq!(value["entries"][0]["charged"], false);
+        assert!(value["ceilings"].as_array().unwrap().is_empty());
         assert_eq!(value["entries"][1]["custody_rows"], 0);
         assert_eq!(value["entries"][1]["revision_shape"], "name");
         assert!(value["workspace_bytes"].is_null());
@@ -2610,6 +2687,151 @@ base_revision = \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"
             "vault_not_initialized"
         );
         assert!(!root.join("catalog").join("catalog.sqlite3").exists());
+    }
+
+    #[test]
+    fn a_ceiling_is_charged_only_when_every_named_entry_is_measured() {
+        let overlap = preview(
+            "schema_version = 1\nname = \"overlap\"\n[[ceilings]]\ncategory = \"coding\"\nbytes = 9\n[[ceilings]]\ncategory = \"text\"\nbytes = 8\n[[entries]]\nrepo_id = \"example/model\"\nrevision = \"main\"\ncategories = [\"coding\", \"text\"]\n",
+        )
+        .unwrap();
+        let both = charge_ceilings(&overlap.ceilings, &overlap.entries, &[Some(9)]);
+        assert_eq!(both[0].charged_bytes, Some(9));
+        assert!(both[0].applied);
+        assert_eq!(both[0].within_written_cap, Some(true));
+        assert_eq!(both[1].charged_bytes, Some(9));
+        assert_eq!(both[1].within_written_cap, Some(false));
+        let partial = charge_ceilings(&overlap.ceilings, &overlap.entries, &[None]);
+        assert!(partial[0].charged_bytes.is_none());
+        assert!(!partial[0].applied);
+        assert!(partial[0].within_written_cap.is_none());
+        let overflow = preview(
+            "schema_version = 1\nname = \"overflow\"\n[[ceilings]]\ncategory = \"embeddings\"\nbytes = 1\n[[entries]]\nrepo_id = \"example/model\"\nrevision = \"main\"\ncategories = [\"embeddings\"]\n[[entries]]\nrepo_id = \"example/other\"\nrevision = \"main\"\ncategories = [\"embeddings\"]\n",
+        )
+        .unwrap();
+        let wrapped = charge_ceilings(
+            &overflow.ceilings,
+            &overflow.entries,
+            &[Some(u64::MAX), Some(1)],
+        );
+        assert!(wrapped[0].charged_bytes.is_none());
+        assert!(!wrapped[0].applied);
+        let mismatched = charge_ceilings(&overflow.ceilings, &overflow.entries, &[]);
+        assert!(!mismatched[0].applied);
+
+        let (_dir, config, config_path) = ready();
+        let coding_a = "c".repeat(40);
+        let coding_b = "d".repeat(40);
+        let text_gap = "e".repeat(40);
+        let bare = "f".repeat(40);
+        let zero = "1".repeat(40);
+        let over = "2".repeat(40);
+        store(
+            &config,
+            &format!(
+                "schema_version = 1\nname = \"charged\"\n[[ceilings]]\ncategory = \"coding\"\nbytes = 1000\n[[ceilings]]\ncategory = \"text\"\nbytes = 100\n[[ceilings]]\ncategory = \"vision\"\nbytes = 10\n[[ceilings]]\ncategory = \"reference\"\nbytes = 0\n[[ceilings]]\ncategory = \"embeddings\"\nbytes = 10\n[[entries]]\nrepo_id = \"example/charge\"\nrevision = \"{coding_a}\"\ncategories = [\"coding\"]\n[[entries]]\nrepo_id = \"example/charge\"\nrevision = \"{coding_b}\"\ncategories = [\"coding\", \"text\"]\n[[entries]]\nrepo_id = \"example/charge\"\nrevision = \"{text_gap}\"\ncategories = [\"text\"]\n[[entries]]\nrepo_id = \"example/charge\"\nrevision = \"{bare}\"\n[[entries]]\nrepo_id = \"example/charge\"\nrevision = \"{zero}\"\ncategories = [\"reference\"]\n[[entries]]\nrepo_id = \"example/charge\"\nrevision = \"{over}\"\ncategories = [\"embeddings\"]\n"
+            ),
+        )
+        .unwrap();
+        let shown = show(&config, "charged").unwrap();
+        assert!(shown.ceilings.iter().all(|ceiling| !ceiling.applied));
+        let connection =
+            rusqlite::Connection::open(config.catalog_path.join("catalog.sqlite3")).unwrap();
+        let agreed = r#"[{"path":"weights.safetensors","size_bytes":100},{"path":"card.md","size_bytes":20}]"#;
+        for (plan, revision, manifest) in [
+            ("j".repeat(64), coding_a.clone(), agreed),
+            ("k".repeat(64), coding_b.clone(), r#"[{"size_bytes":50}]"#),
+            ("l".repeat(64), text_gap.clone(), "{}"),
+            ("m".repeat(64), bare.clone(), r#"[{"size_bytes":7}]"#),
+            ("n".repeat(64), zero.clone(), "[]"),
+            ("o".repeat(64), over.clone(), r#"[{"size_bytes":11}]"#),
+        ] {
+            connection
+                .execute(
+                    "INSERT INTO custody (plan_id, repo_id, resolved_revision, provenance, volume_label, relative_dir, manifest) VALUES (?1, 'example/charge', ?2, 'upstream-verified (ranged https)', 'models', 'model', ?3)",
+                    rusqlite::params![plan, revision, manifest],
+                )
+                .unwrap();
+        }
+        drop(connection);
+        let before = rows(&config, "custody");
+        let report = custody(&config, "charged").unwrap();
+        assert!(!report.vault_mutated);
+        assert!(!report.transfer_authorized);
+        assert!(report.workspace_bytes.is_none());
+        assert_eq!(report.ceilings.len(), 5);
+        assert_eq!(report.ceilings[0].category, "coding");
+        assert_eq!(report.ceilings[0].charged_bytes, Some(170));
+        assert!(report.ceilings[0].applied);
+        assert_eq!(report.ceilings[0].within_written_cap, Some(true));
+        assert!(report.ceilings[1].charged_bytes.is_none());
+        assert!(!report.ceilings[1].applied);
+        assert!(report.ceilings[1].within_written_cap.is_none());
+        assert_eq!(report.ceilings[2].category, "vision");
+        assert!(!report.ceilings[2].applied);
+        assert_eq!(report.ceilings[3].charged_bytes, Some(0));
+        assert!(report.ceilings[3].applied);
+        assert_eq!(report.ceilings[3].within_written_cap, Some(true));
+        assert_eq!(report.ceilings[4].charged_bytes, Some(11));
+        assert_eq!(report.ceilings[4].within_written_cap, Some(false));
+        assert!(report.entries[0].charged);
+        assert!(report.entries[1].charged);
+        assert!(!report.entries[2].charged);
+        assert!(!report.entries[3].charged);
+        assert!(report.entries[4].charged);
+        assert!(report.entries[5].charged);
+        assert_eq!(report.entries[3].measured_bytes, Some(7));
+        assert_eq!(rows(&config, "custody"), before);
+        let text = crate::present::render_collection_custody(&report, false, 220);
+        assert!(
+            text.contains("coding  1000 bytes  charged 170  within the written cap"),
+            "{text}"
+        );
+        assert!(text.contains("text  100 bytes  not charged"), "{text}");
+        assert!(text.contains("vision  10 bytes  not charged"), "{text}");
+        assert!(
+            text.contains("reference  0 bytes  charged 0  within the written cap"),
+            "{text}"
+        );
+        assert!(
+            text.contains("embeddings  10 bytes  charged 11  over the written cap"),
+            "{text}"
+        );
+        assert!(text.contains("not rehashed  charged"), "{text}");
+        assert!(text.contains("not rehashed  not charged"), "{text}");
+        assert!(text.contains("still blocked"), "{text}");
+        assert!(
+            text.lines().all(|line| line.chars().count() <= 220),
+            "{text}"
+        );
+
+        let command = crate::cli::Cli::try_parse_from([
+            "modelprepper",
+            "collection",
+            "custody",
+            "--config",
+            config_path.to_str().unwrap(),
+            "--name",
+            "charged",
+        ])
+        .unwrap();
+        let output = crate::cli::execute_in(command, crate::cli::View::piped()).unwrap();
+        let crate::cli::CommandOutput::Json(value) = output else {
+            panic!("custody is json when stdout is a pipe");
+        };
+        assert_eq!(value["ceilings"][0]["charged_bytes"], 170);
+        assert_eq!(value["ceilings"][0]["applied"], true);
+        assert_eq!(value["ceilings"][0]["within_written_cap"], true);
+        assert!(value["ceilings"][1]["charged_bytes"].is_null());
+        assert_eq!(value["ceilings"][1]["applied"], false);
+        assert!(value["ceilings"][1]["within_written_cap"].is_null());
+        assert_eq!(value["ceilings"][4]["charged_bytes"], 11);
+        assert_eq!(value["ceilings"][4]["within_written_cap"], false);
+        assert_eq!(value["entries"][2]["charged"], false);
+        assert_eq!(value["entries"][3]["measured_bytes"], 7);
+        assert_eq!(value["entries"][3]["charged"], false);
+        assert!(value["workspace_bytes"].is_null());
+        assert_eq!(value["vault_mutated"], false);
     }
 
     #[test]
