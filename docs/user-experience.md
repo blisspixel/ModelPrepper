@@ -71,7 +71,7 @@ The project should remain useful even if its own maintainers, hosting account, o
 - Ordinary self-contained folders and documented manifests. Export carries bytes and evidence, without inheriting the original installation's approval authority.
 - No remote revocation mechanism for existing local copies. Source removal or access changes never trigger local deletion.
 - Explicit watches and local operation work without an AI ranker or inference server. No cloud intelligence service is required to maintain the collection.
-- Manual media transfer, verified replicas, local-baseline adoption, and catalog reconstruction come before discovery or dashboards.
+- Manual media transfer, verified replicas, local-baseline adoption, and catalog reconstruction come before unattended watches, discovery, or dashboards.
 - A disconnected operations guide covers inventory, verification, restoration, and runtime readiness. Preserve optional runtime/toolchain kits separately with their own rights and platform evidence.
 - Repository source, locked dependencies, build instructions, and release checksums make independent builds possible. Document an optional vendored/offline build kit after platform qualification.
 - User-controlled source adapters and admission profiles are an extensibility goal. The application must not acquire a centrally managed opinion filter or a provider-controlled authorization service.
@@ -83,11 +83,14 @@ Acceptance: disabling internet access does not prevent local status, verificatio
 
 | Priority | Milestones | Deliverables |
 | --- | --- | --- |
-| Foundation | M1 through M3 | Honest plans, exact byte identities, resource bounds, verified resumable transfer, durable manifests and publication. |
-| Essential usability | M2 through M4 | Setup/doctor, readable output alongside JSON, explicit watches, explainable decisions, actionable failure states, safe pause/resume. |
-| Recovery and archival | M5 through M6 | Replica walkthrough, fixity sweeps, unplugged disk inventory, reconstruction, imports and explicit relocation. |
-| Release usability | M7 | Native install/build guides, schedule preview/install, current CLI captures, clean-machine and persona drills. |
-| Later conveniences | M8 onward | Collections, optional discovery, local web UI, optional MCP, interoperable archival exports and runtime kits. |
+| Foundation | M1 through M3 | Honest plans, exact byte identities, measured bounds, resumable transfer, and one published revision readable without the program. |
+| Protect that revision | M4 | Replica, fixity, catalog rebuild with the hub unreachable, and local-baseline import. |
+| Bounded automation | M5 | Watches that create new plans, keep old revisions, and stay inside the approval. |
+| Disk qualification | M6 | Missing mounts, full volumes, and filesystem drills. One bundle stays on one volume. |
+| Release usability | M7 | Native install and build guides, schedule preview and install, current CLI captures, clean-machine and persona drills. |
+| Later conveniences | M8 onward | Collections, optional discovery, local web UI, optional MCP, interoperable archival exports, and runtime kits. |
+
+Setup, readable output, and explainable plans are M2 and stay available while later milestones are open. A watch entry that only records intent is M2. A watch that fetches is M5, after M4 can rebuild the sealed revision. The [roadmap](roadmap.md) wave list is the same order.
 
 The first release should be small enough to trust. Do not hold core recovery hostage to a dashboard or make every convenience part of version one.
 

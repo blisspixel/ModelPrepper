@@ -2,23 +2,42 @@
 
 Implementation follows evidence and dependencies, not calendar promises. Native Rust on Linux, macOS, and Windows is a requirement.
 
-Current progress: M0 has strict contracts, canonical previews, and lint/test/coverage gates. The prototype CLI now prints terminal text with one next step, explains unchecked and partial local coverage, and adopts one frozen file set when optional files are absent. M1 has pinned public-source inspection and a streaming segment experiment with checkpoint/range/rollback fault tests and verified uncommitted-tail recovery. An exclusive SQLite staging-session experiment now journals checkpoints, charges each segment allowance before the request, and reconciles restart tails without refunding that charge. Its checkpoint database and rollback journal are each capped at 1 MiB. A fixture refreshes one rejected payload location by requesting the original URL again, without requesting or storing that location again even when the refresh names it, and without changing transfer-file identity. A plaintext loopback fixture measured that the request and response bytes for that refreshed segment exceed the charged allowance. A read-only `readiness` command reports capability closure for one safetensors text profile and does not record a drill pass. Offline `plan --select`, `budget`, and `kit` can preview an explicitly named GGUF derivative and compare pinned sizes with the storage ceiling. They do not reserve bytes, approve a transfer, or complete M8. TLS buffers, kernel socket buffers, multi-file workspace, cross-platform qualification, and vault integration remain open. M2 has bundled SQLite, transactional schema migration, writer ownership, stable volume identities, recoverable committed initialization, offline status, durable source reviews, and final rejection records. Installer scripts have offline fixtures. No milestone is fully qualified: granted approvals, integrated payload jobs, manifests, full crash recovery, and complete platform drills remain outstanding. See [implementation-status.md](implementation-status.md), [contracts.md](contracts.md), and [transfer-spike.md](transfer-spike.md).
+Current progress: M0 has strict contracts, canonical previews, and lint/test/coverage gates. The prototype CLI now prints terminal text with one next step, explains unchecked and partial local coverage, and adopts one frozen file set when optional files are absent. M1 has pinned public-source inspection and a streaming segment experiment with checkpoint/range/rollback fault tests and verified uncommitted-tail recovery. An exclusive SQLite staging-session experiment now journals checkpoints, charges each segment allowance before the request, and reconciles restart tails without refunding that charge. Its checkpoint database and rollback journal are each capped at 1 MiB. A fixture refreshes one rejected payload location by requesting the original URL again, without requesting or storing that location again even when the refresh names it, and without changing transfer-file identity. A plaintext loopback fixture measured that the request and response bytes for that refreshed segment exceed the charged allowance. A read-only `readiness` command reports capability closure for one safetensors text profile and does not record a drill pass. Offline `plan --select`, `budget`, and `kit` can preview an explicitly named GGUF derivative and compare pinned sizes with the storage ceiling. They do not reserve bytes, approve a transfer, or complete M8. TLS buffers, kernel socket buffers, multi-file workspace, cross-platform qualification, and vault integration remain open. M2 has bundled SQLite, transactional schema migration, writer ownership, stable volume identities, recoverable committed initialization, offline status, durable source reviews, and final rejection records. Installer scripts have offline fixtures. No milestone is fully qualified: granted approvals, integrated payload jobs, manifests, full crash recovery, and complete platform drills remain outstanding. Remaining work follows the waves below. Milestone numbers match that order: restoring the sealed revision is M4, and unattended watches are M5. See [implementation-status.md](implementation-status.md), [contracts.md](contracts.md), and [transfer-spike.md](transfer-spike.md).
 
-## Immediate execution order
+## Work waves
 
-1. Prove bounded staged byte transfer with local fixtures: Range correctness, retries, corrupted partials, interruption, URL refresh, and exact final hashes. Record actual workspace and bandwidth bounds before approval code depends on them.
-2. Extend persisted source reviews into qualified immutable transfer plans with measured bounds. Add watch commands and grant approvals only when rights, identity, accounting, and destination gates are enforceable; stale decisions cannot authorize changed plans.
-3. Implement durable storage and transfer reservations around the [staging journal](staging-journal.md), then one approved revision's durable publication. Exercise every transaction/file boundary, then add manifest reconstruction and verified replication.
-4. Extend from one reliable revision to bounded scheduled watches. Add operating-system distribution and actual filesystem/offline recovery drills before calling the product a beta.
+Do these in order. A later wave does not start because an earlier one is inconvenient. Initialization, inspection, adopt, plan, budget, kit, and readiness stay available while the waves are open. The transport constraints and the 7 November 2026 source check are in [transfer-spike.md](transfer-spike.md).
 
-Initialization and inspection must remain useful, explicit operations while these steps are incomplete. Do not expose a pull command until the identity, resource, and publication gates can be enforced together.
+| Wave | Closes | Do | Why it is next |
+| --- | --- | --- | --- |
+| 1 | Honest previews | Keep `LICENSE` and `NOTICE` with a `selected-gguf-v1` selection, or raise a blocker. Ship `examples/budget.json` and `examples/recipe.json`, point help at them, and test every command in getting-started. This is issues 39 and 40, and it closes tracker 41. | The frozen set is what a later seal copies. A GGUF plan that drops license text would store a derivative the rights gate does not allow. Getting-started currently runs files the repository does not ship. |
+| 2 | One-file ceiling | Measure TLS buffers and kernel socket buffers and record the figures. Keep `workspace_bytes` null until those figures exist. Keep rejecting a ranged response that is not 206. | The charged segment allowance is not a bandwidth ceiling. A plaintext fixture already counted more request and response bytes than that charge. Approval cannot depend on an unmeasured number. |
+| 3 | One revision, staged | Stage every file of one frozen set, including license and notice, under the same checkpoint rules as the single-file experiment. No seal and no fetch command. | One successful file does not prove a revision. The set is the set adopt already freezes. |
+| 4 | One bound approval | Record a grant that names that plan's identity, measured bounds, volume UUID, and policy digest, and drop the grant when any of those change. | A grant that survives a changed file set can store bytes nobody reviewed. |
+| 5 | M3, developer preview | Reservations around the [staging journal](staging-journal.md), all-file SHA-256, manifest, atomic publication, and crash recovery at each boundary. The folder is readable without the program. Then run the network-disabled empty-cache drill (issue 29) on that sealed test model. | Publishing the folder is the preview. The drill needs a seal to demonstrate, so it waits until this wave. |
+| 6 | M4, offline restore | Replica and catalog rebuild of that one revision with the hub unreachable. Local-baseline import stays in this wave. | A cache directory or a movable tag is not a second copy. Further revisions wait until this one can be rebuilt. |
+| 7 | M5, watches | Bounded watches: a new commit makes a new plan, older revisions stay, a repeated run is idempotent, and nothing fetches outside the grant. | This is the first time the vault multiplies revisions. |
+| 8 | M6, disks | Removable-volume and filesystem drills. One bundle stays on one volume. A missing disk never receives the write. | M2 already refuses a missing or substituted disk. This wave proves that on NTFS, APFS, ext4, a full volume, and one network share. The beta claim waits for those drills. |
+| 9 | M7, version 1 | Native packages, and OS schedulers installed only after a preview. | Distribution follows a recovery drill on each OS. |
+
+One explicit fetch of one approved plan arrives in wave 5, when identity, measured bounds, and publication hold together. A scheduled or repeated fetch arrives in wave 7, after wave 6. There is no fetch command before wave 5.
+
+The first fetched revision is a small public safetensors file over ranged HTTPS. Files the Hub bridge cannot return as one URL, including a full GET above the limit recorded in the transfer spike, are outside waves 2 through 5.
+
+These are not waves, and a 7 November 2026 check of hub storage, local model managers, and archival practice did not move them forward:
+
+- A native Xet client, including wrapping `hf-xet`, and adopting `hf-hub` 1.0.0 as the downloader. HTTPS through the LFS bridge still returns Xet-stored bytes. Wrap `hf-xet` only after wave 6, and only for a file the bridge cannot serve. Do not write a second Xet client.
+- Cross-revision deduplication, a torrent or peer client, and a second hub. Those are locators for a revision that already has a hash. M10 and the deferred list below still own them.
+- Collections, discovery, a local web UI, and MCP. They stay M8 and M9.
+- The live Omarchy session checks in issue 19. The chip is already on main. It is not installed, and that session is not authorized.
+- Vendor a runtime into the seal. Wave 5 records a runtime as named or retained with its own rights. Issue 29's drill uses a runtime; it does not bundle one.
 
 ## Release boundaries
 
 | Release | Promise | Required milestones |
 | --- | --- | --- |
 | Developer preview | Resolve, plan, and preserve one exact model reliably. | M0 through M3. |
-| Personal vault beta | Maintain watches, recover interrupted work, verify replicas, restore inventory. | M4 through M6. |
+| Personal vault beta | Restore the sealed revision without the hub, run bounded watches, and qualify the disks those jobs write to. | M4 through M6. |
 | Version 1 | A new user can install, schedule, maintain, and recover the utility on all three OSes. | M7 plus all earlier gates. |
 | Later | Collections, discovery, agent access, broader artifacts. | M8 onward after version 1 stability. |
 
@@ -47,7 +66,7 @@ Timebox a technical spike before building the application around an unproven cli
 
 Evaluate the official Rust hub client and native Xet engine. Record exact versions, licenses, features, transitive dependencies, TLS behavior, release targets, and peak cache use.
 
-Demonstrate listing, revision pinning, normal Git files, LFS, Xet, expired URL refresh, cancellation, and resume. Compare one opt-in live plan with reference hub behavior using development tooling only.
+Demonstrate listing, revision pinning, normal Git files, LFS pointers, expired URL refresh, cancellation, and resume for ranged HTTPS. The first seal uses that path, including when the bytes are stored in Xet and the LFS bridge returns them. A native Xet client is not required to finish M1. Compare one opt-in live plan with reference hub behavior using development tooling only, after the fixture waves, on one small public safetensors file.
 
 Acceptance:
 
@@ -72,6 +91,7 @@ Acceptance:
 - Changes to approved identity or policy require another decision.
 - Unknown license text and incomplete inventories cannot auto-approve.
 - Status and doctor without source checks operate offline.
+- A watch entry records intent. It does not resolve, fetch, or approve. Fetching a watch is M5.
 
 ## M3: Seal and recover one revision
 
@@ -87,22 +107,9 @@ Acceptance:
 
 Use a tiny local HTTP fixture in CI. Live weight downloads remain an opt-in developer drill.
 
-## M4: Watches and bounded unattended jobs
+## M4: Replicas, verification, and restoration
 
-Implement watch changes, bounded automatic approval rules, period accounting, rate limits, bandwidth limits, retries, pauses, and local reports.
-
-Acceptance:
-
-- Repeated runs are idempotent.
-- Upstream updates create new plans and preserve older revisions.
-- Source deletion leaves the local archive untouched.
-- Partial scans and access failures are reported distinctly.
-- Reservations survive reboot and period rollover without duplication.
-- No watch expands outside its approval bounds.
-
-## M5: Replicas, verification, and restoration
-
-Implement full and quick checks, resumable verification sweeps, replica/export, import, repair, and catalog backup/reconstruction.
+Implement full and quick checks, resumable verification sweeps, replica/export, import, repair, and catalog backup/reconstruction for the revision M3 sealed.
 
 Upstream-verified adoption of a local folder that matches a resolved commit is available before this milestone. Local-baseline import, which records a copy without that upstream proof, stays here.
 
@@ -115,7 +122,22 @@ Acceptance:
 - Interrupted replica writes never count as healthy.
 - Backup restore does not silently transfer credentials or approval authority.
 
-This milestone precedes discovery because preservation without recovery is an incomplete product.
+This milestone precedes unattended watches and discovery. Preservation without a way to rebuild the sealed revision is an incomplete product. A cache, a branch name, or a second URL is not this milestone.
+
+## M5: Watches and bounded unattended jobs
+
+Start this milestone after M4 has restored the sealed revision with the hub unreachable.
+
+Implement watch changes, bounded automatic approval rules, period accounting, rate limits, bandwidth limits, retries, pauses, and local reports. A watch entry that only records intent is M2 and still does not fetch.
+
+Acceptance:
+
+- Repeated runs are idempotent.
+- Upstream updates create new plans and preserve older revisions.
+- Source deletion leaves the local archive untouched.
+- Partial scans and access failures are reported distinctly.
+- Reservations survive reboot and period rollover without duplication.
+- No watch expands outside its approval bounds.
 
 ## M6: Volumes and platform qualification
 

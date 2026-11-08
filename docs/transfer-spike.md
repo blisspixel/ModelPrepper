@@ -1,6 +1,6 @@
 # Native transfer investigation
 
-Status: package inspection and a bounded blocking HTTP/source adapter, October 1, 2026. M1 is not complete. Live metadata inspection passed on Windows; no live weight transfer, live resume drill, peak-space measurement, or full platform runtime qualification has been performed.
+Status: package inspection and a bounded blocking HTTP/source adapter, October 1, 2026. Landscape re-check 7 November 2026, below. M1 is not complete. Live metadata inspection passed on Windows; no live weight transfer, live resume drill, peak-space measurement, or full platform runtime qualification has been performed.
 
 ## Candidate inspected
 
@@ -44,19 +44,35 @@ Keep source resolution behind a narrow adapter. Own file-path validation, staged
 
 Evaluate lower-level pinned byte streams for ordinary/LFS payload and the native Xet path separately. Reuse protocol implementations where sound; retain the preservation contract at the application boundary.
 
-Do not add Python, external downloaders, or a mandatory service to work around a client gap. Do not write a custom Xet implementation without demonstrating that a maintained native integration cannot satisfy the requirements.
+Do not add Python, external downloaders, or a mandatory service to work around a client gap. Do not write a custom Xet implementation. `hf-xet` 1.8.0 (Apache-2.0; crates.io page stamped 29 October 2026) is the maintained library to wrap later, and only for a file the bridge cannot serve.
+
+## Landscape check, 7 November 2026
+
+Checked against Hugging Face's own docs and the notes under `.agents/research_notes/`. No live weight was downloaded for this check. The [LFS bridge page](https://huggingface.co/docs/hub/xet/legacy-git-lfs) was opened that day.
+
+Xet is the storage default for new Hub users since the 23 May 2025 changelog, and the 15 July 2025 migration post says existing repositories move without a hard cut-over. A repository may mix Xet and LFS files. A client that does not speak Xet still receives one URL from the bridge, which reconstructs the file. The bridge page names `curl` and the web UI as clients of that URL. `resolve/<commit>/<path>` remains the byte URL. `hf_transfer` is deprecated in the current download guide. `HF_HUB_DISABLE_XET` still selects ordinary HTTP.
+
+That is enough for the first seal: a small public safetensors file, pinned by the full commit SHA, hashed by this program against the LFS SHA-256. It is not a fetch command. A Hub engineer wrote on 14 April 2025, in huggingface_hub pull request 2991, that a full GET of a file over 50 GB returns 400 from the CDN, while a Range GET can proceed. Forum reports in 2026 say the bridge itself fails on single files of several hundred GB. Those files are outside the first seal.
+
+A Range request that also sends `Accept-Encoding` can be answered with HTTP 200 by CloudFront. huggingface_hub 0.36.2 (6 February 2026, pull request 3778) treats that 200 as a failed resume and starts over. This experiment already rejects an ignored Range. It must keep doing that, and a ranged GET must not send `Accept-Encoding`.
+
+`hf-hub` 1.0.0 stays off the dependency graph. Its ordinary download uses `File::create` and a full GET, and the crate requires reqwest, tokio, and hf-xet. Wrapping `hf-xet` early would add a second HTTP stack beside ureq and a cache this program does not bound. Neither crate documents a workspace quota.
+
+Local managers checked the same day store a runnable file or a movable tag. Ollama content-addresses blobs and can keep license text, and a pull can drop unreferenced blobs. LM Studio, llama.cpp's cache, Jan, and vLLM's default directory do not pin a commit. The Hub cache does pin `snapshots/<commit>`, and huggingface_hub builds from 30 July 2026 until 8 October 2026 could treat a short snapshot as complete. A seal is a folder of bytes, hashes this program computed, and the LICENSE and NOTICE text that were retrieved. It is not a cache directory and not an Ollama blob name.
+
+BagIt, git-annex, Software Heritage, ORAS, restic, and Borg treat a URL as a locator and a hash as identity. Nothing in that check argued for chunk deduplication, a torrent client, or a second hub before one revision restores with the origin unreachable. The [roadmap](roadmap.md) waves follow that order.
 
 ## Required next experiments
 
-| Experiment | Evidence required |
-| --- | --- |
-| Build graph | Exact locked transitive versions, licenses, native libraries, enabled TLS features. |
-| Local HTTP fixture | Revision resolution, valid full and partial responses, ignored Range, malformed ranges, truncated bodies. |
-| Interrupted ordinary download | Checkpoint bound to pinned identity; resume without loss or mixed bytes. |
-| Xet download | Cancellation/resume and measured workspace under controlled limits. |
-| Expired source URL | One local refresh from the original URL is fixture-tested. Live hub expiry and credentialed refresh remain unproven. |
-| Resource limits | Memory, temporary cache, concurrency, and bounded transfer-budget overrun. |
-| Cross-platform execution | Actual Windows/macOS/Linux binaries, not only cross-target type checks. |
-| Opt-in live comparison | One pinned small repository compared with the reference hub client's dry run. |
+| Experiment | State | Evidence still required |
+| --- | --- | --- |
+| Build graph | `hf-hub` 1.0.0 inspected and rejected as the downloader. | Re-inspect before any later decision to wrap `hf-xet`. |
+| Local HTTP fixture | Range, truncation, bad status, and rollback are in the transfer library. | A ranged GET answered with 200 must not be appended. Do not send `Accept-Encoding` on a ranged request. |
+| Interrupted ordinary download | Single-file checkpoint and tail recovery exist. | The same rules across every file of one frozen set, including license and notice. |
+| Expired source URL | One fixture refresh from the original URL. | Live hub expiry and credentialed refresh stay out of the fixture waves. |
+| Resource limits | Plaintext HTTP sizes for one refreshed segment exceed the charged allowance. | TLS record buffers and kernel socket buffers. `workspace_bytes` stays null until those are recorded. |
+| Xet download | Not started. Not next. | After one HTTPS revision restores with the hub unreachable, and only for a file the bridge cannot serve. Wrap `hf-xet`. Do not write a client. |
+| Cross-platform execution | CI runs the fixtures on Windows, macOS, and Linux. | Clean-machine qualification stays in M6 and M7. |
+| Opt-in live comparison | Not started. | One small public safetensors repository after the fixture waves. Still not a fetch command. |
 
-Until transfer experiments pass, workspace stays unknown and no command can authorize or perform a model transfer. The current CLI can initialize a vault and inspect sources independently.
+Until the resource-limit measurement and the multi-file fixture pass, workspace stays unknown and no command can authorize or perform a model transfer. The current CLI can initialize a vault and inspect sources independently.

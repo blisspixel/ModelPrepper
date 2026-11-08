@@ -39,14 +39,14 @@ Review licenses before copying code. Referencing a project does not select it as
 
 ## Proof required here
 
-- Rust client supports required listing, revision, ordinary-file, LFS, and Xet paths.
+- Ranged HTTPS supports listing, revision pins, ordinary files, and LFS pointers, including when the Hub stores the bytes in Xet and the bridge returns one URL.
 - Peak disk workspace is measured and bounded.
 - Resume cannot mix versions.
 - Filesystem behavior works on all three operating systems.
 - Replica recovery works without the hub.
 - Catalog loss does not destroy file inventory or provenance.
 
-Evaluate the [official Rust hub client](https://github.com/huggingface/hf-hub). Take exact crate names and APIs from the evaluated version.
+The official Rust hub client was inspected at `hf-hub` 1.0.0 and is not the downloader. The record and the later `hf-xet` wrapper are in [transfer-spike.md](transfer-spike.md).
 
 ## Policy context
 
