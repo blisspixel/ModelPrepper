@@ -33,8 +33,8 @@ Only the internal resolver can create a persisted review. There is no JSON-impor
 
 Reads check document hash, strict schema, domain, vault/disk ownership, and decision consistency. This detects accidental corruption relative to the id, not a malicious writer replacing both ids and documents. Transfer authorization is independently disabled even if stored fields claim otherwise.
 
-Catalog schema 2 adds proposals through a transaction under the writer lock. Schema 1 upgrades without changing ownership UUIDs. Unknown versions fail closed. Status can trigger migration and is not read-only. Downgrading to schema-1 software after migration is unsupported; retain independent backups before upgrades.
+Catalog schema 2 adds proposals through a transaction under the writer lock. Schema 3 adds custody. Schema 4 adds one grant row per review. Schema 1 upgrades without changing ownership UUIDs. Unknown versions fail closed. Status can trigger migration and is not read-only. Downgrading to schema-1 software after migration is unsupported; retain independent backups before upgrades.
 
 Documents are capped at 8 MiB. List pages contain 1 through 100 summaries in ascending id order, default 20. next_after supplies the following page's cursor. Evidence is parsed one record at a time instead of retained in the list. Separate invocations do not form a snapshot; repeat a scan if proposals change during pagination.
 
-The future executable plan needs measured bounds and a distinct qualified identity. Editing blockers cannot upgrade a review. See [contracts](contracts.md), [status](implementation-status.md), and [roadmap](roadmap.md).
+A grant is a distinct record from the review decision. It names that review, the measured connection bounds, the per-file staging bound, the volume UUID, and the policy digest, and it is deleted when any of those change. It does not authorize a transfer. Editing blockers cannot upgrade a review. See [contracts](contracts.md), [status](implementation-status.md), and [roadmap](roadmap.md).

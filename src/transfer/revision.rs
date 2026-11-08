@@ -326,6 +326,37 @@ fn set_location(root: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Disk beyond the payload parts for every member of one frozen set.
+/// Each member keeps its own checkpoint database and rollback journal, and the
+/// set keeps one manifest. This is not `workspace_bytes`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct RevisionDiskBound {
+    pub side_file_bytes: u64,
+    pub manifest_bytes: u64,
+}
+
+pub(crate) fn revision_disk_bound(file_count: usize) -> Result<RevisionDiskBound> {
+    if file_count == 0 {
+        return Err(Error::new(
+            "empty_revision",
+            "a frozen set names at least one file",
+        ));
+    }
+    if file_count > MAX_FILES {
+        return Err(Error::new(
+            "too_many_files",
+            "a staged revision is limited to 1024 files",
+        ));
+    }
+    let side_file_bytes = super::staging_workspace_bound()
+        .checked_mul(file_count as u64)
+        .ok_or_else(|| Error::new("size_overflow", "staged side files exceed u64 capacity"))?;
+    Ok(RevisionDiskBound {
+        side_file_bytes,
+        manifest_bytes: MANIFEST_CAP,
+    })
+}
+
 fn sync_directory(path: &Path) -> Result<()> {
     #[cfg(unix)]
     fs::File::open(path)

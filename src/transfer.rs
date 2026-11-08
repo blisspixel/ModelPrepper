@@ -26,6 +26,7 @@ pub use crate::buffers::{
     KernelSocketBuffers, RecordedTransferBuffers, http_agent_matches_recorded_buffers,
     measure_kernel_socket_buffers, recorded_transfer_buffers,
 };
+pub(crate) use revision::revision_disk_bound;
 pub use revision::{RevisionSegment, RevisionStage};
 pub use session::{StagingSession, staging_workspace_bound};
 

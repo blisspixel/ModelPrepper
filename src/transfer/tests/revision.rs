@@ -67,6 +67,21 @@ fn part(root: &Path, index: usize) -> Vec<u8> {
 }
 
 #[test]
+fn the_disk_bound_covers_every_member_and_rejects_an_empty_or_huge_set() {
+    let bound = revision_disk_bound(3).unwrap();
+    assert_eq!(bound.manifest_bytes, 1024 * 1024);
+    assert_eq!(
+        bound.side_file_bytes,
+        crate::transfer::staging_workspace_bound() * 3
+    );
+    assert_eq!(revision_disk_bound(0).err().unwrap().code, "empty_revision");
+    assert_eq!(
+        revision_disk_bound(1025).err().unwrap().code,
+        "too_many_files"
+    );
+}
+
+#[test]
 fn a_frozen_set_stages_license_and_notice_without_sealing() {
     let (_temp, path) = root();
     let files = vec![
