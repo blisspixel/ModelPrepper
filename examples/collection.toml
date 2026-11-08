@@ -20,4 +20,5 @@ revision = "abcdef0123456789abcdef0123456789abcdef01"
 representation = "selected-derivative"
 base_repo = "https://huggingface.co/example/model/"
 base_revision = "0123456789abcdef0123456789abcdef01234567"
-note = "declared base; this preview does not resolve or preserve it"
+categories = ["coding", "text"]
+note = "declared base; this preview does not resolve, preserve, or charge it"
