@@ -110,6 +110,8 @@ fn group_root_help(text: &str) -> String {
             out.push_str("\nPreview:\n");
         } else if name == "watch" {
             out.push_str("\nWatches:\n");
+        } else if name == "schedule" {
+            out.push_str("\nSchedule:\n");
         } else if name == "help" {
             out.push('\n');
         }

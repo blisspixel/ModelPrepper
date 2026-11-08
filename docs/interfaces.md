@@ -1,6 +1,6 @@
 # Interfaces
 
-The executable implements config init/check, init with an existing config, offline status, resolve for public models, plan against an untrusted local inventory, `fetch` for one granted revision, `watch` for one pass over configured watches, and offline `replica`, `rebuild`, and `import`. Resolve fetches bounded metadata and license evidence. `fetch` downloads one granted plan. `watch` can download a newly resolved revision, and only when that plan already has a current grant and the UTC-week byte ceiling still has room. `decide` still cannot approve. See [contracts.md](contracts.md). The table below describes the target interface; commands that are not implemented, and broader behavior, remain proposed. The implemented watch command is `watch --config --stage`. `watch add`, `watch list`, and `watch remove` are not implemented. Watches are entries in the config file.
+The executable implements config init/check, init with an existing config, offline status, resolve for public models, plan against an untrusted local inventory, `fetch` for one granted revision, `watch` for one pass over configured watches, `schedule` preview/install/remove for one weekly timer, and offline `replica`, `rebuild`, and `import`. Resolve fetches bounded metadata and license evidence. `fetch` downloads one granted plan. `watch` can download a newly resolved revision, and only when that plan already has a current grant and the UTC-week byte ceiling still has room. `decide` still cannot approve. See [contracts.md](contracts.md). The table below describes the target interface; commands that are not implemented, and broader behavior, remain proposed. The implemented watch command is `watch --config --stage`. `watch add`, `watch list`, and `watch remove` are not implemented. The implemented schedule commands are `schedule preview`, `schedule install --preview`, and `schedule remove`. Watches are entries in the config file.
 
 ## CLI
 
@@ -83,9 +83,7 @@ The volume label is user-facing. volume.json UUID is the identity. Automatic rul
 
 ## Scheduling
 
-Native OS jobs execute the binary with an explicit config path. A worker holds the writer lock, drains eligible jobs within budget, and exits. The scheduler does not encode quota policy.
-
-Plans can be generated independently of transfer. Schedule installers show commands, paths, triggers, and removal instructions before changing the OS.
+`schedule preview` shows the command, absolute config path, absolute stage path, working directory, timezone, and removal command. It changes nothing. `schedule install` writes the unit and enables that timer only when `--preview` is the digest of that text. `schedule remove` disables and deletes only the ModelPrepper timer. The timer runs `watch` once and exits. It does not call `decide`. systemd and Task Scheduler use Monday 00:05 UTC. launchd uses local time. The byte ceiling stays the configured UTC-week cap. CI injects the host runner and does not enable a live timer.
 
 ## MCP
 

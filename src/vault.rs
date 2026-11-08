@@ -26,6 +26,7 @@ mod ownership_tests;
 mod restore;
 mod review;
 mod seal;
+pub(crate) use seal::checked_stage;
 mod watch;
 pub use crate::filesystem::FilesystemRole;
 pub use adoption::{Adoption, Outcome, PROVENANCE_LOCAL_UPSTREAM, adopt};

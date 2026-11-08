@@ -102,6 +102,9 @@ pub enum Command {
     #[command(flatten)]
     #[command(next_help_heading = "Watches")]
     Watches(WatchCommand),
+    #[command(flatten)]
+    #[command(next_help_heading = "Schedule")]
+    Schedule(ScheduleCommand),
 }
 
 #[derive(Debug, Subcommand)]
@@ -184,6 +187,44 @@ pub enum WatchCommand {
         #[arg(long)]
         stage: PathBuf,
     },
+}
+
+#[derive(Debug, Subcommand)]
+#[command(term_width = 80)]
+pub enum ScheduleCommand {
+    /// Show or change the weekly timer that runs one watch pass.
+    Schedule {
+        #[command(subcommand)]
+        command: ScheduleAction,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+#[command(term_width = 80)]
+pub enum ScheduleAction {
+    /// Show the timer, command, and digest. Changes nothing.
+    Preview {
+        /// Path to the vault configuration file.
+        #[arg(long)]
+        config: PathBuf,
+        /// Absolute staging directory outside the catalog and volumes.
+        #[arg(long)]
+        stage: PathBuf,
+    },
+    /// Write that timer after the preview digest matches.
+    Install {
+        /// Path to the vault configuration file.
+        #[arg(long)]
+        config: PathBuf,
+        /// Absolute staging directory outside the catalog and volumes.
+        #[arg(long)]
+        stage: PathBuf,
+        /// Digest printed by schedule preview.
+        #[arg(long)]
+        preview: String,
+    },
+    /// Remove only the ModelPrepper timer.
+    Remove,
 }
 
 #[derive(Debug, Subcommand)]
@@ -404,6 +445,15 @@ pub fn execute(cli: Cli) -> Result<CommandOutput> {
 }
 
 pub fn execute_in(cli: Cli, view: View) -> Result<CommandOutput> {
+    execute_with(cli, view, &mut crate::schedule::SystemRunner, None)
+}
+
+pub(crate) fn execute_with(
+    cli: Cli,
+    view: View,
+    runner: &mut dyn crate::schedule::HostRunner,
+    unit_dir: Option<&Path>,
+) -> Result<CommandOutput> {
     let quiet = cli.quiet;
     match cli.command {
         Command::Review(ReviewCommand::Propose {
@@ -629,6 +679,89 @@ pub fn execute_in(cli: Cli, view: View) -> Result<CommandOutput> {
                 crate::present::render_watch(report, view.color, view.columns)
             })
         }
+        Command::Schedule(ScheduleCommand::Schedule { command }) => {
+            schedule_action(&view, command, runner, unit_dir)
+        }
+    }
+}
+
+fn schedule_action(
+    view: &View,
+    command: ScheduleAction,
+    runner: &mut dyn crate::schedule::HostRunner,
+    unit_dir: Option<&Path>,
+) -> Result<CommandOutput> {
+    let host = crate::schedule::current_host();
+    let directory = match unit_dir {
+        Some(path) => path.to_path_buf(),
+        None => default_unit_dir(host)?,
+    };
+    let report = match command {
+        ScheduleAction::Preview { config, stage } => {
+            crate::schedule::preview(&schedule_plan(&config, &stage, &directory)?)?
+        }
+        ScheduleAction::Install {
+            config,
+            stage,
+            preview,
+        } => crate::schedule::install(
+            &schedule_plan(&config, &stage, &directory)?,
+            &preview,
+            runner,
+        )?,
+        ScheduleAction::Remove => {
+            crate::schedule::remove(host, &directory, schedule_uid(), runner)?
+        }
+    };
+    show(view, &report, true, |report| {
+        crate::present::render_schedule(report, view.color, view.columns)
+    })
+}
+
+fn schedule_plan(
+    config: &Path,
+    stage: &Path,
+    unit_dir: &Path,
+) -> Result<crate::schedule::SchedulePlan> {
+    let located = located_config(config)?;
+    let stage = crate::vault::checked_stage(&located, stage)?;
+    let config = std::fs::canonicalize(config)
+        .map_err(|error| Error::new("schedule_unreadable", error.to_string()))?;
+    let working_directory = config
+        .parent()
+        .map(Path::to_path_buf)
+        .ok_or_else(|| Error::new("schedule_unreadable", "config has no parent directory"))?;
+    let binary = std::env::current_exe()
+        .map_err(|error| Error::new("schedule_unreadable", error.to_string()))?;
+    let binary = std::fs::canonicalize(&binary).unwrap_or(binary);
+    Ok(crate::schedule::SchedulePlan {
+        host: crate::schedule::current_host(),
+        binary,
+        config,
+        stage,
+        working_directory,
+        unit_dir: unit_dir.to_path_buf(),
+        uid: schedule_uid(),
+    })
+}
+
+fn default_unit_dir(host: crate::schedule::Host) -> Result<PathBuf> {
+    let home = std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .map(PathBuf::from);
+    let xdg = std::env::var_os("XDG_CONFIG_HOME").map(PathBuf::from);
+    let local = std::env::var_os("LOCALAPPDATA").map(PathBuf::from);
+    crate::schedule::unit_directory(host, home.as_deref(), xdg.as_deref(), local.as_deref())
+}
+
+fn schedule_uid() -> u32 {
+    #[cfg(target_os = "macos")]
+    {
+        rustix::process::getuid().as_raw()
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        0
     }
 }
 
