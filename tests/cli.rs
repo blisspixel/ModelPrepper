@@ -35,6 +35,7 @@ fn native_cli_reports_version_help_and_argument_failures() {
         vec!["replica", "--help"],
         vec!["rebuild", "--help"],
         vec!["import", "--help"],
+        vec!["watch", "--help"],
     ] {
         let output = binary(&args);
         assert!(output.status.success());
@@ -445,6 +446,7 @@ fn help_is_grouped_and_fits_eighty_columns() {
         "Review a source",
         "Local copies",
         "Preview",
+        "Watches",
         "First run:",
     ] {
         assert!(text.contains(needle), "{needle} missing from {text}");
@@ -848,6 +850,55 @@ fn budget_and_kit_compare_pinned_sizes_without_rewriting_or_reserving() {
     assert_eq!(stale_body["network_contact"], false);
     assert_eq!(stale_body["vault_mutated"], false);
     assert_eq!(fs::read(&stale).unwrap(), stale_before);
+}
+
+#[test]
+fn an_empty_watch_stays_offline_without_a_vault() {
+    let dir = TempDir::new().unwrap();
+    let config = dir.path().join("config.toml");
+    fs::write(
+        &config,
+        toml::to_string(&modelprepper::Config::default_for(
+            "catalog".into(),
+            "models".into(),
+        ))
+        .unwrap(),
+    )
+    .unwrap();
+    let json = binary(&[
+        "watch",
+        "--config",
+        config.to_str().unwrap(),
+        "--stage",
+        "stage",
+    ]);
+    assert!(json.status.success(), "{json:?}");
+    let body: serde_json::Value = serde_json::from_slice(&json.stdout).unwrap();
+    assert_eq!(body["status"], "watched");
+    assert_eq!(body["transfer_authorized"], false);
+    assert!(body["workspace_bytes"].is_null());
+    assert_eq!(body["charged_bytes"], 0);
+    assert_eq!(body["entries"].as_array().unwrap().len(), 0);
+    assert!(!dir.path().join("catalog").exists());
+    let text = Command::new(env!("CARGO_BIN_EXE_modelprepper"))
+        .env("MODELPREPPER_TEXT", "1")
+        .args([
+            "watch",
+            "--config",
+            config.to_str().unwrap(),
+            "--stage",
+            "stage",
+        ])
+        .output()
+        .unwrap();
+    assert!(text.status.success(), "{text:?}");
+    let rendered = String::from_utf8(text.stdout).unwrap();
+    for needle in ["watched", "nothing fetched", "still blocked", "next:"] {
+        assert!(
+            rendered.contains(needle),
+            "{needle} missing from {rendered}"
+        );
+    }
 }
 
 #[test]

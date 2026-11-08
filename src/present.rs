@@ -612,6 +612,55 @@ pub fn render_import(
     lines.join("\n")
 }
 
+pub fn render_watch(report: &crate::vault::WatchReport, color: bool, columns: usize) -> String {
+    let count = report.entries.len();
+    let mut lines = vec![
+        verdict(
+            color,
+            columns,
+            GREEN,
+            "watched",
+            &format!("  {count} {}", if count == 1 { "entry" } else { "entries" }),
+        ),
+        field(
+            columns,
+            "period",
+            &format!(
+                "{}  {} charged",
+                report.period_start,
+                human_pair(report.charged_bytes)
+            ),
+        ),
+    ];
+    if report.entries.is_empty() {
+        lines.push(field(columns, "entries", "nothing fetched"));
+    } else {
+        for entry in &report.entries {
+            let revision = entry
+                .resolved_revision
+                .as_deref()
+                .unwrap_or(&entry.requested_revision);
+            let plan = entry
+                .plan_id
+                .as_deref()
+                .map(short_id)
+                .unwrap_or_else(|| "no plan".into());
+            lines.push(field(
+                columns,
+                entry.action,
+                &format!("{} @ {}  {plan}", entry.repo_id, short_id(revision)),
+            ));
+        }
+    }
+    lines.push(field(columns, "approval", "still blocked"));
+    lines.push(next_line(
+        color,
+        columns,
+        "modelprepper status --config <file>",
+    ));
+    lines.join("\n")
+}
+
 pub fn render_proposal(proposal: &crate::vault::Proposal, color: bool, columns: usize) -> String {
     let (code, word) = match proposal.decision {
         crate::vault::Decision::Approved => (GREEN, "approved"),

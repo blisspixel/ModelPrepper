@@ -1,6 +1,6 @@
 # Interfaces
 
-The executable implements config init/check, init with an existing config, offline status, resolve for public models, plan against an untrusted local inventory, `fetch` for one granted revision, and offline `replica`, `rebuild`, and `import`. Resolve fetches bounded metadata and license evidence. `fetch` is the only command that downloads a payload, and only for one granted plan. See [contracts.md](contracts.md). The table below describes the target interface; commands that are not implemented, and broader behavior, remain proposed.
+The executable implements config init/check, init with an existing config, offline status, resolve for public models, plan against an untrusted local inventory, `fetch` for one granted revision, `watch` for one pass over configured watches, and offline `replica`, `rebuild`, and `import`. Resolve fetches bounded metadata and license evidence. `fetch` downloads one granted plan. `watch` can download a newly resolved revision, and only when that plan already has a current grant and the UTC-week byte ceiling still has room. `decide` still cannot approve. See [contracts.md](contracts.md). The table below describes the target interface; commands that are not implemented, and broader behavior, remain proposed. The implemented watch command is `watch --config --stage`. `watch add`, `watch list`, and `watch remove` are not implemented. Watches are entries in the config file.
 
 ## CLI
 

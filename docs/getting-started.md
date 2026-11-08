@@ -1,6 +1,6 @@
 # Getting started with the prototype
 
-Read [current status](implementation-status.md) before setup. This version initializes and inspects a vault. `fetch` can seal one granted revision, and `replica`, `rebuild`, and `import` can copy or record local bytes. These examples do not download weights.
+Read [current status](implementation-status.md) before setup. This version initializes and inspects a vault. `fetch` can seal one granted revision, and `replica`, `rebuild`, and `import` can copy or record local bytes. `watch` can fetch a new commit only when that plan already has a grant. These examples do not download weights and do not run a watch.
 
 ## Build and run
 

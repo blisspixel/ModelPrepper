@@ -2,7 +2,7 @@
 
 ## Current repository
 
-This repository contains the Rust vault foundation, public-source inspection, persisted source reviews/rejection, offline preview planning, installer scripts, and design documents. Tests cover ownership/migration, disk substitution, initialization recovery, source-review persistence/pagination, pinned metadata, rights evidence, shard closure, HTTP failures, byte integrity, CLI behavior, offline installer failures/upgrades, and offline readiness preflight. Downloads, granted approvals, and sealed manifests are not implemented.
+This repository contains the Rust vault foundation, public-source inspection, persisted source reviews/rejection, offline preview planning, installer scripts, and design documents. Tests cover ownership/migration, disk substitution, initialization recovery, source-review persistence/pagination, pinned metadata, rights evidence, shard closure, HTTP failures, byte integrity, CLI behavior, offline installer failures/upgrades, offline readiness preflight, ranged seals, replicas, catalog rebuild, and one bounded watch pass. `decide` still cannot approve a transfer. A schedule is not implemented.
 
 Development Node tooling is not a dependency of the planned native product.
 

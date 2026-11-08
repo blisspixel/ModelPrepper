@@ -4,7 +4,7 @@ This file routes work to the canonical documents. It does not replace them.
 
 ## Orientation
 
-Read [README](README.md) and [implementation status](docs/implementation-status.md) first, then [contracts](docs/contracts.md) and the matching gate in the [roadmap](docs/roadmap.md). Planned downloads, granted approvals, sealed bundles, replicas, and unattended maintenance are not implemented. Do not describe them as current behavior.
+Read [README](README.md) and [implementation status](docs/implementation-status.md) first, then [contracts](docs/contracts.md) and the matching gate in the [roadmap](docs/roadmap.md). `fetch`, grants, seals, replicas, rebuild, import, and one bounded `watch` pass are implemented. `decide` still cannot approve a transfer, and a schedule is not implemented. Do not describe a schedule or an approval as current behavior.
 
 ## Start tidy, stop tidy
 

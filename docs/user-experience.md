@@ -85,12 +85,12 @@ Acceptance: disabling internet access does not prevent local status, verificatio
 | --- | --- | --- |
 | Foundation | M1 through M3 | Honest plans, exact byte identities, measured bounds, resumable transfer, and one published revision readable without the program. |
 | Protect that revision | M4 | Replica, fixity, catalog rebuild with the hub unreachable, and local-baseline import. |
-| Bounded automation | M5 | Watches that create new plans, keep old revisions, and stay inside the approval. |
+| Bounded automation | M5 | `watch` creates a new plan for a new commit, keeps old revisions, and fetches only inside a current grant and the weekly byte ceiling. |
 | Disk qualification | M6 | Missing mounts, full volumes, and filesystem drills. One bundle stays on one volume. |
 | Release usability | M7 | Native install and build guides, schedule preview and install, current CLI captures, clean-machine and persona drills. |
 | Later conveniences | M8 onward | Collections, optional discovery, local web UI, optional MCP, interoperable archival exports, and runtime kits. |
 
-Setup, readable output, and explainable plans are M2 and stay available while later milestones are open. A watch entry that only records intent is M2. A watch that fetches is M5, after M4 can rebuild the sealed revision. The [roadmap](roadmap.md) wave list is the same order.
+Setup, readable output, and explainable plans are M2 and stay available while later milestones are open. A watch entry that only records intent is M2. `watch` fetches that entry only inside a current grant. Scheduling is still M7. The [roadmap](roadmap.md) wave list is the same order.
 
 The first release should be small enough to trust. Do not hold core recovery hostage to a dashboard or make every convenience part of version one.
 

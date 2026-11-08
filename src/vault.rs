@@ -22,6 +22,7 @@ mod ownership_tests;
 mod restore;
 mod review;
 mod seal;
+mod watch;
 pub use adoption::{Adoption, Outcome, PROVENANCE_LOCAL_UPSTREAM, adopt};
 pub use grant::{Grant, current_grant, record_grant};
 pub use restore::{
@@ -32,6 +33,7 @@ pub use review::{Decision, Proposal, ProposalPage, decide, proposals, propose, s
 #[cfg(test)]
 pub(crate) use review::{ProposalSummary, SourceReview};
 pub use seal::{PROVENANCE_RANGED_HTTPS, Seal, SealStop, fetch, seal_staged};
+pub use watch::{WatchEntry, WatchReport, run_watches};
 
 #[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -277,7 +279,7 @@ fn open_catalog_mode(config: &Config, create: bool, recover: bool) -> Result<Cat
     let version: u32 = connection
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .map_err(db)?;
-    if (!new && !matches!(version, 1..=5)) || (new && version != 0) {
+    if (!new && !matches!(version, 1..=6)) || (new && version != 0) {
         return Err(Error::new(
             "unsupported_catalog_schema",
             "catalog schema is not supported",
@@ -392,6 +394,21 @@ fn open_catalog_mode(config: &Config, create: bool, recover: bool) -> Result<Cat
                 PRIMARY KEY (plan_id, volume_label)
             );
             PRAGMA user_version=5;
+            COMMIT;",
+            )
+            .map_err(db)?;
+    }
+    if version < 6 {
+        connection
+            .execute_batch(
+                "BEGIN IMMEDIATE;
+            CREATE TABLE IF NOT EXISTS period_charges (
+                period_start TEXT NOT NULL,
+                plan_id TEXT NOT NULL CHECK(length(plan_id)=64),
+                payload_bytes INTEGER NOT NULL CHECK(payload_bytes >= 0),
+                PRIMARY KEY (period_start, plan_id)
+            );
+            PRAGMA user_version=6;
             COMMIT;",
             )
             .map_err(db)?;
