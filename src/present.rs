@@ -913,14 +913,19 @@ pub fn render_collection_custody(
     let mut lines = vec![verdict(color, columns, YELLOW, word, "  offline")];
     lines.push(field(columns, "name", &report.name));
     for entry in &report.entries {
+        let measured = match entry.measured_bytes {
+            Some(bytes) => format!("measured {bytes}"),
+            None if entry.custody_rows == 0 => "measured not recorded".to_string(),
+            None => "measured unavailable".to_string(),
+        };
         let detail = if entry.custody_rows == 0 {
             format!(
-                "{}  {}  {}  custody not recorded  not rehashed",
+                "{}  {}  {}  custody not recorded  {measured}  not rehashed  not charged",
                 entry.repo_id, entry.revision, entry.revision_shape
             )
         } else {
             format!(
-                "{}  {}  {}  custody {}  {}  not rehashed",
+                "{}  {}  {}  custody {}  {}  {measured}  not rehashed  not charged",
                 entry.repo_id,
                 entry.revision,
                 entry.revision_shape,
