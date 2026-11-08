@@ -1,6 +1,7 @@
 //! Preservation contracts and bounded public-source resolution.
 
 pub mod budget;
+mod buffers;
 pub mod cli;
 pub mod config;
 pub mod error;

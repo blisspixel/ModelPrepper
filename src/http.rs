@@ -4,7 +4,10 @@
 //! when the refreshed request redirects to it. A 401 or 403 is classified before
 //! content encoding. A body that may be stored must use identity encoding,
 //! matched in any letter case.
-use crate::{Error, Result};
+use crate::{
+    Error, Result,
+    buffers::{TLS_INPUT_BYTES, TLS_OUTPUT_BYTES},
+};
 use std::{io::Read, time::Duration};
 use url::Url;
 
@@ -21,6 +24,12 @@ impl Default for Http {
                 .max_redirects(0)
                 .http_status_as_error(false)
                 .timeout_global(Some(Duration::from_secs(60)))
+                .input_buffer_size(TLS_INPUT_BYTES)
+                .output_buffer_size(TLS_OUTPUT_BYTES)
+                // Empty disables ureq's automatic Accept-Encoding. A ranged
+                // request must not send that header. An unscoped request sets
+                // identity itself.
+                .accept_encoding("")
                 .build()
                 .new_agent(),
             test_origin: None,
@@ -52,12 +61,14 @@ impl Http {
         let mut rejected: Option<Url> = None;
         loop {
             validate_url(&current, self.test_origin.as_deref())?;
-            let mut request = self
-                .agent
-                .get(current.as_str())
-                .header("Accept-Encoding", "identity");
+            let mut request = self.agent.get(current.as_str());
             if let Some((start, end)) = range {
+                // CloudFront can answer Range plus Accept-Encoding with HTTP 200.
+                // Omit the header. The caller rejects any status other than 206
+                // when this range is not the whole fresh file.
                 request = request.header("Range", format!("bytes={start}-{end}"));
+            } else {
+                request = request.header("Accept-Encoding", "identity");
             }
             let response = request.call().map_err(|_| {
                 Error::new(
@@ -116,6 +127,13 @@ impl Http {
             }
             return Ok(response);
         }
+    }
+
+    pub(crate) fn buffer_sizes(&self) -> (usize, usize) {
+        (
+            self.agent.config().input_buffer_size(),
+            self.agent.config().output_buffer_size(),
+        )
     }
 
     #[cfg(test)]

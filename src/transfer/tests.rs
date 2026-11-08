@@ -47,7 +47,9 @@ fn run(
     );
     let requests = server.finish();
     assert!(requests[0].contains(&format!("/resolve/{}/", "a".repeat(40))));
-    assert!(requests[0].to_ascii_lowercase().contains("range: bytes="));
+    let request = requests[0].to_ascii_lowercase();
+    assert!(request.contains("range: bytes="));
+    assert!(!request.contains("accept-encoding"));
     result
 }
 fn bytes(file: &mut File) -> Vec<u8> {
@@ -425,6 +427,21 @@ fn changed_or_corrupt_partials_fail_before_any_source_request() {
             .code,
         "invalid_checkpoint"
     );
+}
+
+#[test]
+fn a_partial_first_segment_answered_with_200_is_not_appended() {
+    let mut file = tempfile::tempfile().unwrap();
+    let error = run(
+        response(200, "", b"abcdef"),
+        &expected(b"abcdef"),
+        &mut file,
+        None,
+        3,
+    )
+    .unwrap_err();
+    assert_eq!(error.code, "range_not_honored");
+    assert!(bytes(&mut file).is_empty());
 }
 
 #[test]
