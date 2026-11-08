@@ -36,9 +36,9 @@ No async executor, Python, Node, OpenSSL installation, external downloader, or m
 | Configuration and manifests | serde plus TOML/JSON parsers | Strict schema validation and bounded inputs. |
 | Catalog | rusqlite with bundled SQLite | Avoid system SQLite installation; local database only. |
 | HTTP/TLS | Official client stack, Rust TLS where feasible | Avoid two competing HTTP runtimes. |
-| Transfer | Official [hf-hub](https://github.com/huggingface/hf-hub), native Xet | Prove ordinary files, LFS, Xet, resume, and workspace limits. |
+| Transfer | ureq for the first seal. `hf-xet` only after one revision restores offline | Ranged HTTPS, including bytes stored in Xet and served by the LFS bridge. Do not add [hf-hub](https://github.com/huggingface/hf-hub) 1.0.0 beside ureq. Do not write a Xet client. See [transfer-spike.md](transfer-spike.md). |
 | Integrity | Maintained SHA-256 implementation | Record algorithm semantics explicitly. |
-| Async execution | Shared runtime needed by the transfer client | Bound concurrency; do not add a second executor. |
+| Async execution | None for the first seal | `hf-hub` and `hf-xet` pull an async runtime. That runtime waits with the later Xet wrapper. Do not add a second executor to reach them early. |
 | Locking | OS-backed locking through a small maintained abstraction | Cross-platform ownership; no distributed-lock claim. |
 | Optional MCP | Official [Rust SDK](https://github.com/modelcontextprotocol/rust-sdk) | Feature-gated after core reliability. |
 

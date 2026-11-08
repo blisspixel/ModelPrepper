@@ -1,6 +1,6 @@
 # Model source catalog and adapter plan
 
-Reviewed September 30, 2026 against primary project documentation. This is a research catalog, not a claim that every API, download, license, or mirror was tested. ModelPrepper currently inspects only official public, ungated Hugging Face model repositories. None of the other entries is enabled by adding a URL to configuration.
+Reviewed September 30, 2026 against primary project documentation. A 7 November 2026 check of the Hub's Xet migration did not change the adapter order below. The first fetch is still ranged HTTPS on an official public Hugging Face repository. A native Xet client is not the next adapter. See [transfer-spike.md](transfer-spike.md) and the [roadmap](roadmap.md). This is a research catalog, not a claim that every API, download, license, or mirror was tested. ModelPrepper currently inspects only official public, ungated Hugging Face model repositories. None of the other entries is enabled by adding a URL to configuration.
 
 The companion [data-only registry](../resources/model-sources.json) gives future discovery tools a curated starting point. It is not a trusted network allowlist, runtime plugin registry, or authority to download. Source changes require another documented review.
 
@@ -65,7 +65,7 @@ An original source failure creates a visible event and possible recovery proposa
 
 This is an engineering recommendation based on documented fit, not a reliability benchmark:
 
-1. Finish the existing HF preservation and recovery path, including manifests and offline import.
+1. Finish the existing HF preservation and recovery path, including manifests and offline import. Do that with ranged HTTPS. Do not open with a Xet client, a second hub, or a torrent transport.
 2. Qualify ModelScope as a second hub, and a narrowly scoped official-release/HTTPS adapter with captured inventories and digests. Avoid a universal downloader that trusts arbitrary links.
 3. Qualify Kaggle and NGC independently, especially archive extraction, licenses, entitlement, format dependencies, and signatures where offered.
 4. Add Civitai alongside a supported image-model dependency profile; add other modality adapters only after their closure gates pass.
