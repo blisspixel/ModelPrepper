@@ -70,9 +70,9 @@ BagIt, git-annex, Software Heritage, ORAS, restic, and Borg treat a URL as a loc
 | Local HTTP fixture | Range, truncation, bad status, and rollback are in the transfer library. A ranged GET omits `Accept-Encoding`. A 200 that answers a partial range is not appended. | Live hub expiry stays out of the fixture waves. |
 | Interrupted ordinary download | One frozen set, including license and notice, uses the single-file checkpoint rules. Part files stay part files. | A seal and a fetch command stay in later waves. |
 | Expired source URL | One fixture refresh from the original URL. | Live hub expiry and credentialed refresh stay out of the fixture waves. |
-| Resource limits | Plaintext HTTP sizes for one refreshed segment exceed the charged allowance. TLS input, output, received-plaintext, and send buffers are recorded. Kernel receive and send buffers are measured on a loopback socket. | `workspace_bytes` stays null until those figures also cover every selected file. |
+| Resource limits | Plaintext HTTP sizes for one refreshed segment exceed the charged allowance. TLS input, output, received-plaintext, and send buffers are recorded. Kernel receive and send buffers are measured on a loopback socket. A grant records those figures and the per-file staging bound. | `workspace_bytes` stays null. The grant is not a transfer authorization. |
 | Xet download | Not started. Not next. | After one HTTPS revision restores with the hub unreachable, and only for a file the bridge cannot serve. Wrap `hf-xet`. Do not write a client. |
 | Cross-platform execution | CI runs the fixtures on Windows, macOS, and Linux. | Clean-machine qualification stays in M6 and M7. |
 | Opt-in live comparison | Not started. | One small public safetensors repository after the fixture waves. Still not a fetch command. |
 
-Until the resource-limit measurement and the multi-file fixture pass, workspace stays unknown and no command can authorize or perform a model transfer. The current CLI can initialize a vault and inspect sources independently.
+`workspace_bytes` stays null on plans, budgets, and kits. No command authorizes or performs a model transfer. A grant can record measured bounds for one review and is dropped when those bounds, the volume, or the policy change. The current CLI can initialize a vault and inspect sources independently.

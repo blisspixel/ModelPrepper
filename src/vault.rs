@@ -15,11 +15,13 @@ const PENDING: &str = ".modelprepper-volume.pending";
 
 #[path = "vault/adopt.rs"]
 mod adoption;
+mod grant;
 #[cfg(all(test, unix))]
 #[path = "vault/tests/ownership.rs"]
 mod ownership_tests;
 mod review;
 pub use adoption::{Adoption, Outcome, PROVENANCE_LOCAL_UPSTREAM, adopt};
+pub use grant::{Grant, current_grant, record_grant};
 pub use review::{Decision, Proposal, ProposalPage, decide, proposals, propose, show_proposal};
 #[cfg(test)]
 pub(crate) use review::{ProposalSummary, SourceReview};
@@ -246,7 +248,7 @@ fn open_catalog(config: &Config, create: bool) -> Result<Catalog> {
     let version: u32 = connection
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .map_err(db)?;
-    if (!new && !matches!(version, 1..=3)) || (new && version != 0) {
+    if (!new && !matches!(version, 1..=4)) || (new && version != 0) {
         return Err(Error::new(
             "unsupported_catalog_schema",
             "catalog schema is not supported",
@@ -309,6 +311,20 @@ fn open_catalog(config: &Config, create: bool) -> Result<Catalog> {
                 manifest TEXT NOT NULL
             );
             PRAGMA user_version=3;
+            COMMIT;",
+            )
+            .map_err(db)?;
+    }
+    if version < 4 {
+        connection
+            .execute_batch(
+                "BEGIN IMMEDIATE;
+            CREATE TABLE IF NOT EXISTS grants (
+                plan_id TEXT PRIMARY KEY CHECK(length(plan_id)=64),
+                document TEXT NOT NULL,
+                recorded_at INTEGER NOT NULL DEFAULT (unixepoch())
+            );
+            PRAGMA user_version=4;
             COMMIT;",
             )
             .map_err(db)?;
