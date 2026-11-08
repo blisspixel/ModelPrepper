@@ -357,7 +357,7 @@ pub enum PreviewCommand {
         #[arg(long)]
         kit: PathBuf,
     },
-    /// Preview, store, or list a shared list of repositories. Nothing is downloaded.
+    /// Preview, store, list, or remove a shared list of repositories. Nothing is downloaded.
     Collection {
         #[command(subcommand)]
         command: CollectionAction,
@@ -409,6 +409,15 @@ pub enum CollectionAction {
         #[arg(long)]
         config: PathBuf,
         /// Collection name from the file.
+        #[arg(long)]
+        name: String,
+    },
+    /// Delete one stored list. Archived revisions stay.
+    Remove {
+        /// Path to the vault configuration file.
+        #[arg(long)]
+        config: PathBuf,
+        /// Collection name to delete from the catalog.
         #[arg(long)]
         name: String,
     },
@@ -739,6 +748,12 @@ pub(crate) fn execute_with(
             }
             CollectionAction::Show { config, name } => {
                 let report = crate::collection::show(&located_config(&config)?, &name)?;
+                show(&view, &report, true, |report| {
+                    crate::present::render_collection(report, view.color, view.columns)
+                })
+            }
+            CollectionAction::Remove { config, name } => {
+                let report = crate::collection::remove(&located_config(&config)?, &name)?;
                 show(&view, &report, true, |report| {
                     crate::present::render_collection(report, view.color, view.columns)
                 })

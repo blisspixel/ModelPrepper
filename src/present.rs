@@ -761,6 +761,7 @@ pub fn render_collection(
         match report.action {
             "stored" => "stored",
             "show" => "shown",
+            "removed" => "removed",
             _ => "preview",
         }
     };
@@ -854,6 +855,7 @@ pub fn render_collection(
     lines.push(field(columns, "approval", "still blocked"));
     let next = match (report.supported, report.action) {
         (false, "store") => "this schema is not stored",
+        (true, "removed") => "archived revisions stay",
         (true, "stored" | "show") => "this list is not resolved or downloaded",
         _ => "this preview does not download or resolve",
     };

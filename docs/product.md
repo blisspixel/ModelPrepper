@@ -46,7 +46,7 @@ Adding a watch does not approve every future revision. Approval rules constrain 
 
 A collection names a user-maintained group, such as "offline coding" or "speech tools," and may set a replica target.
 
-Shared collection definitions are inspectable data. `collection preview` lists those entries and does not resolve them or download them. `collection store` writes that parsed list into the catalog and `collection show` reads it back. `collection list` pages the stored names in name order and does not rank them. Storing does not apply the recorded fields or delete archived revisions. A representation name on an entry is recorded and not applied. Category names and a category ceiling are recorded and the ceiling is not charged. An evaluation attribution is recorded and not ranked. An evidence statement is recorded and not checked. A provenance statement is recorded and not verified. A declared base is recorded and is not treated as preserved. A repeated declared base is listed and not merged. Each installation still has to resolve current source and license evidence itself.
+Shared collection definitions are inspectable data. `collection preview` lists those entries and does not resolve them or download them. `collection store` writes that parsed list into the catalog and `collection show` reads it back. `collection list` pages the stored names in name order and does not rank them. `collection remove` deletes that stored name and does not delete archived revisions. Storing does not apply the recorded fields or delete archived revisions. A representation name on an entry is recorded and not applied. Category names and a category ceiling are recorded and the ceiling is not charged. An evaluation attribution is recorded and not ranked. An evidence statement is recorded and not checked. A provenance statement is recorded and not verified. A declared base is recorded and is not treated as preserved. A repeated declared base is listed and not merged. Each installation still has to resolve current source and license evidence itself.
 
 ### Optional discovery
 
@@ -85,7 +85,7 @@ Text and JSON come first. A local web UI comes after the stable CLI. No remote d
 
 The first release supports local catalogs, mounted volumes, one writer, explicit watches, preservation bundles, verification, replicas, recovery, and native scheduling. Build order is the wave list in the [roadmap](roadmap.md). `watch` can fetch one granted revision on an operator-invoked pass. `schedule` can preview a weekly timer for that pass and install it only after the preview digest matches. A live scheduler was not enabled by the fixture.
 
-`collection preview` lists an explicit shared file, and `collection store` writes that list into the catalog. `collection list` pages the stored names and does not rank them. Discovery, ranking, MCP, a local UI, other sources, datasets, software releases, and runtime kits remain later. They consume the same contracts.
+`collection preview` lists an explicit shared file, and `collection store` writes that list into the catalog. `collection list` pages the stored names and does not rank them. `collection remove` deletes one stored name and does not delete archived revisions. Discovery, ranking, MCP, a local UI, other sources, datasets, software releases, and runtime kits remain later. They consume the same contracts.
 
 Public hosting, distributed write access, inference serving, and a mirror of the entire hub are outside the initial scope.
 

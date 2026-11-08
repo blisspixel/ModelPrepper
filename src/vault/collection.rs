@@ -1,4 +1,4 @@
-//! Catalog rows for one shared list. Writing them does not download or apply the list.
+//! Catalog rows for one shared list. Writing or removing them does not download or apply the list.
 use super::{db, open_catalog};
 use crate::collection::{
     CategoryCeiling, CollectionEntry, CollectionReport, CollectionSummary, EvaluationAttribution,
@@ -110,10 +110,29 @@ pub(crate) fn list_collections(
     rows.collect::<std::result::Result<Vec<_>, _>>().map_err(db)
 }
 
+pub(crate) fn remove_collection(config: &Config, name: &str) -> Result<CollectionReport> {
+    let mut catalog = open_catalog(config, false)?;
+    let transaction = catalog
+        .db
+        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+        .map_err(db)?;
+    let mut report = load_collection(&transaction, name)?;
+    transaction
+        .execute("DELETE FROM collections WHERE name = ?1", params![name])
+        .map_err(db)?;
+    transaction.commit().map_err(db)?;
+    report.action = "removed";
+    report.vault_mutated = true;
+    Ok(report)
+}
+
 pub(crate) fn read_collection(config: &Config, name: &str) -> Result<CollectionReport> {
     let catalog = open_catalog(config, false)?;
-    let replica = catalog
-        .db
+    load_collection(&catalog.db, name)
+}
+
+fn load_collection(connection: &rusqlite::Connection, name: &str) -> Result<CollectionReport> {
+    let replica = connection
         .query_row(
             "SELECT replica FROM collections WHERE name = ?1",
             params![name],
@@ -127,8 +146,7 @@ pub(crate) fn read_collection(config: &Config, name: &str) -> Result<CollectionR
             "that collection name is not in the catalog",
         ));
     };
-    let mut ceilings = catalog
-        .db
+    let mut ceilings = connection
         .prepare("SELECT category, bytes FROM collection_ceilings WHERE name = ?1 ORDER BY ordinal")
         .map_err(db)?;
     let ceilings = ceilings
@@ -142,8 +160,7 @@ pub(crate) fn read_collection(config: &Config, name: &str) -> Result<CollectionR
         .map_err(db)?
         .collect::<std::result::Result<Vec<_>, _>>()
         .map_err(db)?;
-    let mut entries = catalog
-        .db
+    let mut entries = connection
         .prepare(
             "SELECT e.position, e.repo_id, e.revision, e.note, e.representation, e.base_repo,
                     e.base_revision, e.evaluation_source, e.evaluation_name, e.evaluation_value,
