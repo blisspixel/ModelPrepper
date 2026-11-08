@@ -365,6 +365,216 @@ pub fn custody(config: &crate::Config, name: &str) -> Result<CollectionCustody> 
 }
 
 #[derive(Debug, PartialEq, Eq, Serialize)]
+pub struct CollectionSelection {
+    pub schema_version: u32,
+    pub action: &'static str,
+    pub supported: bool,
+    pub name: String,
+    pub evaluation_source: Option<String>,
+    pub evaluation_name: Option<String>,
+    pub evaluation_value: Option<String>,
+    pub category: Option<String>,
+    pub representation: Option<String>,
+    /// Matching entries in stored order. This is not a rank.
+    pub matches: Vec<CollectionEntry>,
+    pub ranked: bool,
+    pub transfer_authorized: bool,
+    pub network_contact: bool,
+    pub vault_mutated: bool,
+    pub downloads_started: bool,
+    pub workspace_bytes: Option<u64>,
+}
+
+/// Keep stored entries whose written text matches every named constraint.
+///
+/// `evaluation_value` is exact text, not a score. An unknown schema does not open the catalog.
+pub fn select(config: &crate::Config, name: &str, text: &str) -> Result<CollectionSelection> {
+    check_text(name, 1, MAX_NAME, "name")?;
+    let table: toml::Table =
+        toml::from_str(text).map_err(|error| Error::new("invalid_selection", error.to_string()))?;
+    if table
+        .get("schema_version")
+        .and_then(toml::Value::as_integer)
+        != Some(1)
+    {
+        return Ok(empty_selection(false, name));
+    }
+    let constraints = selection_constraints(&table)?;
+    let stored = show(config, name)?;
+    let matches = stored
+        .entries
+        .into_iter()
+        .filter(|entry| selection_matches(entry, &constraints))
+        .collect();
+    Ok(CollectionSelection {
+        schema_version: 1,
+        action: "selected",
+        supported: true,
+        name: stored.name,
+        evaluation_source: constraints.evaluation_source,
+        evaluation_name: constraints.evaluation_name,
+        evaluation_value: constraints.evaluation_value,
+        category: constraints.category,
+        representation: constraints.representation,
+        matches,
+        ranked: false,
+        transfer_authorized: false,
+        network_contact: false,
+        vault_mutated: false,
+        downloads_started: false,
+        workspace_bytes: None,
+    })
+}
+
+struct SelectionConstraints {
+    evaluation_source: Option<String>,
+    evaluation_name: Option<String>,
+    evaluation_value: Option<String>,
+    category: Option<String>,
+    representation: Option<String>,
+}
+
+fn empty_selection(supported: bool, name: &str) -> CollectionSelection {
+    CollectionSelection {
+        schema_version: 1,
+        action: "selected",
+        supported,
+        name: if supported {
+            name.to_string()
+        } else {
+            String::new()
+        },
+        evaluation_source: None,
+        evaluation_name: None,
+        evaluation_value: None,
+        category: None,
+        representation: None,
+        matches: Vec::new(),
+        ranked: false,
+        transfer_authorized: false,
+        network_contact: false,
+        vault_mutated: false,
+        downloads_started: false,
+        workspace_bytes: None,
+    }
+}
+
+fn selection_constraints(table: &toml::Table) -> Result<SelectionConstraints> {
+    for key in table.keys() {
+        if !matches!(
+            key.as_str(),
+            "schema_version"
+                | "evaluation_source"
+                | "evaluation_name"
+                | "evaluation_value"
+                | "category"
+                | "representation"
+        ) {
+            return Err(Error::new(
+                "invalid_selection",
+                format!("unknown field {key}"),
+            ));
+        }
+    }
+    let evaluation_source = selection_text(table, "evaluation_source")?;
+    let evaluation_name = selection_text(table, "evaluation_name")?;
+    let evaluation_value = selection_text(table, "evaluation_value")?;
+    let category = selection_text(table, "category")?;
+    let representation = selection_text(table, "representation")?;
+    if let Some(category) = &category
+        && !CATEGORIES.contains(&category.as_str())
+    {
+        return Err(Error::new(
+            "invalid_selection",
+            format!("unknown category {category}"),
+        ));
+    }
+    if let Some(representation) = &representation
+        && !REPRESENTATIONS.contains(&representation.as_str())
+    {
+        return Err(Error::new(
+            "invalid_selection",
+            format!("unknown representation {representation}"),
+        ));
+    }
+    if evaluation_source.is_none()
+        && evaluation_name.is_none()
+        && evaluation_value.is_none()
+        && category.is_none()
+        && representation.is_none()
+    {
+        return Err(Error::new(
+            "invalid_selection",
+            "name a category, representation, or evaluation field",
+        ));
+    }
+    Ok(SelectionConstraints {
+        evaluation_source,
+        evaluation_name,
+        evaluation_value,
+        category,
+        representation,
+    })
+}
+
+fn selection_text(table: &toml::Table, key: &str) -> Result<Option<String>> {
+    match table.get(key) {
+        None => Ok(None),
+        Some(toml::Value::String(value)) => {
+            check_text(value, 1, MAX_NAME, key).map_err(|_| {
+                Error::new(
+                    "invalid_selection",
+                    format!("{key} must be 1 to {MAX_NAME} characters without control characters"),
+                )
+            })?;
+            Ok(Some(value.clone()))
+        }
+        Some(_) => Err(Error::new(
+            "invalid_selection",
+            format!("{key} must be a string"),
+        )),
+    }
+}
+
+fn selection_matches(entry: &CollectionEntry, constraints: &SelectionConstraints) -> bool {
+    if let Some(source) = &constraints.evaluation_source {
+        let Some(evaluation) = &entry.evaluation else {
+            return false;
+        };
+        if evaluation.source != *source {
+            return false;
+        }
+    }
+    if let Some(name) = &constraints.evaluation_name {
+        let Some(evaluation) = &entry.evaluation else {
+            return false;
+        };
+        if evaluation.name != *name {
+            return false;
+        }
+    }
+    if let Some(value) = &constraints.evaluation_value {
+        let Some(evaluation) = &entry.evaluation else {
+            return false;
+        };
+        if evaluation.value != *value {
+            return false;
+        }
+    }
+    if let Some(category) = &constraints.category
+        && !entry.categories.iter().any(|item| item == category)
+    {
+        return false;
+    }
+    if let Some(representation) = &constraints.representation
+        && entry.representation.as_deref() != Some(representation)
+    {
+        return false;
+    }
+    true
+}
+
+#[derive(Debug, PartialEq, Eq, Serialize)]
 pub struct CollectionExport {
     pub schema_version: u32,
     pub action: &'static str,
@@ -3235,5 +3445,163 @@ base_revision = "abcdef0123456789abcdef0123456789abcdef01"
                 .join("catalog.sqlite3")
                 .exists()
         );
+    }
+
+    #[test]
+    fn an_exact_text_selection_keeps_stored_order_and_does_not_rank() {
+        let (_dir, config, config_path) = ready();
+        store(
+            &config,
+            "schema_version = 1\nname = \"picked\"\n[[entries]]\nrepo_id = \"example/model\"\nrevision = \"main\"\ncategories = [\"coding\"]\nrepresentation = \"original-required\"\nevaluation_source = \"card\"\nevaluation_name = \"note\"\nevaluation_value = \"10\"\n[[entries]]\nrepo_id = \"example/other\"\nrevision = \"main\"\ncategories = [\"coding\", \"text\"]\nevaluation_source = \"card\"\nevaluation_name = \"note\"\nevaluation_value = \"2\"\n[[entries]]\nrepo_id = \"example/third\"\nrevision = \"main\"\ncategories = [\"text\"]\nevaluation_source = \"card\"\nevaluation_name = \"note\"\nevaluation_value = \"100\"\n[[entries]]\nrepo_id = \"example/bare\"\nrevision = \"main\"\n",
+        )
+        .unwrap();
+        let before = rows(&config, "collection_entries");
+        let coding = select(
+            &config,
+            "picked",
+            "schema_version = 1\ncategory = \"coding\"\n",
+        )
+        .unwrap();
+        assert!(coding.supported);
+        assert!(!coding.ranked);
+        assert!(!coding.vault_mutated);
+        assert!(coding.workspace_bytes.is_none());
+        assert_eq!(
+            coding
+                .matches
+                .iter()
+                .map(|entry| entry.repo_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["example/model", "example/other"]
+        );
+        assert!(coding.matches.iter().all(|entry| {
+            entry
+                .evaluation
+                .as_ref()
+                .is_none_or(|evaluation| !evaluation.ranked)
+        }));
+        let ten = select(
+            &config,
+            "picked",
+            "schema_version = 1\nevaluation_value = \"10\"\n",
+        )
+        .unwrap();
+        assert_eq!(ten.matches.len(), 1);
+        assert_eq!(ten.matches[0].repo_id, "example/model");
+        let hundred = select(
+            &config,
+            "picked",
+            "schema_version = 1\nevaluation_value = \"100\"\n",
+        )
+        .unwrap();
+        assert_eq!(hundred.matches[0].repo_id, "example/third");
+        let both = select(
+            &config,
+            "picked",
+            "schema_version = 1\ncategory = \"coding\"\nevaluation_value = \"2\"\n",
+        )
+        .unwrap();
+        assert_eq!(both.matches.len(), 1);
+        assert_eq!(both.matches[0].repo_id, "example/other");
+        let none = select(
+            &config,
+            "picked",
+            "schema_version = 1\nrepresentation = \"selected-derivative\"\n",
+        )
+        .unwrap();
+        assert!(none.matches.is_empty());
+        let text = crate::present::render_collection_selection(&coding, false, 80);
+        assert!(text.contains("selected"), "{text}");
+        assert!(text.contains("example/model"), "{text}");
+        assert!(text.contains("not a rank"), "{text}");
+        assert!(
+            text.lines().all(|line| line.chars().count() <= 80),
+            "{text}"
+        );
+        let empty_text = crate::present::render_collection_selection(&none, false, 80);
+        assert!(empty_text.contains("none"), "{empty_text}");
+        assert_eq!(rows(&config, "collection_entries"), before);
+        assert_eq!(show(&config, "picked").unwrap().entries.len(), 4);
+
+        let path = config_path.parent().unwrap().join("select.toml");
+        std::fs::write(&path, "schema_version = 1\nevaluation_value = \"2\"\n").unwrap();
+        let command = crate::cli::Cli::try_parse_from([
+            "modelprepper",
+            "collection",
+            "select",
+            "--config",
+            config_path.to_str().unwrap(),
+            "--name",
+            "picked",
+            "--file",
+            path.to_str().unwrap(),
+        ])
+        .unwrap();
+        let output = crate::cli::execute_in(command, crate::cli::View::piped()).unwrap();
+        let crate::cli::CommandOutput::Json(value) = output else {
+            panic!("select is json when stdout is a pipe");
+        };
+        assert_eq!(value["action"], "selected");
+        assert_eq!(value["ranked"], false);
+        assert_eq!(value["matches"][0]["repo_id"], "example/other");
+        assert_eq!(value["matches"][0]["evaluation"]["ranked"], false);
+        assert!(value["workspace_bytes"].is_null());
+        assert_eq!(value["vault_mutated"], false);
+
+        assert_eq!(
+            select(
+                &config,
+                "picked",
+                "schema_version = 1\ncategory = \"reasoning\"\n"
+            )
+            .unwrap_err()
+            .code,
+            "invalid_selection"
+        );
+        assert_eq!(
+            select(&config, "picked", "schema_version = 1\n")
+                .unwrap_err()
+                .code,
+            "invalid_selection"
+        );
+        assert_eq!(
+            select(
+                &config,
+                "missing",
+                "schema_version = 1\ncategory = \"coding\"\n"
+            )
+            .unwrap_err()
+            .code,
+            "collection_not_stored"
+        );
+        let unsupported = select(&config, "picked", "[1]\n").unwrap();
+        assert!(!unsupported.supported);
+        assert!(unsupported.matches.is_empty());
+        let unsupported_text = crate::present::render_collection_selection(&unsupported, false, 80);
+        assert!(
+            unsupported_text.contains("unsupported"),
+            "{unsupported_text}"
+        );
+        assert!(
+            unsupported_text.contains("this schema is not selected"),
+            "{unsupported_text}"
+        );
+        let unready = tempfile::tempdir().unwrap();
+        let root = std::fs::canonicalize(unready.path()).unwrap();
+        std::fs::create_dir_all(root.join("catalog")).unwrap();
+        std::fs::create_dir_all(root.join("models")).unwrap();
+        let missing = crate::Config::default_for(root.join("catalog"), root.join("models"));
+        assert!(!select(&missing, "picked", "[1]\n").unwrap().supported);
+        assert_eq!(
+            select(
+                &missing,
+                "picked",
+                "schema_version = 1\ncategory = \"nope\"\n"
+            )
+            .unwrap_err()
+            .code,
+            "invalid_selection"
+        );
+        assert!(!root.join("catalog").join("catalog.sqlite3").exists());
     }
 }

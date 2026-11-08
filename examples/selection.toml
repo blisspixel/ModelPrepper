@@ -1,0 +1,4 @@
+# Exact text selection. evaluation_value is not a score, and this file does not rank entries.
+schema_version = 1
+category = "coding"
+evaluation_value = "stated"
