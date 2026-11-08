@@ -59,6 +59,30 @@ fn bounded_http_follows_only_allowed_redirects_and_preserves_exact_bytes() {
 }
 
 #[test]
+fn a_ranged_get_does_not_send_accept_encoding() {
+    let server = Server::new(vec![response(
+        206,
+        "Content-Range: bytes 0-2/3\r\n",
+        b"abc",
+    )]);
+    let response = Http::fixture(&server.origin)
+        .open(&Url::parse(&server.origin).unwrap(), Some((0, 2)))
+        .unwrap();
+    assert_eq!(response.status().as_u16(), 206);
+    drop(response);
+    let request = server.finish().remove(0).to_ascii_lowercase();
+    assert!(request.contains("range: bytes=0-2"));
+    assert!(!request.contains("accept-encoding"));
+}
+
+#[test]
+fn the_agent_records_the_tls_buffer_sizes() {
+    assert!(crate::buffers::http_agent_matches_recorded_buffers(
+        &Http::default()
+    ));
+}
+
+#[test]
 fn http_errors_do_not_disclose_signed_urls() {
     for (reply, limit, code) in [
         (response(403, "", b"secret"), 10, "source_status"),

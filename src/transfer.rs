@@ -5,6 +5,7 @@
 //! that location is not requested, and the refresh does not change identity.
 use crate::{
     Error, Result,
+    buffers::APPLICATION_READ_BYTES,
     http::Http,
     integrity::verify_reader,
     inventory::{HashAlgorithm, Source, SourceFile},
@@ -20,6 +21,10 @@ use std::{
 use url::Url;
 
 mod session;
+pub use crate::buffers::{
+    KernelSocketBuffers, RecordedTransferBuffers, http_agent_matches_recorded_buffers,
+    measure_kernel_socket_buffers, recorded_transfer_buffers,
+};
 pub use session::{StagingSession, staging_workspace_bound};
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -258,7 +263,7 @@ fn stage_with(
         let result = (|| {
             let mut reader = response.body_mut().as_reader();
             let mut left = count;
-            let mut buffer = [0; 64 * 1024];
+            let mut buffer = [0; APPLICATION_READ_BYTES];
             while left > 0 {
                 let requested = left.min(buffer.len() as u64) as usize;
                 let bytes = reader.read(&mut buffer[..requested]).map_err(|_| {
