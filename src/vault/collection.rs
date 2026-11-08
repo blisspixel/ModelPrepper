@@ -145,7 +145,7 @@ pub(crate) fn custody_matches(
     let mut statement = catalog
         .db
         .prepare(
-            "SELECT provenance, manifest FROM custody
+            "SELECT plan_id, provenance, manifest FROM custody
              WHERE repo_id = ?1 AND resolved_revision = ?2
              ORDER BY plan_id",
         )
@@ -154,16 +154,22 @@ pub(crate) fn custody_matches(
     for entry in &stored.entries {
         let rows = statement
             .query_map(params![entry.repo_id, entry.revision], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
             })
             .map_err(db)?;
+        let mut plan_ids = Vec::new();
         let mut provenances = Vec::new();
         let mut totals = Vec::new();
         let mut measurable = true;
         let mut custody_rows = 0u64;
         for row in rows {
-            let (provenance, manifest) = row.map_err(db)?;
+            let (plan_id, provenance, manifest) = row.map_err(db)?;
             custody_rows += 1;
+            plan_ids.push(plan_id);
             if !provenances.contains(&provenance) {
                 provenances.push(provenance);
             }
@@ -185,6 +191,7 @@ pub(crate) fn custody_matches(
             revision: entry.revision.clone(),
             custody_rows,
             provenances,
+            plan_ids,
             revision_shape: revision_shape(&entry.revision),
             measured_bytes,
             charged: false,

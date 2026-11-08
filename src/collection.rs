@@ -254,6 +254,8 @@ pub struct CollectionCustodyEntry {
     pub custody_rows: u64,
     /// Distinct provenance strings on those rows, in plan id order. Not rechecked.
     pub provenances: Vec<String>,
+    /// Custody plan ids in plan id order. Listing an id does not drop or merge that plan.
+    pub plan_ids: Vec<String>,
     /// `commit` for 40 lowercase hex characters. `name` for any other accepted revision.
     /// The label is not a publisher resolution.
     pub revision_shape: &'static str,
@@ -332,7 +334,8 @@ pub(crate) fn charge_ceilings(
         .collect()
 }
 
-/// Count custody rows that match one stored list. Nothing is hashed or downloaded.
+/// Count custody rows that match one stored list and name their plan ids.
+/// Nothing is dropped, merged, hashed, or downloaded.
 pub fn custody(config: &crate::Config, name: &str) -> Result<CollectionCustody> {
     check_text(name, 1, MAX_NAME, "name")?;
     let (stored, mut entries) = crate::vault::custody_matches(config, name)?;
@@ -2757,6 +2760,10 @@ base_revision = \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"
         assert_eq!(noted.entries[0].measured_bytes, None);
         assert_eq!(noted.entries[0].custody_rows, 3);
         assert_eq!(
+            noted.entries[0].plan_ids,
+            vec!["a".repeat(64), "b".repeat(64), "c".repeat(64)]
+        );
+        assert_eq!(
             noted.entries[0].provenances,
             vec![
                 "upstream-verified (ranged https)".to_string(),
@@ -2767,6 +2774,7 @@ base_revision = \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"
         assert_eq!(noted.entries[1].revision_shape, "name");
         assert_eq!(noted.entries[1].measured_bytes, None);
         assert_eq!(noted.entries[1].custody_rows, 0);
+        assert!(noted.entries[1].plan_ids.is_empty());
         assert!(noted.entries[1].provenances.is_empty());
         assert_eq!(noted.entries[2].repo_id, "example/other");
         assert_eq!(noted.entries[2].revision_shape, "commit");
@@ -2794,9 +2802,18 @@ base_revision = \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"
         );
         assert!(wide.contains("measured unavailable"), "{wide}");
         assert!(wide.contains("not charged"), "{wide}");
+        assert!(
+            wide.contains(&format!("{}  not dropped", "a".repeat(64))),
+            "{wide}"
+        );
+        assert!(!wide.contains(&"e".repeat(64)), "{wide}");
         let sized = custody(&config, "sized").unwrap();
         assert_eq!(sized.entries[0].measured_bytes, Some(120));
         assert_eq!(sized.entries[0].custody_rows, 2);
+        assert_eq!(
+            sized.entries[0].plan_ids,
+            vec!["f".repeat(64), "g".repeat(64)]
+        );
         assert_eq!(sized.entries[0].revision_shape, "commit");
         assert_eq!(sized.entries[1].measured_bytes, None);
         assert_eq!(sized.entries[1].custody_rows, 2);
@@ -2850,6 +2867,14 @@ base_revision = \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"
         assert_eq!(value["provenance_verified"], false);
         assert_eq!(value["evidence_checked"], false);
         assert_eq!(value["entries"][0]["custody_rows"], 3);
+        assert_eq!(value["entries"][0]["plan_ids"][0], "a".repeat(64));
+        assert_eq!(value["entries"][0]["plan_ids"][2], "c".repeat(64));
+        assert!(
+            value["entries"][1]["plan_ids"]
+                .as_array()
+                .unwrap()
+                .is_empty()
+        );
         assert_eq!(value["entries"][0]["revision_shape"], "commit");
         assert!(value["entries"][0]["measured_bytes"].is_null());
         assert_eq!(value["entries"][0]["charged"], false);
