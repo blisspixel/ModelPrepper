@@ -179,11 +179,7 @@ pub(crate) fn replica_with(
         adoption::sync_dir(parent)?;
     }
     for file in &files {
-        copy_hashed(
-            &crate::verify::local_path(&source, &file.path),
-            &crate::verify::local_path(&staging, &file.path),
-            file,
-        )?;
+        copy_hashed(&source, &staging, file)?;
     }
     copy_bytes(&source.join(BUNDLE_NAME), &staging.join(BUNDLE_NAME))?;
     adoption::sync_dir(&staging)?;
@@ -335,14 +331,22 @@ pub fn import_baseline(
     }
     let mut files = Vec::with_capacity(names.len());
     for name in names {
-        let path = crate::verify::local_path(&source, &name);
-        let meta = fs::symlink_metadata(&path).map_err(super::io)?;
-        if linked(&meta) || !meta.is_file() {
+        let meta = match crate::verify::metadata_nofollow(&source, &name)? {
+            Some(meta) => meta,
+            None => {
+                return Err(Error::new(
+                    "unsafe_path",
+                    "a local baseline contains a non-regular file",
+                ));
+            }
+        };
+        if !meta.is_file() {
             return Err(Error::new(
                 "unsafe_path",
                 "a local baseline contains a non-regular file",
             ));
         }
+        let path = crate::verify::local_path(&source, &name);
         let hashed = crate::integrity::hash_exact(
             File::open(&path).map_err(super::io)?,
             meta.len(),
@@ -402,11 +406,7 @@ pub fn import_baseline(
         adoption::sync_dir(parent)?;
     }
     for file in &files {
-        copy_hashed(
-            &crate::verify::local_path(&source, &file.path),
-            &crate::verify::local_path(&staging, &file.path),
-            file,
-        )?;
+        copy_hashed(&source, &staging, file)?;
     }
     write_baseline_bundle(&staging, &plan_id, &repo, revision, &files)?;
     if let Some(parent) = published.parent() {
@@ -651,12 +651,12 @@ fn sealed_status(directory: &Path, file: &ManifestFile) -> &'static str {
         return "mismatch";
     }
     let path = crate::verify::local_path(directory, &file.path);
-    match hash_file(&path, file) {
+    match hash_file(directory, file) {
         Ok(()) => "match",
         Err(error) if error.code == "hash_mismatch" && fs::symlink_metadata(&path).is_err() => {
             "missing"
         }
-        Err(error) if error.code == "hash_mismatch" => "mismatch",
+        Err(error) if error.code == "hash_mismatch" || error.code == "unsafe_path" => "mismatch",
         Err(_) => "unreadable",
     }
 }
@@ -753,14 +753,7 @@ fn find_bundles(preserved: &Path, label: &str, damaged: &mut Vec<String>) -> Res
 fn sweep(root: &Path, files: &[ManifestFile]) -> Result<u64> {
     let mut total = 0_u64;
     for file in files {
-        if !safe_relative(&file.path) {
-            return Err(Error::new(
-                "hash_mismatch",
-                format!("{} hash_mismatch", file.path),
-            ));
-        }
-        let path = crate::verify::local_path(root, &file.path);
-        hash_file(&path, file)?;
+        hash_file(root, file)?;
         total = total
             .checked_add(file.size_bytes)
             .ok_or_else(|| Error::new("size_overflow", "sealed size exceeds u64 capacity"))?;
@@ -768,24 +761,32 @@ fn sweep(root: &Path, files: &[ManifestFile]) -> Result<u64> {
     Ok(total)
 }
 
-fn hash_file(path: &Path, file: &ManifestFile) -> Result<()> {
-    let meta = match fs::symlink_metadata(path) {
-        Ok(meta) => meta,
-        Err(_) => {
+fn hash_file(root: &Path, file: &ManifestFile) -> Result<()> {
+    if !safe_relative(&file.path) {
+        return Err(Error::new(
+            "hash_mismatch",
+            format!("{} hash_mismatch", file.path),
+        ));
+    }
+    // Walk every component. A directory symlink must not make the hash read outside the tree.
+    let meta = match crate::verify::metadata_nofollow(root, &file.path)? {
+        Some(meta) => meta,
+        None => {
             return Err(Error::new(
                 "hash_mismatch",
                 format!("{} hash_mismatch", file.path),
             ));
         }
     };
-    if linked(&meta) || !meta.is_file() || meta.len() != file.size_bytes {
+    if !meta.is_file() || meta.len() != file.size_bytes {
         return Err(Error::new(
             "hash_mismatch",
             format!("{} hash_mismatch", file.path),
         ));
     }
+    let path = crate::verify::local_path(root, &file.path);
     let hashed = crate::integrity::hash_exact(
-        File::open(path).map_err(super::io)?,
+        File::open(&path).map_err(super::io)?,
         file.size_bytes,
         |_| {},
     )?;
@@ -798,12 +799,22 @@ fn hash_file(path: &Path, file: &ManifestFile) -> Result<()> {
     Ok(())
 }
 
-fn copy_hashed(from: &Path, to: &Path, file: &ManifestFile) -> Result<()> {
-    if hash_file(to, file).is_ok() {
+fn copy_hashed(from_root: &Path, to_root: &Path, file: &ManifestFile) -> Result<()> {
+    if hash_file(to_root, file).is_ok() {
         return Ok(());
     }
+    // Any walk error, including a directory symlink, stops the copy. A later open must not follow it.
+    crate::verify::metadata_nofollow(to_root, &file.path)?;
+    if crate::verify::metadata_nofollow(from_root, &file.path)?.is_none() {
+        return Err(Error::new(
+            "hash_mismatch",
+            format!("{} hash_mismatch", file.path),
+        ));
+    }
+    let to = crate::verify::local_path(to_root, &file.path);
+    let from = crate::verify::local_path(from_root, &file.path);
     if to.exists() {
-        fs::remove_file(to).map_err(super::io)?;
+        fs::remove_file(&to).map_err(super::io)?;
     }
     if let Some(parent) = to.parent() {
         fs::create_dir_all(parent).map_err(super::io)?;
@@ -813,7 +824,7 @@ fn copy_hashed(from: &Path, to: &Path, file: &ManifestFile) -> Result<()> {
     if partial.exists() {
         fs::remove_file(&partial).map_err(super::io)?;
     }
-    let mut input = File::open(from).map_err(super::io)?;
+    let mut input = File::open(&from).map_err(super::io)?;
     let mut output = OpenOptions::new()
         .write(true)
         .create_new(true)
@@ -847,11 +858,11 @@ fn copy_hashed(from: &Path, to: &Path, file: &ManifestFile) -> Result<()> {
     }
     output.sync_all().map_err(super::io)?;
     drop(output);
-    fs::rename(&partial, to).map_err(super::io)?;
+    fs::rename(&partial, &to).map_err(super::io)?;
     if let Some(parent) = to.parent() {
         adoption::sync_dir(parent)?;
     }
-    hash_file(to, file)
+    hash_file(to_root, file)
 }
 
 fn copy_bytes(from: &Path, to: &Path) -> Result<()> {

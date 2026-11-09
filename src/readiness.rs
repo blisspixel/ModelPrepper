@@ -748,7 +748,7 @@ fn inspect_retained(
         return Ok(finding);
     }
     let hashed = hash_exact(
-        File::open(root.join(&file.path))
+        File::open(verify::local_path(root, &file.path))
             .map_err(|error| Error::new("input_read_failed", format!("{}: {error}", file.path)))?,
         declared,
         |_| {},

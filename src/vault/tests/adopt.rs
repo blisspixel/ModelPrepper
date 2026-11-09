@@ -536,6 +536,28 @@ fn linked_evidence_and_retry_ancestors_are_not_followed() {
     );
 }
 
+#[test]
+fn manifest_does_not_hash_through_a_linked_ancestor() {
+    let dir = TempDir::new().unwrap();
+    let root = fs::canonicalize(dir.path()).unwrap();
+    let outside = root.join("outside");
+    fs::create_dir(&outside).unwrap();
+    let bytes = b"outside weights";
+    fs::write(outside.join("model.safetensors"), bytes).unwrap();
+    let published = root.join("published");
+    fs::create_dir(&published).unwrap();
+    point_directory(&published.join("nested"), &outside);
+    let file = source_file(
+        "nested/model.safetensors",
+        bytes,
+        Role::Weight,
+        HashAlgorithm::Sha256,
+    );
+    let error = super::manifest_from_tree(&published, &[file]).unwrap_err();
+    assert_eq!(error.code, "unsafe_path");
+    assert_eq!(fs::read(outside.join("model.safetensors")).unwrap(), bytes);
+}
+
 #[cfg(windows)]
 #[test]
 fn retry_does_not_follow_windows_junctions() {

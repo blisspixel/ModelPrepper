@@ -657,10 +657,7 @@ fn replica_refuses_a_tree_that_is_not_the_sealed_revision() {
     #[cfg(unix)]
     {
         link(model.parent().unwrap().join("LICENSE").as_path(), &model);
-        failure(
-            replica(&config, &proposal.plan_id, "backup"),
-            "hash_mismatch",
-        );
+        failure(replica(&config, &proposal.plan_id, "backup"), "unsafe_path");
         fs::remove_file(&model).unwrap();
     }
     fs::write(&model, &model_bytes).unwrap();
@@ -1233,4 +1230,42 @@ fn one_sealed_plan_is_hashed_and_custody_is_not_rewritten() {
         text.lines().all(|line| line.chars().count() <= 80),
         "{text}"
     );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_linked_ancestor_is_not_hashed() {
+    let (_dir, config, _stage) = setup();
+    let plan = "ab".repeat(32);
+    let outside_dir = config.volumes[0].path.join("outside");
+    fs::create_dir(&outside_dir).unwrap();
+    let bytes = b"outside weights";
+    fs::write(outside_dir.join("weights.bin"), bytes).unwrap();
+    let hashed = crate::integrity::hash_exact(&bytes[..], bytes.len() as u64, |_| {}).unwrap();
+    let directory = config.volumes[0]
+        .path
+        .join("preserved")
+        .join("example")
+        .join("model")
+        .join(REVISION);
+    fs::create_dir_all(&directory).unwrap();
+    link(&outside_dir, &directory.join("nested"));
+    let manifest = format!(
+        r#"[{{"path":"nested/weights.bin","sha256":"{}","size_bytes":{}}}]"#,
+        hashed.sha256,
+        bytes.len()
+    );
+    let connection =
+        rusqlite::Connection::open(config.catalog_path.join("catalog.sqlite3")).unwrap();
+    connection
+        .execute(
+            "INSERT INTO custody (plan_id, repo_id, resolved_revision, provenance, volume_label, relative_dir, manifest) VALUES (?1, 'example/model', ?2, 'upstream-verified (ranged https)', 'primary', 'preserved/example/model/rev', ?3)",
+            rusqlite::params![plan, REVISION, manifest],
+        )
+        .unwrap();
+    drop(connection);
+    let report = verify_sealed(&config, &plan).unwrap();
+    assert!(!report.matched);
+    assert_eq!(report.files[0].status, "mismatch");
+    assert_eq!(fs::read(outside_dir.join("weights.bin")).unwrap(), bytes);
 }
