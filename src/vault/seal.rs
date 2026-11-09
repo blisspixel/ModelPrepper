@@ -342,6 +342,7 @@ fn copy_and_publish(
     }
     let mut hashes = Vec::with_capacity(prepared.selected.len());
     for (index, file) in prepared.selected.iter().enumerate() {
+        crate::verify::metadata_nofollow(&prepared.copy_root, &file.path)?;
         let sha = copy_verified(
             &stage.payload_path(index),
             &crate::verify::local_path(&prepared.copy_root, &file.path),
@@ -591,6 +592,7 @@ fn copy_verified(from: &Path, to: &Path, file: &SourceFile) -> Result<String> {
 fn hash_selected(root: &Path, files: &[SourceFile]) -> Result<Vec<(String, u64, String)>> {
     let mut hashes = Vec::with_capacity(files.len());
     for file in files {
+        crate::verify::metadata_nofollow(root, &file.path)?;
         let path = crate::verify::local_path(root, &file.path);
         let Some(sha) = adoption::matched_sha256(&path, file)? else {
             return Err(conflict());

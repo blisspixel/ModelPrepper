@@ -322,6 +322,8 @@ fn copy_one(
     file: &SourceFile,
     progress: &mut dyn FnMut(&str, u64, u64),
 ) -> Result<()> {
+    verify::metadata_nofollow(source, &file.path)?;
+    verify::metadata_nofollow(staging, &file.path)?;
     let from = verify::local_path(source, &file.path);
     let to = verify::local_path(staging, &file.path);
     if let Some(parent) = to.parent() {
@@ -417,6 +419,8 @@ pub(crate) fn matched_sha256(path: &Path, file: &SourceFile) -> Result<Option<St
 pub(crate) fn manifest_from_tree(root: &Path, files: &[SourceFile]) -> Result<String> {
     let mut entries = Vec::new();
     for file in files {
+        // Refuse a directory symlink before the hash. The final component check cannot see it.
+        verify::metadata_nofollow(root, &file.path)?;
         let sha256 = matched_sha256(&verify::local_path(root, &file.path), file)?
             .ok_or_else(|| Error::new("hash_mismatch", format!("{} hash_mismatch", file.path)))?;
         entries.push(serde_json::json!({

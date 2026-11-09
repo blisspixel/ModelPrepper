@@ -1,9 +1,9 @@
 {
   "schema_version": 1,
-  "captured_at": "2026-11-09T01:17:19.068233+00:00",
+  "captured_at": "2026-11-09T01:50:29.741857+00:00",
   "platform": "Linux",
   "version": "modelprepper 0.1.0",
-  "source_digest": "cd2069fc6bf156ef65b7f34ed330b942f00a8953b4e13a0e30269a9cf4b9c764",
+  "source_digest": "f263fd3c5d3447f4011ee1d764f08f68fdac4acef59ff25c370b794b2f42eac8",
   "captures": [
     {
       "command": "modelprepper --help",
