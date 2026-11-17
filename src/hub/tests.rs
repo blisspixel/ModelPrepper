@@ -9,7 +9,7 @@ fn sibling(path: &str, bytes: &[u8]) -> Value {
     let mut git = Sha1::new();
     git.update(format!("blob {}\0", bytes.len()));
     git.update(bytes);
-    json!({"rfilename": path, "size": bytes.len(), "blobId": format!("{:x}", git.finalize())})
+    json!({"rfilename": path, "size": bytes.len(), "blobId": crate::integrity::hex(&git.finalize())})
 }
 
 fn document() -> (Value, Vec<u8>) {

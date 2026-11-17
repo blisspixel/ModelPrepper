@@ -4,7 +4,7 @@ ModelPrepper is an MIT-licensed Rust preservation utility under active developme
 
 ## Development
 
-Install Rust using the pinned rust-toolchain.toml. Node 24 or newer is used only for documentation checks.
+Install Rust using the pinned rust-toolchain.toml. Documentation checks support Node 24 or newer. Hosted CI installs Node 26.13.1 LTS.
 
 Native installer fixture tests and packaging use Python's standard library. Install Ruff 0.15.16 for those scripts' lint/format checks. Screenshot rendering separately uses optional Pillow. None is a product runtime dependency.
 

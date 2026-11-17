@@ -46,6 +46,7 @@ def render(name, command, output):
         Path("C:/Windows/Fonts/consola.ttf"),
         Path("/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf"),
         Path("/usr/share/fonts/liberation/LiberationMono-Regular.ttf"),
+        Path("/usr/share/fonts/liberation/LiberationMono-Regular.ttf"),
         Path("/System/Library/Fonts/Menlo.ttc"),
     ]
     font_path = next((p for p in fonts if p.exists()), None)

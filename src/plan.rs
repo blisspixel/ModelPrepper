@@ -81,7 +81,7 @@ pub struct GgufCandidate {
 }
 
 pub fn digest(bytes: &[u8]) -> String {
-    format!("{:x}", Sha256::digest(bytes))
+    crate::integrity::hex(&Sha256::digest(bytes))
 }
 
 /// A local inventory is untrusted input. This preview can never authorize a transfer.

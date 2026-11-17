@@ -87,7 +87,7 @@ fn prefix(file: &mut File, length: u64) -> Result<String> {
         hash.update(&buffer[..count]);
         left -= count as u64;
     }
-    Ok(format!("{:x}", hash.finalize()))
+    Ok(crate::integrity::hex(&hash.finalize()))
 }
 
 fn file_identity(source: &Source, expected: &SourceFile) -> Result<(String, String)> {
