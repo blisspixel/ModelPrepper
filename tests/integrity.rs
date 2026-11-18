@@ -1,19 +1,22 @@
+use modelprepper::plan::digest;
 use modelprepper::{
     integrity::verify_reader,
     inventory::{HashAlgorithm, Role, SourceFile, UpstreamHash},
     licenses,
 };
 use sha1::{Digest, Sha1};
-use sha2::Sha256;
 
 fn file(bytes: &[u8], algorithm: HashAlgorithm) -> SourceFile {
     let value = match algorithm {
-        HashAlgorithm::Sha256 => format!("{:x}", Sha256::digest(bytes)),
+        HashAlgorithm::Sha256 => digest(bytes),
         HashAlgorithm::GitSha1 => {
             let mut hash = Sha1::new();
             hash.update(format!("blob {}\0", bytes.len()));
             hash.update(bytes);
-            format!("{:x}", hash.finalize())
+            hash.finalize()
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect()
         }
     };
     SourceFile {
@@ -30,10 +33,7 @@ fn verifies_git_objects_lfs_and_empty_files_with_a_local_sha256() {
     for bytes in [b"".as_slice(), b"hello\n", &[42; 150_000]] {
         for algorithm in [HashAlgorithm::GitSha1, HashAlgorithm::Sha256] {
             let expected = file(bytes, algorithm);
-            assert_eq!(
-                verify_reader(bytes, &expected).unwrap(),
-                format!("{:x}", Sha256::digest(bytes))
-            );
+            assert_eq!(verify_reader(bytes, &expected).unwrap(), digest(bytes));
         }
     }
     // Known Git blob vector; raw SHA-1 of the file is different.

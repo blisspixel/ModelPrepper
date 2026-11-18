@@ -26,10 +26,10 @@ cargo audit
 cargo deny check
 ```
 
-Line and branch coverage use a separate pinned nightly toolchain because cargo-llvm-cov branch instrumentation is currently unstable. Release code remains pinned to Rust 1.99.1.
+Line and branch coverage use a separate pinned nightly toolchain because cargo-llvm-cov branch instrumentation is currently unstable. Release code remains pinned to Rust 1.100.0.
 
 ```text
-cargo +nightly-2026-10-08 llvm-cov --locked --branch --json --output-path target/coverage.json --ignore-filename-regex 'tests[\\/]' --fail-under-lines 80
+cargo +nightly-2026-11-09 llvm-cov --locked --branch --json --output-path target/coverage.json --ignore-filename-regex 'tests[\\/]' --fail-under-lines 80
 node scripts/check-rust-coverage.mjs target/coverage.json
 ```
 

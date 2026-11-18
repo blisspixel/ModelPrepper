@@ -2,7 +2,7 @@
 name = "modelprepper"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.99"
+rust-version = "1.100"
 license = "MIT"
 description = "User-owned preservation plans for open-weight models"
 repository = "https://github.com/blisspixel/ModelPrepper"
@@ -13,19 +13,21 @@ publish = false
 clap = { version = "4.5", default-features = false, features = ["derive", "std", "help", "usage", "error-context", "wrap_help"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-sha2 = "0.10"
-toml = { version = "0.8", default-features = false, features = ["parse", "display"] }
+sha2 = { version = "0.11.1", default-features = false }
+toml = { version = "1.2.1", default-features = false, features = ["std", "serde", "parse", "display"] }
 ureq = { version = "3.4", default-features = false, features = ["rustls"] }
 url = "2"
-rusqlite = { version = "0.38", default-features = false, features = ["bundled"] }
+rusqlite = { version = "0.43.0", default-features = false, features = ["bundled"] }
 fs4 = { version = "1.1", default-features = false }
-sha1 = "0.10"
+sha1 = { version = "0.11.0", default-features = false }
 socket2 = "0.6"
 uuid = { version = "1", features = ["v4"] }
+
+[target.'cfg(windows)'.dependencies]
 volume-kind = { path = "crates/volume-kind", version = "0.1.0" }
 
 [target.'cfg(target_os = "macos")'.dependencies]
-rustix = { version = "1.1.5", features = ["fs", "process"] }
+rustix = { version = "1.1.6", features = ["fs", "process"] }
 
 [dev-dependencies]
 tempfile = "3"

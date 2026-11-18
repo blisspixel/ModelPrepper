@@ -7,6 +7,16 @@ use sha1::Sha1;
 use sha2::{Digest, Sha256};
 use std::io::Read;
 
+pub(crate) fn hex(bytes: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        out.push(HEX[(byte >> 4) as usize] as char);
+        out.push(HEX[(byte & 0xf) as usize] as char);
+    }
+    out
+}
+
 /// Streams without buffering a model in memory; always computes a local SHA-256.
 pub fn verify_reader(mut reader: impl Read, file: &SourceFile) -> Result<String> {
     let expected = file
@@ -37,10 +47,10 @@ pub fn verify_reader(mut reader: impl Read, file: &SourceFile) -> Result<String>
     if count != file.size_bytes {
         return Err(Error::new("size_mismatch", "file is shorter than expected"));
     }
-    let local = format!("{:x}", sha256.finalize());
+    let local = hex(&sha256.finalize());
     let identity = match expected.algorithm {
         HashAlgorithm::Sha256 => local.clone(),
-        HashAlgorithm::GitSha1 => format!("{:x}", git.finalize()),
+        HashAlgorithm::GitSha1 => hex(&git.finalize()),
     };
     if identity != expected.value {
         return Err(Error::new(
@@ -91,7 +101,7 @@ pub fn hash_exact(
     }
     progress(count);
     Ok(StreamedHash {
-        sha256: format!("{:x}", sha256.finalize()),
-        git_sha1: format!("{:x}", git.finalize()),
+        sha256: hex(&sha256.finalize()),
+        git_sha1: hex(&git.finalize()),
     })
 }

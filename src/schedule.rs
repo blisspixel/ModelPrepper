@@ -370,7 +370,7 @@ fn digest(report: &ScheduleReport) -> String {
         }
         hasher.update(b"\n");
     }
-    hex(&hasher.finalize())
+    crate::integrity::hex(&hasher.finalize())
 }
 
 fn systemd_arg(arg: &str) -> String {
@@ -538,16 +538,6 @@ fn host_name(host: Host) -> &'static str {
 
 fn failed(code: &'static str, error: &io::Error) -> Error {
     Error::new(code, error.to_string())
-}
-
-fn hex(bytes: &[u8]) -> String {
-    const HEX: &[u8; 16] = b"0123456789abcdef";
-    let mut out = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        out.push(HEX[(byte >> 4) as usize] as char);
-        out.push(HEX[(byte & 0xf) as usize] as char);
-    }
-    out
 }
 
 #[cfg(test)]
