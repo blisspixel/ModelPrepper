@@ -13,7 +13,8 @@ use std::{
     path::{Path, PathBuf},
 };
 
-const BUNDLE_NAME: &str = "modelprepper-bundle.json";
+pub(super) const BUNDLE_NAME: &str = "modelprepper-bundle.json";
+
 pub(super) const BUNDLE_CAP: u64 = 1024 * 1024;
 const RESERVATION_CAP: u64 = 64 * 1024;
 
@@ -150,6 +151,7 @@ pub(crate) fn fetch_with(
     if let Some(seal) = recover(&prepared, config)? {
         return Ok(seal);
     }
+    check_bundle_paths(prepared.selected.iter().map(|file| file.path.as_str()))?;
     let stage_path = checked_stage(config, stage)?;
     let files = prepared.selected.clone();
     let mut session = if stage_path.exists() {
@@ -214,6 +216,22 @@ pub(crate) fn reservation_fits(available: u64, payload: u64, reserve: u64) -> Re
         return Err(Error::new(
             "insufficient_space",
             "the destination does not have the payload plus the configured free reserve",
+        ));
+    }
+    Ok(())
+}
+
+/// A portable bundle needs its entire root manifest path free on a
+/// case-insensitive destination, including when a payload names a child.
+pub(super) fn check_bundle_paths<'a>(mut paths: impl Iterator<Item = &'a str>) -> Result<()> {
+    if paths.any(|path| {
+        path.split('/')
+            .next()
+            .is_some_and(|part| part.eq_ignore_ascii_case(BUNDLE_NAME))
+    }) {
+        return Err(Error::new(
+            "destination_conflict",
+            "a payload path conflicts with the root bundle manifest",
         ));
     }
     Ok(())
@@ -310,6 +328,7 @@ fn copy_and_publish(
     if let Some(seal) = recover(&prepared, config)? {
         return Ok(seal);
     }
+    check_bundle_paths(prepared.selected.iter().map(|file| file.path.as_str()))?;
     if !stage.is_staged()? {
         return Err(Error::new(
             "revision_not_staged",
@@ -325,7 +344,7 @@ fn copy_and_publish(
     if prepared
         .selected
         .iter()
-        .any(|file| file.path == BUNDLE_NAME || file.path.ends_with(&format!("/{BUNDLE_NAME}")))
+        .any(|file| file.path.ends_with(&format!("/{BUNDLE_NAME}")))
     {
         return Err(Error::new(
             "destination_conflict",
