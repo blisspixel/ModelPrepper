@@ -5,7 +5,7 @@ use crate::{Config, Error, Result, inventory::Source, plan::digest, validation::
 use rusqlite::OptionalExtension;
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::BTreeSet,
+    collections::{BTreeMap, BTreeSet},
     fs::{self, File, OpenOptions},
     io::{Read, Write},
     path::{Path, PathBuf},
@@ -203,7 +203,6 @@ pub(crate) fn replica_with(
         &source,
         &staging,
         &files,
-        size,
         destination,
         &current.vault_id,
         config.storage.min_free_bytes,
@@ -549,7 +548,6 @@ pub fn import_baseline(
         &source,
         &staging,
         &files,
-        size,
         volume,
         &current.vault_id,
         config.storage.min_free_bytes,
@@ -1052,75 +1050,80 @@ fn hash_file(root: &Path, file: &ManifestFile) -> Result<()> {
     Ok(())
 }
 
-// Only called on the unpublished staging tree. Old versions used `.partial`
-// siblings there, which can also be legitimate selected filenames.
-fn discard_unselected(staging: &Path, files: &[ManifestFile]) -> Result<()> {
-    for path in collect_files(staging)? {
-        if files.binary_search_by(|file| file.path.cmp(&path)).is_err() {
-            fs::remove_file(crate::verify::local_path(staging, &path)).map_err(super::io)?;
-        }
-    }
-    Ok(())
-}
-
+// Work only inside this plan's unpublished staging tree. Reclaim incomplete
+// payloads and legacy scratch files before measuring the remaining capacity.
 fn stage_payload_files(
     source: &Path,
     staging: &Path,
     files: &[ManifestFile],
-    size: u64,
     volume: &super::VolumeStatus,
     vault_id: &str,
     min_free_bytes: u64,
 ) -> Result<()> {
     volume.require_identity(vault_id)?;
-    // For a retry, each missing file is charged below. Matching staged files need no second copy.
-    let new_bytes = if directory_exists(staging)? { 0 } else { size };
-    seal::reservation_fits(
-        fs4::available_space(&volume.path).map_err(super::io)?,
-        new_bytes,
-        min_free_bytes,
-    )?;
+    let mut pending: BTreeMap<_, _> = files
+        .iter()
+        .map(|file| (file.path.as_str(), file))
+        .collect();
+    if directory_exists(staging)? {
+        for name in collect_files(staging)? {
+            if let Some(file) = pending.get(name.as_str()) {
+                match hash_file(staging, file) {
+                    Ok(()) => {
+                        pending.remove(name.as_str());
+                        continue;
+                    }
+                    Err(error) if error.code == "hash_mismatch" => {}
+                    Err(error) => return Err(error),
+                }
+            }
+            volume.require_identity(vault_id)?;
+            fs::remove_file(crate::verify::local_path(staging, &name)).map_err(super::io)?;
+        }
+    }
+    let needed = pending
+        .values()
+        .try_fold(0_u64, |sum, file| sum.checked_add(file.size_bytes))
+        .ok_or_else(|| {
+            Error::new(
+                "size_overflow",
+                "remaining staged payload exceeds u64 capacity",
+            )
+        })?;
+    let admit = |bytes| {
+        volume.require_identity(vault_id)?;
+        seal::reservation_fits(
+            fs4::available_space(&volume.path).map_err(super::io)?,
+            bytes,
+            min_free_bytes,
+        )
+    };
+    admit(needed)?;
     if let Some(parent) = staging.parent() {
         fs::create_dir_all(parent).map_err(super::io)?;
         adoption::sync_dir(parent)?;
     }
-    for file in files {
-        copy_hashed(source, staging, file, || {
-            volume.require_identity(vault_id)?;
-            seal::reservation_fits(
-                fs4::available_space(&volume.path).map_err(super::io)?,
-                file.size_bytes,
-                min_free_bytes,
-            )
-        })?;
+    for file in pending.into_values() {
+        admit(file.size_bytes)?;
+        copy_hashed(source, staging, file)?;
     }
-    volume.require_identity(vault_id)?;
-    discard_unselected(staging, files)
+    volume.require_identity(vault_id)
 }
 
-fn copy_hashed(
-    from_root: &Path,
-    to_root: &Path,
-    file: &ManifestFile,
-    admit_write: impl FnOnce() -> Result<()>,
-) -> Result<()> {
-    if hash_file(to_root, file).is_ok() {
-        return Ok(());
+fn copy_hashed(from_root: &Path, to_root: &Path, file: &ManifestFile) -> Result<()> {
+    if crate::verify::metadata_nofollow(to_root, &file.path)?.is_some() {
+        return Err(conflict());
     }
-    // Any walk error, including a directory symlink, stops the copy. A later open must not follow it.
-    crate::verify::metadata_nofollow(to_root, &file.path)?;
-    if crate::verify::metadata_nofollow(from_root, &file.path)?.is_none() {
+    if !crate::verify::metadata_nofollow(from_root, &file.path)?
+        .is_some_and(|meta| meta.is_file() && meta.len() == file.size_bytes)
+    {
         return Err(Error::new(
             "hash_mismatch",
             format!("{} hash_mismatch", file.path),
         ));
     }
-    admit_write()?;
     let to = crate::verify::local_path(to_root, &file.path);
     let from = crate::verify::local_path(from_root, &file.path);
-    if to.exists() {
-        fs::remove_file(&to).map_err(super::io)?;
-    }
     if let Some(parent) = to.parent() {
         fs::create_dir_all(parent).map_err(super::io)?;
         adoption::sync_dir(parent)?;
