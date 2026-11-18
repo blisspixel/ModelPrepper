@@ -1080,13 +1080,15 @@ fn rebuild_names_damage_offline_disks_and_marker_loss_without_inventing_rows() {
     }
     let rich = Rebuild {
         schema_version: 1,
-        status: "rebuilt",
+        status: "partial",
         vault_id: rebuilt.vault_id.clone(),
         custody_count: 1,
         replica_count: 0,
         damaged: rebuilt.damaged.clone(),
         conflicts: vec![plan.clone()],
         offline_volumes: vec!["backup".into()],
+        unconfirmed_copies: Vec::new(),
+        unbundled_directories: Vec::new(),
         approvals_transferred: false,
         transfer_authorized: false,
         workspace_bytes: None,
@@ -1096,6 +1098,7 @@ fn rebuild_names_damage_offline_disks_and_marker_loss_without_inventing_rows() {
     assert!(rich_text.contains(&plan[..12]), "{rich_text}");
     assert!(rich_text.contains("offline"), "{rich_text}");
     let quiet = Rebuild {
+        status: "rebuilt",
         damaged: Vec::new(),
         conflicts: Vec::new(),
         offline_volumes: Vec::new(),
@@ -1334,6 +1337,64 @@ fn identical_bytes_do_not_merge_conflicting_custody_evidence() {
         doc["provenance"] = PROVENANCE_RANGED_HTTPS.into()
     });
     failure(replica(&config, &plan, "backup"), "destination_conflict");
+}
+
+#[test]
+fn partial_rebuild_keeps_good_bundles_and_accounts_for_an_unconfirmed_copy() {
+    let (dir, config, _) = setup();
+    let plan = digest(b"rebuild-coverage");
+    for volume in &config.volumes {
+        plant(
+            &volume.path,
+            REVISION,
+            &plan,
+            b"model",
+            Some(PROVENANCE_LOCAL_BASELINE),
+        );
+    }
+    let complete = rebuild(&config).unwrap();
+    assert_eq!(complete.status, "rebuilt");
+    let document = bundle_file(&config.volumes[1].path, REVISION);
+    let held = dir.path().join("held-document");
+    fs::rename(&document, &held).unwrap();
+    let partial = rebuild(&config).unwrap();
+    assert_eq!(partial.status, "partial");
+    assert_eq!(partial.unconfirmed_copies, [format!("backup:{plan}")]);
+    assert_eq!(partial.unbundled_directories.len(), 1);
+    assert_eq!((partial.custody_count, partial.replica_count), (1, 1));
+    // An entirely absent revision is known only to the old catalog.
+    let tree = document.parent().unwrap();
+    let detached = dir.path().join("detached-tree");
+    fs::rename(tree, &detached).unwrap();
+    let missing = rebuild(&config).unwrap();
+    assert_eq!(missing.unconfirmed_copies, partial.unconfirmed_copies);
+    assert!(missing.unbundled_directories.is_empty());
+    fs::rename(&detached, tree).unwrap();
+    delete_catalog(&config);
+    let fresh = rebuild(&config).unwrap();
+    assert_eq!(fresh.status, "partial");
+    assert_eq!(fresh.unbundled_directories, partial.unbundled_directories);
+    assert!(fresh.unconfirmed_copies.is_empty());
+    assert_eq!((fresh.custody_count, fresh.replica_count), (1, 0));
+    fs::rename(&held, &document).unwrap();
+    let repaired = rebuild(&config).unwrap();
+    assert_eq!(repaired.status, "rebuilt");
+    assert_eq!((repaired.custody_count, repaired.replica_count), (1, 1));
+    assert!(repaired.unbundled_directories.is_empty() && repaired.unconfirmed_copies.is_empty());
+}
+
+#[test]
+fn nested_baseline_payload_named_like_a_bundle_rebuilds_cleanly() {
+    let (dir, config, _) = setup();
+    let source = dir.path().join("source");
+    fs::create_dir_all(source.join("assets")).unwrap();
+    fs::write(source.join("assets").join(BUNDLE_NAME), b"ordinary payload").unwrap();
+    let original = import_baseline(&config, &source, "local/model", REVISION, "primary").unwrap();
+    delete_catalog(&config);
+    let report = rebuild(&config).unwrap();
+    assert_eq!(report.status, "rebuilt");
+    assert_eq!(report.custody_count, 1);
+    assert!(verify_sealed(&config, &original.plan_id).unwrap().matched);
 }
 
 #[test]

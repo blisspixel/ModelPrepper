@@ -282,6 +282,20 @@ class InstallerTests(unittest.TestCase):
         )
         self.assertNotEqual(damaged.returncode, 0)
         self.assertFalse(json.loads(damaged.stdout)["matched"])
+        partial = subprocess.run(
+            [str(self.executable), "--json", "rebuild", "--config", recovery],
+            cwd=self.root,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        self.assertNotEqual(partial.returncode, 0)
+        report = json.loads(partial.stdout)
+        self.assertEqual(report["status"], "partial")
+        self.assertFalse(report["ok"])
+        self.assertTrue(report["damaged"])
+        self.assertEqual(report["unconfirmed_copies"], [f"backup:{plan}"])
+        self.assertEqual(report["custody_count"], 1)
         for name in ("catalog", "primary", "incoming"):
             self.assertFalse((self.root / name).exists())
 
