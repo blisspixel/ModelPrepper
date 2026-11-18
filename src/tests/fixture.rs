@@ -1,8 +1,9 @@
 use std::{
     io::{Read, Write},
     net::TcpListener,
+    sync::mpsc::{self, RecvTimeoutError, Sender},
     thread::{self, JoinHandle},
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 /// One plaintext HTTP exchange. Counts are bytes read and written on the
@@ -15,6 +16,8 @@ pub struct Exchange {
 
 pub struct Server {
     pub origin: String,
+    lifetime: Sender<()>,
+    expected: usize,
     worker: JoinHandle<Vec<Exchange>>,
 }
 
@@ -23,16 +26,21 @@ impl Server {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         listener.set_nonblocking(true).unwrap();
         let origin = format!("http://{}", listener.local_addr().unwrap());
+        let (lifetime, stopped) = mpsc::channel();
+        let expected = responses.len();
         let worker = thread::spawn(move || {
             let mut exchanges = Vec::new();
             for response in responses {
-                let deadline = Instant::now() + Duration::from_secs(5);
                 let mut stream = loop {
                     match listener.accept() {
                         Ok((stream, _)) => break stream,
                         Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                            assert!(Instant::now() < deadline, "fixture request timed out");
-                            thread::sleep(Duration::from_millis(5));
+                            // The client may be doing disk work between requests.
+                            if stopped.recv_timeout(Duration::from_millis(5))
+                                != Err(RecvTimeoutError::Timeout)
+                            {
+                                return exchanges;
+                            }
                         }
                         Err(error) => panic!("fixture accept: {error}"),
                     }
@@ -73,11 +81,19 @@ impl Server {
             }
             exchanges
         });
-        Self { origin, worker }
+        Self {
+            origin,
+            lifetime,
+            expected,
+            worker,
+        }
     }
 
     pub fn finish_measured(self) -> Vec<Exchange> {
-        self.worker.join().unwrap()
+        drop(self.lifetime);
+        let exchanges = self.worker.join().unwrap();
+        assert_eq!(exchanges.len(), self.expected, "missing fixture requests");
+        exchanges
     }
 
     pub fn finish(self) -> Vec<String> {
@@ -86,6 +102,12 @@ impl Server {
             .map(|exchange| exchange.request)
             .collect()
     }
+}
+
+#[test]
+#[should_panic(expected = "missing fixture requests")]
+fn finishing_an_unused_fixture_reports_the_missing_request() {
+    Server::new(vec![response(200, "", b"")]).finish();
 }
 
 pub fn response(status: u16, headers: &str, body: &[u8]) -> Vec<u8> {
