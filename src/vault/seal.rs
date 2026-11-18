@@ -87,6 +87,7 @@ struct BundleFile {
     upstream_hash: Option<UpstreamHash>,
 }
 
+#[derive(PartialEq, Eq)]
 pub(crate) struct PublishedBundle {
     pub bundle_id: String,
     pub repo_id: String,
@@ -95,6 +96,7 @@ pub(crate) struct PublishedBundle {
     pub files: Vec<PublishedFile>,
 }
 
+#[derive(PartialEq, Eq)]
 pub(crate) struct PublishedFile {
     pub path: String,
     pub size_bytes: u64,
@@ -639,7 +641,11 @@ fn bundle_agrees(path: &Path, prepared: &Prepared, hashes: &[(String, u64, Strin
 
 pub(crate) fn read_published_bundle(path: &Path) -> Result<PublishedBundle> {
     let bytes = read_capped(path, BUNDLE_CAP)?;
-    let document: BundleDocument = serde_json::from_slice(&bytes)
+    parse_published_bundle(&bytes)
+}
+
+pub(super) fn parse_published_bundle(bytes: &[u8]) -> Result<PublishedBundle> {
+    let document: BundleDocument = serde_json::from_slice(bytes)
         .map_err(|_| Error::new("not_sealed", "the bundle manifest is missing or unreadable"))?;
     if document.schema_version != 1 || !hex_len(&document.bundle_id, 64) {
         return Err(Error::new(
