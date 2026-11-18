@@ -7,7 +7,7 @@ use crate::{
     },
     plan::{Blocker, digest},
     transfer::KernelSocketBuffers,
-    vault::{Decision, PROVENANCE_RANGED_HTTPS, initialize},
+    vault::{Decision, PROVENANCE_RANGED_HTTPS, initialize, status},
 };
 use std::{
     fs,
@@ -1381,4 +1381,41 @@ fn staging_requires_the_disk_that_was_present_before_hashing() {
         assert!(!staging.parent().unwrap().exists());
     }
     assert!(status(&config).unwrap().replicas.is_empty());
+}
+
+#[test]
+fn backup_verification_uses_the_recorded_copy_even_with_a_missing_primary() {
+    let (dir, config, _) = setup();
+    let incoming = dir.path().join("incoming");
+    fs::create_dir(&incoming).unwrap();
+    fs::write(incoming.join("part.bin"), b"first").unwrap();
+    let primary = import_baseline(&config, &incoming, "local/demo", REVISION, "primary").unwrap();
+    let check = |volume| verify_sealed_on_volume(&config, &primary.plan_id, Some(volume));
+    assert_eq!(check("unknown").unwrap_err().code, "unknown_volume");
+    assert_eq!(check("backup").unwrap_err().code, "replica_not_recorded");
+    // Independently importing the same baseline on another volume used to leave it uncataloged.
+    let backup = import_baseline(&config, &incoming, "local/demo", REVISION, "backup").unwrap();
+    import_baseline(&config, &incoming, "local/demo", REVISION, "backup").unwrap();
+    let listed = status(&config).unwrap();
+    assert_eq!(listed.replicas.len(), 1);
+    assert_eq!(listed.replicas[0].plan_id, listed.preserved[0].plan_id);
+    fs::rename(&config.volumes[0].path, dir.path().join("unavailable")).unwrap();
+    let report = check("backup").unwrap();
+    assert!(report.matched);
+    assert_eq!(
+        (report.volume_label.as_str(), report.copy_kind),
+        ("backup", "replica")
+    );
+    assert_eq!(
+        verify_sealed(&config, &primary.plan_id).unwrap().action,
+        "offline"
+    );
+    fs::write(backup.path.join("part.bin"), b"other").unwrap();
+    assert_eq!(check("backup").unwrap().files[0].status, "mismatch");
+    fs::remove_file(backup.path.join(BUNDLE_NAME)).unwrap();
+    assert!(check("backup").is_err());
+    fs::remove_file(config.volumes[1].path.join(crate::vault::MARKER)).unwrap();
+    let absent = check("backup").unwrap();
+    assert_eq!(absent.volume_state, "identity_missing");
+    assert!(!absent.matched && absent.files.is_empty());
 }

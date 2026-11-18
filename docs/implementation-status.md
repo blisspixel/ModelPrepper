@@ -1,6 +1,6 @@
 # Implementation status
 
-This records executable behavior and evidence as of November 8, 2026. It does not mark the preservation roadmap complete.
+This records executable behavior and evidence through wave 38. It does not mark the preservation roadmap complete.
 
 ## Executable features
 
@@ -96,5 +96,7 @@ The order is the work-wave table in the [roadmap](roadmap.md), then the still-in
 35. Wave 35 is implemented. Opening a catalog at schema 1 through 6 moves it to schema 7 and keeps the rows that schema stored. A file on the volume is not rewritten. Schema 0 and schema 8 stay refused. An existing schema 7 collection name stays in place. This does not close clean-machine setup, the ten-minute planning drill, published provenance, or the per-OS recovery drill. `decide` stays blocked and `workspace_bytes` stays null.
 36. Wave 36 is implemented. `verify-sealed`, replica, import, and seal confirmation refuse a directory symlink. The hash reads the file inside the seal tree or reports a mismatch. The outside file is left unchanged. This does not retire a copy, resolve a collection, or close the live Version 1 drills. `decide` stays blocked and `workspace_bytes` stays null. The next step is the still-in-this-order list in the roadmap: leave collection-wide resolve alone. Dropping or merging copies still waits for an approval that does not exist yet. M8 acceptance is not passed.
 37. A verified local adoption now supports a fully hashed replica. The recovery fixture rebuilds a fresh catalog from the backup alone and preserves the local-source provenance.
+
+38. `verify-sealed --volume` hashes a recorded replica by plan ID and volume label. It checks the backup bundle identity and payload even when the custody volume is offline. Both kinds of saved location include plan IDs in `status --json`.
 
 Initialized disks and successful inspection are useful foundations. They do not establish that a model has been preserved or can run offline.

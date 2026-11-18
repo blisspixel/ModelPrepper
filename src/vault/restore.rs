@@ -1,9 +1,8 @@
 //! Offline replica, catalog rebuild, local-baseline import, and one-plan verification.
 //! These paths do not open a socket, do not require a grant, and do not copy one.
-use super::{
-    Catalog, adoption, check_path, open_catalog, open_recovered_catalog, report, seal, status,
-};
+use super::{Catalog, adoption, check_path, open_catalog, open_recovered_catalog, report, seal};
 use crate::{Config, Error, Result, inventory::Source, plan::digest, validation::normalize_repo};
+use rusqlite::OptionalExtension;
 use serde::{Deserialize, Serialize};
 use std::{
     fs::{self, File, OpenOptions},
@@ -171,16 +170,7 @@ pub(crate) fn replica_with(
         (seal::read_capped(&manifest_path, seal::BUNDLE_CAP)?, None)
     };
     let bundle = seal::parse_published_bundle(&bundle_bytes)?;
-    if bundle.bundle_id != row.plan_id
-        || bundle.repo_id != row.repo
-        || bundle.resolved_revision != row.revision
-        || (bundle.provenance != row.provenance
-            && (!bundle.provenance.is_empty()
-                || row.provenance == adoption::PROVENANCE_LOCAL_UPSTREAM))
-        || !same_files(&bundle.files, &files)
-    {
-        return Err(conflict());
-    }
+    check_bundle_identity(&bundle, &row, &files)?;
     let size = match verified_size {
         Some(size) => size,
         None => sweep(&source, &files)?,
@@ -501,6 +491,8 @@ pub fn import_baseline(
         sweep(&published, &files)?;
         let bundle = seal::read_published_bundle(&published.join(BUNDLE_NAME))?;
         if bundle.bundle_id != plan_id
+            || bundle.repo_id != repo
+            || bundle.resolved_revision != revision
             || bundle.provenance != PROVENANCE_LOCAL_BASELINE
             || !same_files(&bundle.files, &files)
         {
@@ -621,8 +613,17 @@ fn record_baseline(
 ) -> Result<()> {
     let manifest = manifest_json(files)?;
     match load_custody(catalog, plan_id)? {
-        Some(row) if row.provenance != PROVENANCE_LOCAL_BASELINE || row.manifest != manifest => {
+        Some(row)
+            if row.provenance != PROVENANCE_LOCAL_BASELINE
+                || row.repo != repo
+                || row.revision != revision
+                || row.relative != adoption::relative_dir(repo, revision)
+                || parse_manifest(&row.manifest)? != files =>
+        {
             Err(conflict())
+        }
+        Some(row) if row.volume_label != volume_label => {
+            record_replica(catalog, &row, volume_label)
         }
         Some(_) => Ok(()),
         None => adoption::record_custody(
@@ -647,17 +648,17 @@ fn insert_replica(
     relative: &str,
     manifest: &str,
 ) -> Result<()> {
-    let stored = match catalog.db.query_row(
-        "SELECT manifest FROM replicas WHERE plan_id = ?1 AND volume_label = ?2",
-        rusqlite::params![plan_id, volume_label],
-        |row| row.get::<_, String>(0),
-    ) {
-        Ok(value) => Some(value),
-        Err(rusqlite::Error::QueryReturnedNoRows) => None,
-        Err(error) => return Err(super::db(error)),
-    };
+    let stored: Option<(String, String)> = catalog
+        .db
+        .query_row(
+            "SELECT relative_dir, manifest FROM replicas WHERE plan_id = ?1 AND volume_label = ?2",
+            rusqlite::params![plan_id, volume_label],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()
+        .map_err(super::db)?;
     match stored {
-        Some(existing) if existing != manifest => Err(conflict()),
+        Some((path, existing)) if path != relative || existing != manifest => Err(conflict()),
         Some(_) => Ok(()),
         None => {
             catalog
@@ -679,6 +680,9 @@ pub struct SealedVerification {
     pub plan_id: String,
     pub repo_id: String,
     pub resolved_revision: String,
+    pub volume_label: String,
+    pub volume_state: &'static str,
+    pub copy_kind: &'static str,
     /// True only when every sealed file matches. An empty manifest is not a match.
     pub matched: bool,
     pub files: Vec<SealedFile>,
@@ -697,6 +701,15 @@ pub struct SealedFile {
 
 /// Hash one sealed plan with the existing file hash. Other plans are not read.
 pub fn verify_sealed(config: &Config, plan_id: &str) -> Result<SealedVerification> {
+    verify_sealed_on_volume(config, plan_id, None)
+}
+
+/// Hash just the selected catalog location, including when another disk is offline.
+pub fn verify_sealed_on_volume(
+    config: &Config,
+    plan_id: &str,
+    selected_volume: Option<&str>,
+) -> Result<SealedVerification> {
     if plan_id.len() != 64
         || !plan_id
             .bytes()
@@ -711,20 +724,61 @@ pub fn verify_sealed(config: &Config, plan_id: &str) -> Result<SealedVerificatio
     let Some(row) = load_custody(&catalog, plan_id)? else {
         return Err(Error::new("plan_not_stored", "that plan is not in custody"));
     };
-    drop(catalog);
-    let files: Vec<ManifestFile> = serde_json::from_str(&row.manifest)
-        .map_err(|_| Error::new("invalid_catalog", "custody manifest is invalid"))?;
-    let current = status(config)?;
-    let volume = current
+    let label = selected_volume.unwrap_or(&row.volume_label);
+    let ownership = super::identities(&catalog, config)?;
+    let (identity, path) = ownership
         .volumes
-        .iter()
-        .find(|volume| volume.label == row.volume_label)
+        .into_iter()
+        .find(|(identity, _)| identity.label == label)
         .ok_or_else(|| Error::new("unknown_volume", "the named volume is not in this vault"))?;
+    let is_replica = label != row.volume_label;
+    let kind = if is_replica { "replica" } else { "custody" };
+    let expected_relative = adoption::relative_dir(&row.repo, &row.revision);
+    if normalize_repo(&row.repo).as_deref().ok() != Some(row.repo.as_str())
+        || crate::validation::validate_hex(&row.revision, 40).is_err()
+    {
+        return Err(conflict());
+    }
+    let files = parse_manifest(&row.manifest)?;
+    if is_replica {
+        let (relative, manifest): (String, String) = catalog
+            .db
+            .query_row(
+                "SELECT relative_dir, manifest FROM replicas WHERE plan_id=?1 AND volume_label=?2",
+                rusqlite::params![plan_id, label],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()
+            .map_err(super::db)?
+            .ok_or_else(|| {
+                Error::new(
+                    "replica_not_recorded",
+                    "this plan has no recorded replica on that volume",
+                )
+            })?;
+        if relative != expected_relative || parse_manifest(&manifest)? != files {
+            return Err(conflict());
+        }
+    }
+    let volume = super::volume_status(identity, path)?;
+    drop(catalog);
     if volume.state != "mounted" {
-        return Ok(sealed_report(&row, "offline", false, Vec::new()));
+        return Ok(sealed_report(
+            &row,
+            &volume,
+            kind,
+            "offline",
+            false,
+            Vec::new(),
+        ));
     }
     let root = fs::canonicalize(&volume.path).map_err(super::io)?;
-    let directory = adoption::publish_dir(&root, &row.repo, &row.revision);
+    let directory = root.join(expected_relative);
+    check_path(&directory)?;
+    if is_replica {
+        let bundle = seal::read_published_bundle(&directory.join(BUNDLE_NAME))?;
+        check_bundle_identity(&bundle, &row, &files)?;
+    }
     let mut checked = Vec::with_capacity(files.len());
     let mut matched = !files.is_empty();
     for file in &files {
@@ -737,11 +791,34 @@ pub fn verify_sealed(config: &Config, plan_id: &str) -> Result<SealedVerificatio
             status,
         });
     }
-    Ok(sealed_report(&row, "verified", matched, checked))
+    volume.require_identity(&ownership.vault_id)?;
+    Ok(sealed_report(
+        &row, &volume, kind, "verified", matched, checked,
+    ))
+}
+
+fn check_bundle_identity(
+    bundle: &seal::PublishedBundle,
+    row: &CustodyRow,
+    files: &[ManifestFile],
+) -> Result<()> {
+    if bundle.bundle_id != row.plan_id
+        || bundle.repo_id != row.repo
+        || bundle.resolved_revision != row.revision
+        || (bundle.provenance != row.provenance
+            && (!bundle.provenance.is_empty()
+                || row.provenance == adoption::PROVENANCE_LOCAL_UPSTREAM))
+        || !same_files(&bundle.files, files)
+    {
+        return Err(conflict());
+    }
+    Ok(())
 }
 
 fn sealed_report(
     row: &CustodyRow,
+    volume: &super::VolumeStatus,
+    copy_kind: &'static str,
     action: &'static str,
     matched: bool,
     files: Vec<SealedFile>,
@@ -749,6 +826,9 @@ fn sealed_report(
     SealedVerification {
         schema_version: 1,
         action,
+        volume_label: volume.label.clone(),
+        volume_state: volume.state,
+        copy_kind,
         plan_id: row.plan_id.clone(),
         repo_id: row.repo.clone(),
         resolved_revision: row.revision.clone(),

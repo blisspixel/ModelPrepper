@@ -920,6 +920,11 @@ pub fn render_sealed(
         "differ"
     };
     let mut lines = vec![verdict(color, columns, YELLOW, word, "  offline")];
+    lines.push(field(
+        columns,
+        report.copy_kind,
+        &format!("{}  {}", report.volume_label, report.volume_state),
+    ));
     lines.push(field(columns, "plan", &report.plan_id));
     lines.push(field(
         columns,
@@ -2187,6 +2192,7 @@ mod tests {
                 read_only: false,
             }],
             preserved: vec![PreservedCopy {
+                plan_id: "aa".repeat(32),
                 repo_id: "example/model".into(),
                 resolved_revision: source.resolved_revision.clone(),
                 provenance: crate::vault::PROVENANCE_LOCAL_UPSTREAM.into(),

@@ -38,6 +38,7 @@ pub use grant::{Grant, current_grant, record_grant};
 pub use restore::{
     BaselineImport, PROVENANCE_LOCAL_BASELINE, PROVENANCE_UNRECORDED, Rebuild, Replica,
     ReplicaStop, SealedVerification, import_baseline, rebuild, replica, verify_sealed,
+    verify_sealed_on_volume,
 };
 pub use review::{Decision, Proposal, ProposalPage, decide, proposals, propose, show_proposal};
 #[cfg(test)]
@@ -66,6 +67,7 @@ pub struct Status {
 
 #[derive(Debug, Serialize)]
 pub struct PreservedCopy {
+    pub plan_id: String,
     pub repo_id: String,
     pub resolved_revision: String,
     pub provenance: String,
@@ -687,38 +689,10 @@ fn report(catalog: &Catalog, config: &Config) -> Result<Status> {
         state,
         volumes,
     } = identities(catalog, config)?;
-    let mut reports = Vec::new();
-    for (identity, path) in volumes {
-        let marker = path.join(MARKER);
-        let placement = if path.exists() {
-            Some(filesystem::classify(&path)?)
-        } else {
-            None
-        };
-        let (condition, available_bytes) = if !path.exists() {
-            ("offline", None)
-        } else if !marker.exists() {
-            ("identity_missing", None)
-        } else if read_identity(&marker)? != identity {
-            ("identity_mismatch", None)
-        } else {
-            ("mounted", Some(fs4::available_space(&path).map_err(io)?))
-        };
-        let (filesystem, filesystem_role, read_only) = match placement {
-            Some(placement) => (placement.kind, placement.role, placement.read_only),
-            None => ("unmeasured".into(), FilesystemRole::Unmeasured, false),
-        };
-        reports.push(VolumeStatus {
-            label: identity.label,
-            volume_id: identity.volume_id,
-            path,
-            state: condition,
-            filesystem,
-            filesystem_role,
-            read_only,
-            available_bytes,
-        });
-    }
+    let reports = volumes
+        .into_iter()
+        .map(|(identity, path)| volume_status(identity, path))
+        .collect::<Result<_>>()?;
     Ok(Status {
         schema_version: 1,
         state,
@@ -729,13 +703,45 @@ fn report(catalog: &Catalog, config: &Config) -> Result<Status> {
     })
 }
 
+fn volume_status(identity: Identity, path: PathBuf) -> Result<VolumeStatus> {
+    let marker = path.join(MARKER);
+    let placement = if path.exists() {
+        Some(filesystem::classify(&path)?)
+    } else {
+        None
+    };
+    let (condition, available_bytes) = if !path.exists() {
+        ("offline", None)
+    } else if !marker.exists() {
+        ("identity_missing", None)
+    } else if read_identity(&marker)? != identity {
+        ("identity_mismatch", None)
+    } else {
+        ("mounted", Some(fs4::available_space(&path).map_err(io)?))
+    };
+    let (filesystem, filesystem_role, read_only) = match placement {
+        Some(placement) => (placement.kind, placement.role, placement.read_only),
+        None => ("unmeasured".into(), FilesystemRole::Unmeasured, false),
+    };
+    Ok(VolumeStatus {
+        label: identity.label,
+        volume_id: identity.volume_id,
+        path,
+        state: condition,
+        filesystem,
+        filesystem_role,
+        read_only,
+        available_bytes,
+    })
+}
+
 fn replica_copies(catalog: &Catalog) -> Result<Vec<PreservedCopy>> {
     let mut query = catalog
         .db
         .prepare(
-            "SELECT custody.repo_id, custody.resolved_revision, custody.provenance, replicas.volume_label
+            "SELECT custody.repo_id, custody.resolved_revision, custody.provenance, replicas.volume_label, custody.plan_id
              FROM replicas JOIN custody ON custody.plan_id = replicas.plan_id
-             ORDER BY custody.repo_id, custody.resolved_revision, replicas.volume_label",
+             ORDER BY custody.repo_id, custody.resolved_revision, replicas.volume_label, custody.plan_id",
         )
         .map_err(db)?;
     let rows = query
@@ -745,6 +751,7 @@ fn replica_copies(catalog: &Catalog) -> Result<Vec<PreservedCopy>> {
                 resolved_revision: row.get(1)?,
                 provenance: row.get(2)?,
                 volume_label: row.get(3)?,
+                plan_id: row.get(4)?,
             })
         })
         .map_err(db)?;
@@ -755,7 +762,7 @@ fn preserved_copies(catalog: &Catalog) -> Result<Vec<PreservedCopy>> {
     let mut query = catalog
         .db
         .prepare(
-            "SELECT repo_id, resolved_revision, provenance, volume_label FROM custody ORDER BY repo_id, resolved_revision, volume_label",
+            "SELECT repo_id, resolved_revision, provenance, volume_label, plan_id FROM custody ORDER BY repo_id, resolved_revision, volume_label, plan_id",
         )
         .map_err(db)?;
     let rows = query
@@ -765,6 +772,7 @@ fn preserved_copies(catalog: &Catalog) -> Result<Vec<PreservedCopy>> {
                 resolved_revision: row.get(1)?,
                 provenance: row.get(2)?,
                 volume_label: row.get(3)?,
+                plan_id: row.get(4)?,
             })
         })
         .map_err(db)?;

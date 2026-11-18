@@ -22,7 +22,7 @@ What you can do now:
 - `watch` runs each configured watch once and fetches only inside a current grant and the weekly byte ceiling. `schedule` installs that weekly timer only when the preview digest matches. CI does not enable a live timer.
 - `collection` stores a list you wrote. `select` keeps entries by exact text. It does not rank, resolve, or download. `discover` searches only the embedded source catalog.
 - `collection custody` names the sealed plans, their volumes and sizes, and why they are not retired. It does not retire a copy.
-- `verify-sealed` hashes one sealed plan. A directory symlink is not followed. Other plans are not read.
+- `verify-sealed` hashes the custody copy of one plan. Add `--volume <label>` to check a recorded backup even with the primary offline. Find the plan ID in `status --json`. A directory symlink is not followed. Other plans are not read.
 
 Opening a catalog written at schema 1 through 6 moves it to schema 7 and keeps the rows that schema stored. Schema 0 and schema 8 are refused. A file on the volume is not rewritten.
 
