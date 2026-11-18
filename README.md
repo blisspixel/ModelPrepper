@@ -44,7 +44,7 @@ Still open: clean-machine setup, the ten-minute planning drill, published checks
 | fetch | Seal one granted revision. Approval stays blocked. |
 | catalog-backup | Save a private, consistent SQLite snapshot and its SHA-256. Retain config and payload separately. |
 | replica | Copy a sealed revision or verified local adoption onto another volume after a full hash. The backup retains the original provenance. No network. The failure domain stays unlabeled. A directory symlink is not followed. |
-| rebuild | Reconstruct custody and replica rows from on-volume bundles. A missing catalog is rebuilt from volume markers. Approvals are not copied. |
+| rebuild | Reconstruct custody and replica rows from on-volume bundles. A missing catalog is rebuilt from volume markers. A partial scan lists outstanding copies and exits nonzero. Approvals are not copied. |
 | import | Record a local folder as `local-baseline`. Matching bytes do not relabel it as upstream-verified. A directory symlink is not followed. |
 | watch | Run each configured watch once. A new commit is a new plan. Older revisions stay. A fetch happens only inside a current grant and the UTC-week transfer ceiling. |
 | schedule | Preview, install, or remove one weekly timer that runs `watch` once. Install requires the preview digest. The timer does not approve a transfer. |

@@ -581,19 +581,23 @@ pub fn render_rebuild(rebuild: &crate::vault::Rebuild, color: bool, columns: usi
         verdict(
             color,
             columns,
-            GREEN,
-            "rebuilt",
+            if rebuild.status == "rebuilt" {
+                GREEN
+            } else {
+                YELLOW
+            },
+            rebuild.status,
             &format!("  vault {}", short_id(&rebuild.vault_id)),
         ),
         field(
             columns,
             "custody",
-            &format!("{} sealed", rebuild.custody_count),
+            &format!("{} recorded", rebuild.custody_count),
         ),
         field(
             columns,
             "replicas",
-            &format!("{} healthy", rebuild.replica_count),
+            &format!("{} recorded", rebuild.replica_count),
         ),
         field(
             columns,
@@ -621,6 +625,14 @@ pub fn render_rebuild(rebuild: &crate::vault::Rebuild, color: bool, columns: usi
             5,
             field(columns, "offline", &rebuild.offline_volumes.join(", ")),
         );
+    }
+    for (name, values) in [
+        ("unbundled", &rebuild.unbundled_directories),
+        ("unconfirmed", &rebuild.unconfirmed_copies),
+    ] {
+        if !values.is_empty() {
+            lines.insert(lines.len() - 1, field(columns, name, &values.join(", ")));
+        }
     }
     lines.join("\n")
 }

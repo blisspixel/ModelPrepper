@@ -711,7 +711,7 @@ pub(crate) fn execute_with(
         }
         Command::LocalCopies(LocalCopiesCommand::Rebuild { config }) => {
             let rebuilt = crate::vault::rebuild(&located_config(&config)?)?;
-            show(&view, &rebuilt, true, |rebuilt| {
+            show(&view, &rebuilt, rebuilt.status == "rebuilt", |rebuilt| {
                 crate::present::render_rebuild(rebuilt, view.color, view.columns)
             })
         }

@@ -100,5 +100,6 @@ The order is the work-wave table in the [roadmap](roadmap.md), then the still-in
 38. `verify-sealed --volume` hashes a recorded replica by plan ID and volume label. It checks the backup bundle identity and payload even when the custody volume is offline. Both kinds of saved location include plan IDs in `status --json`.
 39. The native catalog snapshot reopens with the original vault ID after catalog loss. A fixture recovers committed WAL rows and checks that later changes stay in the original.
 40. A version 2 drill observation can be checked against an explicitly supplied evidence log. The offline fixture exercises an original log, changed bytes and a missing file.
+41. A partial rebuild now identifies historical copies it could not confirm and revision directories lacking a recovery document. A fixture recovers the intact primary before the backup document is returned, then confirms both copies on retry.
 
 Initialized disks and successful inspection are useful foundations. They do not establish that a model has been preserved or can run offline.

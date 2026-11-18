@@ -5,6 +5,7 @@ use crate::{Config, Error, Result, inventory::Source, plan::digest, validation::
 use rusqlite::OptionalExtension;
 use serde::{Deserialize, Serialize};
 use std::{
+    collections::BTreeSet,
     fs::{self, File, OpenOptions},
     io::{Read, Write},
     path::{Path, PathBuf},
@@ -51,6 +52,8 @@ pub struct Rebuild {
     pub damaged: Vec<String>,
     pub conflicts: Vec<String>,
     pub offline_volumes: Vec<String>,
+    pub unbundled_directories: Vec<String>,
+    pub unconfirmed_copies: Vec<String>,
     pub approvals_transferred: bool,
     pub transfer_authorized: bool,
     pub workspace_bytes: Option<u64>,
@@ -335,6 +338,7 @@ pub fn rebuild(config: &Config) -> Result<Rebuild> {
     let mut found = Vec::new();
     let mut damaged = Vec::new();
     let mut offline_volumes = Vec::new();
+    let mut unbundled_directories = Vec::new();
     for volume in &current.volumes {
         if volume.state != "mounted" {
             offline_volumes.push(volume.label.clone());
@@ -343,20 +347,37 @@ pub fn rebuild(config: &Config) -> Result<Rebuild> {
         let root = fs::canonicalize(&volume.path).map_err(super::io)?;
         check_path(&root)?;
         let preserved = root.join("preserved");
-        if !preserved.exists() {
-            continue;
-        }
         if linked_path(&preserved)? {
             damaged.push(format!("{}:preserved", volume.label));
             continue;
         }
-        for bundle_path in find_bundles(&preserved, &volume.label, &mut damaged)? {
+        if !preserved.try_exists().map_err(super::io)? {
+            continue;
+        }
+        for bundle_path in find_bundles(
+            &preserved,
+            &volume.label,
+            &mut damaged,
+            &mut unbundled_directories,
+        )? {
             match inspect(&root, &volume.label, &bundle_path) {
                 Ok(item) => found.push(item),
                 Err(_) => damaged.push(format!("{}:{}", volume.label, bundle_path.display())),
             }
         }
     }
+    // Hashing a large volume can span a mount change. Check all scanned
+    // identities before adding the first custody or replica row.
+    for volume in current.volumes.iter().filter(|v| v.state == "mounted") {
+        volume.require_identity(&current.vault_id)?;
+    }
+    let mut unconfirmed: BTreeSet<_> = current
+        .preserved
+        .iter()
+        .chain(&current.replicas)
+        .filter(|copy| !offline_volumes.contains(&copy.volume_label))
+        .map(|copy| (copy.volume_label.as_str(), copy.plan_id.as_str()))
+        .collect();
     found.sort_by(|left, right| {
         (&left.bundle_id, &left.volume_label).cmp(&(&right.bundle_id, &right.volume_label))
     });
@@ -382,6 +403,10 @@ pub fn rebuild(config: &Config) -> Result<Rebuild> {
             } else {
                 return Err(error);
             }
+        } else {
+            for item in group {
+                unconfirmed.remove(&(item.volume_label.as_str(), item.bundle_id.as_str()));
+            }
         }
         index = end;
     }
@@ -391,16 +416,26 @@ pub fn rebuild(config: &Config) -> Result<Rebuild> {
     damaged.dedup();
     let custody_count = u64::try_from(count_rows(&catalog, "custody")?).unwrap_or(0);
     let replica_count = u64::try_from(count_rows(&catalog, "replicas")?).unwrap_or(0);
-    let fresh = report(&catalog, config)?;
+    unbundled_directories.sort();
+    let complete = damaged.is_empty()
+        && conflicts.is_empty()
+        && offline_volumes.is_empty()
+        && unbundled_directories.is_empty()
+        && unconfirmed.is_empty();
     Ok(Rebuild {
         schema_version: 1,
-        status: "rebuilt",
-        vault_id: fresh.vault_id,
+        status: if complete { "rebuilt" } else { "partial" },
+        vault_id: current.vault_id,
         custody_count,
         replica_count,
         damaged,
         conflicts,
         offline_volumes,
+        unbundled_directories,
+        unconfirmed_copies: unconfirmed
+            .into_iter()
+            .map(|(label, id)| format!("{label}:{id}"))
+            .collect(),
         approvals_transferred: false,
         transfer_authorized: false,
         workspace_bytes: None,
@@ -885,7 +920,9 @@ fn inspect(root: &Path, label: &str, bundle_path: &Path) -> Result<Found> {
         .parent()
         .ok_or_else(|| Error::new("not_sealed", "the bundle manifest is missing or unreadable"))?;
     let expected = adoption::publish_dir(root, &bundle.repo_id, &bundle.resolved_revision);
-    if directory != expected {
+    if normalize_repo(&bundle.repo_id).as_deref().ok() != Some(bundle.repo_id.as_str())
+        || directory != expected
+    {
         return Err(Error::new(
             "not_sealed",
             "a bundle outside its revision directory is not a seal",
@@ -919,27 +956,47 @@ fn inspect(root: &Path, label: &str, bundle_path: &Path) -> Result<Found> {
     })
 }
 
-fn find_bundles(preserved: &Path, label: &str, damaged: &mut Vec<String>) -> Result<Vec<PathBuf>> {
+fn find_bundles(
+    preserved: &Path,
+    label: &str,
+    damaged: &mut Vec<String>,
+    unbundled: &mut Vec<String>,
+) -> Result<Vec<PathBuf>> {
     let mut found = Vec::new();
-    let mut stack = vec![preserved.to_path_buf()];
-    while let Some(dir) = stack.pop() {
+    let mut stack = vec![(preserved.to_path_buf(), false)];
+    while let Some((dir, inside_payload)) = stack.pop() {
         let mut entries = Vec::new();
         for entry in fs::read_dir(&dir).map_err(super::io)? {
             entries.push(entry.map_err(super::io)?.path());
         }
         entries.sort();
+        // Keep revision directories visible when their rebuild document is
+        // absent. Plain local adoptions can legitimately have this shape.
+        let revision_root = dir.parent().and_then(Path::parent).and_then(Path::parent)
+            == Some(preserved)
+            && dir
+                .file_name()
+                .and_then(|v| v.to_str())
+                .is_some_and(|v| crate::validation::validate_hex(v, 40).is_ok());
+        if revision_root && entries.binary_search(&dir.join(BUNDLE_NAME)).is_err() {
+            unbundled.push(format!("{label}:{}", dir.display()));
+        }
         for path in entries {
-            if linked_path(&path)? {
+            let meta = fs::symlink_metadata(&path).map_err(super::io)?;
+            if linked(&meta) {
                 damaged.push(format!("{label}:{}", path.display()));
                 continue;
             }
-            let meta = fs::symlink_metadata(&path).map_err(super::io)?;
-            if meta.is_dir() {
-                stack.push(path);
-            } else if meta.is_file()
+            if !inside_payload
                 && path.file_name().and_then(|name| name.to_str()) == Some(BUNDLE_NAME)
             {
-                found.push(path);
+                if meta.is_file() {
+                    found.push(path);
+                } else {
+                    damaged.push(format!("{label}:{}", path.display()));
+                }
+            } else if meta.is_dir() {
+                stack.push((path, inside_payload || revision_root));
             }
         }
     }
