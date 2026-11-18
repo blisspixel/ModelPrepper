@@ -1128,8 +1128,22 @@ fn rebuild_names_damage_offline_disks_and_marker_loss_without_inventing_rows() {
 
     let (_dir, config, _stage) = setup();
     delete_catalog(&config);
-    fs::remove_file(config.volumes[1].path.join(".modelprepper-volume.json")).unwrap();
+    let marker = config.volumes[1].path.join(crate::vault::MARKER);
+    let original = fs::read(&marker).unwrap();
+    fs::remove_file(&marker).unwrap();
     failure(rebuild(&config), "volume_identity_missing");
+    assert!(!config.catalog_path.join("catalog.sqlite3").exists());
+    let primary: serde_json::Value = serde_json::from_slice(
+        &fs::read(config.volumes[0].path.join(crate::vault::MARKER)).unwrap(),
+    )
+    .unwrap();
+    let mut duplicate: serde_json::Value = serde_json::from_slice(&original).unwrap();
+    duplicate["volume_id"] = primary["volume_id"].clone();
+    fs::write(&marker, serde_json::to_vec(&duplicate).unwrap()).unwrap();
+    failure(rebuild(&config), "volume_identity_mismatch");
+    assert!(!config.catalog_path.join("catalog.sqlite3").exists());
+    fs::write(&marker, original).unwrap();
+    assert_eq!(rebuild(&config).unwrap().vault_id, primary["vault_id"]);
 
     let (_dir, config, _stage) = setup();
     let marker = config.volumes[1].path.join(".modelprepper-volume.json");
