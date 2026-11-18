@@ -1583,7 +1583,12 @@ pub fn render_readiness(report: &crate::readiness::Report, color: bool, columns:
     let files = report
         .capabilities
         .iter()
-        .map(|capability| format!("{} {}", capability.id, capability.closure))
+        .map(|capability| {
+            format!(
+                "{} {} ({})",
+                capability.id, capability.closure, capability.integrity
+            )
+        })
         .collect::<Vec<_>>()
         .join(", ");
     let mut lines = vec![

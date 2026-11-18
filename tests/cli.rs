@@ -691,6 +691,37 @@ fn readiness_text_and_json_agree_and_do_not_create_or_execute() {
     let missing: serde_json::Value = serde_json::from_slice(&missing.stdout).unwrap();
     assert_eq!(missing["availability"], "unavailable");
     assert!(!absent.exists());
+    let kit = dir.path().join("runtime kit");
+    let inspect_kit = || {
+        binary(&[
+            "readiness",
+            "--recipe",
+            recipe.to_str().unwrap(),
+            "--path",
+            model.to_str().unwrap(),
+            "--runtime-root",
+            kit.to_str().unwrap(),
+        ])
+    };
+    let named = inspect_kit();
+    assert!(!named.status.success());
+    assert!(!kit.exists());
+    fs::create_dir(&kit).unwrap();
+    fs::write(kit.join("runtime.bin"), b"weights").unwrap();
+    let mut document: serde_json::Value =
+        serde_json::from_slice(&fs::read(&recipe).unwrap()).unwrap();
+    document["runtime"]["artifact"] = serde_json::json!({
+        "retention": "retained", "locator": "runtime.bin", "size_bytes": 7,
+        "sha256": document["model"]["files"][2]["sha256"]
+    });
+    fs::write(&recipe, serde_json::to_vec(&document).unwrap()).unwrap();
+    let result = inspect_kit();
+    assert!(result.status.success(), "{result:?}");
+    let report: serde_json::Value = serde_json::from_slice(&result.stdout).unwrap();
+    assert_eq!(report["runtime_retention"], "retained");
+    assert_eq!(report["capabilities"][0]["integrity"], "matched");
+    assert_eq!(report["executed"], false);
+    assert!(!model.join("runtime.bin").exists());
 }
 
 #[test]

@@ -108,6 +108,10 @@ A load test establishes that the specific environment worked at that time, not g
 
 Each file and the runtime artifact says whether it is `retained`, `named`, or `remote`. A retained file has a size and SHA-256. Ordinary preflight hashes a retained file only when its declared size is at most 2 MiB. A larger file can match in length and still be unverified. Pass `--full-hash` to stream and compare every declared retained file, including a large runtime. This can require a full HDD read. The report says `retained` for a runtime only when its bytes match, `unverified` when that retained file is larger than 2 MiB, `damaged` when the present file does not match, and `missing` when it is absent. A package name or an HTTPS URL is not a retained artifact and cannot make the closure complete. Rights are echoed from the recipe as a declaration. This command does not re-check the publisher, so provenance stays `declared_only`.
 
+When a retained runtime lives on separate media, add `--runtime-root <dir>`. Its relative locator is resolved under that directory. Model paths stay under `--path`. The same recipe digest applies after moving either directory. A missing or damaged runtime at the selected root is reported even if another copy sits beside the model. A named or remote runtime cannot use this option.
+
+The JSON `integrity` field covers the full recipe. Each capability also has an `integrity` field covering its own files. A previous task result can still apply to its recorded capability when a different capability is missing or damaged. The recorded recipe identity, runtime bytes, selected capability closure and integrity, rights, and environment must still match.
+
 The report keeps integrity, capability closure, rights, disk availability, environment, runtime retention, and offline readiness separate. There is no single ready badge. A missing directory is `unavailable` and is not created. A symlink or Windows reparse point used as the directory is `unsafe_path` and is not followed. The command does not contact a network, execute a model or runtime, or write a vault.
 
 ### Recording a prior task

@@ -250,6 +250,7 @@ impl EvidenceLog {
 
 #[derive(Debug, Serialize, PartialEq, Eq)]
 pub struct CapabilityReport {
+    pub integrity: &'static str,
     pub id: String,
     pub closure: &'static str,
     pub blocked_by: Vec<String>,
@@ -401,16 +402,16 @@ impl Recipe {
             }
             validate_hex(&drill.recipe_digest, 64)?;
             validate_platform(&drill.os, &drill.arch)?;
-            if !self.capabilities.iter().any(|id| id == &drill.capability) {
+            if drill.capability.is_empty() {
                 return Err(Error::new(
                     "invalid_recipe",
-                    "a recorded drill names a selected capability",
+                    "a recorded drill needs its original capability",
                 ));
             }
-            if drill.runtime_version != self.runtime.version {
+            if drill.runtime_version.is_empty() {
                 return Err(Error::new(
                     "invalid_recipe",
-                    "a recorded drill names the recipe runtime version",
+                    "a recorded drill needs its original runtime version",
                 ));
             }
             if drill.network != "disabled" || drill.cache != "empty" {
@@ -453,12 +454,20 @@ impl Recipe {
     }
 }
 
+/// Inspect an explicitly located retained runtime independently of the model volume.
 pub fn preflight(
     recipe: &Recipe,
     path: &Path,
+    runtime_root: Option<&Path>,
     full_hash: bool,
     evidence_path: Option<&Path>,
 ) -> Result<Report> {
+    if runtime_root.is_some() && recipe.runtime.artifact.retention != Retention::Retained {
+        return Err(Error::new(
+            "invalid_recipe",
+            "--runtime-root requires a retained runtime artifact",
+        ));
+    }
     let evidence_log = evidence_path
         .map(|path| check_evidence_log(recipe, path))
         .transpose()?;
@@ -466,7 +475,6 @@ pub fn preflight(
     let available = directory_available(path)?;
     let mut hashed_files = 0_u32;
     let mut unverified_files = 0_u32;
-    let mut damaged = false;
     let mut findings = Vec::new();
     if available {
         for file in &recipe.model.files {
@@ -477,48 +485,42 @@ pub fn preflight(
                 &mut hashed_files,
                 &mut unverified_files,
             )?;
-            damaged |= finding.damaged;
-            findings.push(finding);
-        }
-        if recipe.runtime.artifact.retention == Retention::Retained {
-            let runtime_file = RecipeFile {
-                path: recipe.runtime.artifact.locator.clone(),
-                role: Role::Other,
-                capability: String::new(),
-                need: Need::Required,
-                retention: Retention::Retained,
-                size_bytes: recipe.runtime.artifact.size_bytes,
-                sha256: recipe.runtime.artifact.sha256.clone(),
-                base: None,
-                locator: None,
-            };
-            let finding = inspect_retained(
-                path,
-                &runtime_file,
-                full_hash,
-                &mut hashed_files,
-                &mut unverified_files,
-            )?;
-            damaged |= finding.damaged;
             findings.push(finding);
         }
     }
+    let runtime_finding = if recipe.runtime.artifact.retention == Retention::Retained {
+        if let Some(root) = runtime_root {
+            // Reject linked or non-directory roots. A missing root is reported
+            // through the same retained-file lookup as any other missing asset.
+            directory_available(root)?;
+        }
+        let runtime_file = RecipeFile {
+            path: recipe.runtime.artifact.locator.clone(),
+            role: Role::Other,
+            capability: String::new(),
+            need: Need::Required,
+            retention: Retention::Retained,
+            size_bytes: recipe.runtime.artifact.size_bytes,
+            sha256: recipe.runtime.artifact.sha256.clone(),
+            base: None,
+            locator: None,
+        };
+        Some(inspect_retained(
+            runtime_root.unwrap_or(path),
+            &runtime_file,
+            full_hash,
+            &mut hashed_files,
+            &mut unverified_files,
+        )?)
+    } else {
+        None
+    };
     let capabilities = recipe
         .capabilities
         .iter()
         .map(|id| capability_report(id, &recipe.model.files, &findings))
         .collect::<Vec<_>>();
-    let integrity = if !available {
-        "unavailable"
-    } else if damaged {
-        "damaged"
-    } else if unverified_files > 0 || findings.iter().any(|finding| finding.missing) {
-        "not_checked"
-    } else if hashed_files > 0 {
-        "matched"
-    } else {
-        "not_checked"
-    };
+    let integrity = file_integrity(available, findings.iter().chain(&runtime_finding));
     let environment = if recipe.runtime.os != "any" && recipe.runtime.os != host_os()
         || recipe.runtime.arch != "any" && recipe.runtime.arch != host_arch()
     {
@@ -527,20 +529,12 @@ pub fn preflight(
         "compatible"
     };
     let runtime_retention = match recipe.runtime.artifact.retention {
-        Retention::Retained => {
-            // The runtime finding is recorded after the model files. A shared
-            // path must use that later finding, not the model file's result.
-            match findings
-                .iter()
-                .rev()
-                .find(|finding| finding.path == recipe.runtime.artifact.locator)
-            {
-                Some(finding) if finding.satisfied => "retained",
-                Some(finding) if finding.unverified => "unverified",
-                Some(finding) if finding.damaged => "damaged",
-                _ => "missing",
-            }
-        }
+        Retention::Retained => match &runtime_finding {
+            Some(finding) if finding.satisfied => "retained",
+            Some(finding) if finding.unverified => "unverified",
+            Some(finding) if finding.damaged => "damaged",
+            _ => "missing",
+        },
         Retention::Named => "named",
         Retention::Remote => "remote",
     };
@@ -552,7 +546,6 @@ pub fn preflight(
     let mut offline_readiness = readiness_state(
         recipe,
         &recipe_digest,
-        integrity,
         environment,
         runtime_retention,
         rights,
@@ -600,7 +593,6 @@ pub fn preflight(
 }
 
 struct Finding {
-    path: String,
     satisfied: bool,
     missing: bool,
     damaged: bool,
@@ -609,13 +601,46 @@ struct Finding {
     reason: String,
 }
 
+fn file_integrity<'a>(
+    available: bool,
+    findings: impl Iterator<Item = &'a Finding>,
+) -> &'static str {
+    if !available {
+        return "unavailable";
+    }
+    let mut checked = false;
+    let mut incomplete = false;
+    for finding in findings {
+        if finding.damaged {
+            return "damaged";
+        }
+        checked |= finding.satisfied;
+        incomplete |= finding.missing || finding.unverified;
+    }
+    if checked && !incomplete {
+        "matched"
+    } else {
+        "not_checked"
+    }
+}
+
 fn capability_report(id: &str, files: &[RecipeFile], findings: &[Finding]) -> CapabilityReport {
     let mut blocked_by = Vec::new();
     let mut excluded = Vec::new();
     let mut unknown = false;
     let mut missing = false;
     let mut unverified = false;
-    for file in files.iter().filter(|file| file.capability == id) {
+    // Available model files produce one finding each in declaration order.
+    let assets = files
+        .iter()
+        .enumerate()
+        .filter(|(_, file)| file.capability == id)
+        .map(|(index, file)| (file, findings.get(index)));
+    let integrity = file_integrity(
+        !findings.is_empty(),
+        assets.clone().filter_map(|(_, finding)| finding),
+    );
+    for (file, finding) in assets {
         if file.need == Need::Unknown {
             unknown = true;
             blocked_by.push(format!("{} unknown", file.path));
@@ -627,7 +652,6 @@ fn capability_report(id: &str, files: &[RecipeFile], findings: &[Finding]) -> Ca
             unknown = true;
             blocked_by.push(format!("{} unresolved_base", file.path));
         }
-        let finding = findings.iter().find(|finding| finding.path == file.path);
         match finding {
             Some(finding) if finding.optional_absent => excluded.push(file.path.clone()),
             Some(finding) if finding.unverified && file.need == Need::Required => {
@@ -664,6 +688,7 @@ fn capability_report(id: &str, files: &[RecipeFile], findings: &[Finding]) -> Ca
         "complete"
     };
     CapabilityReport {
+        integrity,
         id: id.to_owned(),
         closure,
         blocked_by,
@@ -674,7 +699,6 @@ fn capability_report(id: &str, files: &[RecipeFile], findings: &[Finding]) -> Ca
 fn readiness_state(
     recipe: &Recipe,
     digest: &str,
-    integrity: &str,
     environment: &str,
     runtime_retention: &str,
     rights: &str,
@@ -688,16 +712,18 @@ fn readiness_state(
             .observation
             .as_ref()
             .is_none_or(|o| o.isolation != Isolation::Unverified)
+        && drill.runtime_version == recipe.runtime.version
         && drill.os == host_os()
         && drill.arch == host_arch()
         && drill.network == "disabled"
         && drill.cache == "empty"
         && environment == "compatible"
-        && integrity == "matched"
         && rights == "declared_matched"
         && runtime_retention == "retained"
         && capabilities.iter().any(|capability| {
-            capability.id == drill.capability && capability.closure == "complete"
+            capability.id == drill.capability
+                && capability.closure == "complete"
+                && capability.integrity == "matched"
         });
     if !applies {
         return "stale";
@@ -843,7 +869,6 @@ fn inspect_retained(
     unverified_files: &mut u32,
 ) -> Result<Finding> {
     let mut finding = Finding {
-        path: file.path.clone(),
         satisfied: false,
         missing: false,
         damaged: false,
@@ -1017,7 +1042,7 @@ mod tests {
     use std::fs;
 
     fn preflight(recipe: &Recipe, path: &Path) -> Result<Report> {
-        super::preflight(recipe, path, false, None)
+        super::preflight(recipe, path, None, false, None)
     }
 
     const COMMIT: &str = "0123456789abcdef0123456789abcdef01234567";
@@ -1417,14 +1442,14 @@ mod tests {
         recipe.recorded_drill = Some(drill.clone());
         let recipe = Recipe::parse(&serde_json::to_string(&recipe).unwrap()).unwrap();
         assert_eq!(preflight(&recipe, &dir).unwrap().unverified_files, 2);
-        let report = super::preflight(&recipe, &dir, true, None).unwrap();
+        let report = super::preflight(&recipe, &dir, None, true, None).unwrap();
         assert_eq!(report.offline_readiness, "task_passed");
         assert!(!report.executed && !report.network_contact);
         assert_eq!(report.recorded_drill.as_ref(), Some(&drill));
         assert!(crate::present::render_readiness(&report, false, 80).contains("prior drill"));
         assert!(report.evidence_log.is_none());
         let log = fs::canonicalize(&dir).unwrap().join("observed.log");
-        let check = || super::preflight(&recipe, &dir, true, Some(&log)).unwrap();
+        let check = || super::preflight(&recipe, &dir, None, true, Some(&log)).unwrap();
         let missing = check();
         assert_eq!(missing.offline_readiness, "stale");
         assert_eq!(missing.evidence_log.unwrap().status, "missing");
@@ -1448,7 +1473,7 @@ mod tests {
             .unwrap()
             .isolation = Isolation::Unverified;
         assert_eq!(
-            super::preflight(&unverified, &dir, true, None)
+            super::preflight(&unverified, &dir, None, true, None)
                 .unwrap()
                 .offline_readiness,
             "stale"
@@ -1456,9 +1481,53 @@ mod tests {
         let mut changed = body;
         changed[0] ^= 1;
         fs::write(dir.join("model.safetensors"), &changed).unwrap();
-        let report = super::preflight(&recipe, &dir, true, None).unwrap();
+        let report = super::preflight(&recipe, &dir, None, true, None).unwrap();
         assert_eq!(report.integrity, "damaged");
         assert_eq!(report.offline_readiness, "stale");
+    }
+
+    #[test]
+    fn separate_runtime_and_other_capabilities_are_checked_independently() {
+        let (temp, model, mut recipe) = prepared_runtime();
+        let root = temp.path().join("runtime-kit");
+        recipe.capabilities.push("transcription".into());
+        recipe.model.files.push(file(
+            "audio.bin",
+            Role::Weight,
+            "transcription",
+            Need::Required,
+            Retention::Retained,
+            Some(b"extra"),
+        ));
+        recipe.recorded_drill = Some(matching_drill(&recipe, DrillResult::TaskPassed));
+        let recipe = Recipe::parse(&serde_json::to_string(&recipe).unwrap()).unwrap();
+        let check = |path: &Path| super::preflight(&recipe, path, Some(&root), true, None).unwrap();
+        // A valid runtime exists beside the model, but an explicit missing root never falls back.
+        let missing_runtime = check(&model);
+        assert_eq!(missing_runtime.runtime_retention, "missing");
+        assert_eq!(missing_runtime.offline_readiness, "stale");
+        assert!(!root.exists());
+        fs::create_dir(&root).unwrap();
+        fs::rename(model.join("runtime.bin"), root.join("runtime.bin")).unwrap();
+        let recorded = check(&model);
+        assert_eq!(recorded.recipe_digest, missing_runtime.recipe_digest);
+        assert_eq!(recorded.runtime_retention, "retained");
+        assert_eq!(recorded.offline_readiness, "task_passed");
+        assert_eq!(recorded.capabilities[0].integrity, "matched");
+        assert_eq!(recorded.capabilities[1].closure, "missing");
+        assert_eq!(recorded.integrity, "not_checked");
+        fs::write(model.join("audio.bin"), b"wrong").unwrap();
+        let damaged = check(&model);
+        assert_eq!(damaged.offline_readiness, "task_passed");
+        assert_eq!(damaged.capabilities[1].integrity, "damaged");
+        assert_eq!(damaged.integrity, "damaged");
+        let unavailable = check(&temp.path().join("absent"));
+        assert_eq!(unavailable.runtime_retention, "retained");
+        assert_eq!(unavailable.availability, "unavailable");
+        assert_eq!(unavailable.offline_readiness, "stale");
+        fs::write(root.join("runtime.bin"), b"changed").unwrap();
+        assert_eq!(check(&model).offline_readiness, "stale");
+        assert!(!damaged.executed && !damaged.network_contact && !damaged.vault_mutated);
     }
 
     #[test]
@@ -1811,16 +1880,16 @@ mod tests {
         reject(
             |recipe| {
                 let mut drill = matching_drill(recipe, DrillResult::Failed);
-                drill.capability = "other".into();
+                drill.capability.clear();
                 recipe.recorded_drill = Some(drill);
             },
             "invalid_recipe",
-            "selected capability",
+            "original capability",
         );
         reject(
             |recipe| {
                 let mut drill = matching_drill(recipe, DrillResult::Failed);
-                drill.runtime_version = "0".into();
+                drill.runtime_version.clear();
                 recipe.recorded_drill = Some(drill);
             },
             "invalid_recipe",
@@ -2201,7 +2270,16 @@ mod tests {
 
         let mut other = recipe.clone();
         other.recorded_drill.as_mut().unwrap().capability = "other".into();
-        expect(&other, "stale", "does not apply");
+        let historical = Recipe::parse(&serde_json::to_string(&other).unwrap()).unwrap();
+        expect(&historical, "stale", "does not apply");
+        let mut old_runtime = recipe.clone();
+        old_runtime.recorded_drill.as_mut().unwrap().runtime_version = "previous-build".into();
+        let historical = Recipe::parse(&serde_json::to_string(&old_runtime).unwrap()).unwrap();
+        let stale = expect(&historical, "stale", "does not apply");
+        assert_eq!(
+            stale.recorded_drill.unwrap().runtime_version,
+            "previous-build"
+        );
     }
 
     #[cfg(unix)]

@@ -406,6 +406,9 @@ pub enum PreviewCommand {
         /// Verify this retained log against the digest in a version 2 prior drill.
         #[arg(long)]
         evidence_log: Option<PathBuf>,
+        /// Directory containing the recipe's retained runtime artifact. Defaults to the model directory.
+        #[arg(long)]
+        runtime_root: Option<PathBuf>,
         /// Directory of retained model files. A missing directory is reported and not created.
         #[arg(long)]
         path: PathBuf,
@@ -904,10 +907,16 @@ pub(crate) fn execute_with(
             path,
             full_hash,
             evidence_log,
+            runtime_root,
         }) => {
             let recipe = crate::readiness::Recipe::parse(&read_text(&recipe)?)?;
-            let report =
-                crate::readiness::preflight(&recipe, &path, full_hash, evidence_log.as_deref())?;
+            let report = crate::readiness::preflight(
+                &recipe,
+                &path,
+                runtime_root.as_deref(),
+                full_hash,
+                evidence_log.as_deref(),
+            )?;
             let log_ok = report.evidence_log.as_ref().is_none_or(|log| log.matched());
             show(&view, &report, log_ok, |report| {
                 crate::present::render_readiness(report, view.color, view.columns)
