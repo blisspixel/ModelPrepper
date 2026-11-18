@@ -102,7 +102,13 @@ revision=0000000000000000000000000000000000000001
     available=$(df -B1 --output=avail /bounded | tail -1)
     test "$available" -ge 1310720
     test "$available" -lt 2359296
+    # An interrupted writer already allocated part of the second file. Its
+    # old bytes must be reclaimed before charging space for the replacement.
+    dd if=/dev/zero of="$staging/second.bin" bs=65536 count=12 status=none
+    test "$(df -B1 --output=avail /bounded | tail -1)" -lt 1310720
+    first_inode=$(stat -c %i "$staging/first.bin")
     /modelprepper import --config tight.toml "$@" --json > resumed.json
+    test "$(stat -c %i /bounded/vault/preserved/local/pair/0000000000000000000000000000000000000002/first.bin)" = "$first_inode"
     jq -e ".file_count == 2" resumed.json
     /modelprepper verify-sealed --config tight.toml --plan "$id" --json > checked.json
     jq -e ".matched" checked.json

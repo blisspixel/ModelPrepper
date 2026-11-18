@@ -1298,6 +1298,25 @@ fn partial_is_a_valid_payload_extension_and_recorded_retries_need_no_second_copy
     }
     let import =
         import_baseline(&config, &incoming, "example/intake", REVISION, "primary").unwrap();
+    let staging = config.volumes[1]
+        .path
+        .join(".modelprepper-adopt")
+        .join(&import.plan_id);
+    fs::create_dir_all(&staging).unwrap();
+    fs::write(staging.join("model.partial"), b"first").unwrap();
+    fs::write(staging.join("model.txt"), b"broken").unwrap(); // Same length as the correct bytes.
+    fs::write(staging.join("old.partial"), b"obsolete scratch").unwrap();
+    let reserve = config.storage.min_free_bytes;
+    config.storage.min_free_bytes = u64::MAX - 1024;
+    failure(
+        replica(&config, &import.plan_id, "backup"),
+        "insufficient_space",
+    );
+    assert_eq!(fs::read(staging.join("model.partial")).unwrap(), b"first");
+    assert!(!staging.join("old.partial").exists() && !staging.join("model.txt").exists());
+    assert_eq!(fs::read(import.path.join("model.txt")).unwrap(), b"second");
+    assert!(status(&config).unwrap().replicas.is_empty());
+    config.storage.min_free_bytes = reserve;
     let replica = replica(&config, &import.plan_id, "backup").unwrap();
     assert_eq!(
         fs::read(replica.path.join("model.partial")).unwrap(),
@@ -1449,9 +1468,8 @@ fn staging_requires_the_disk_that_was_present_before_hashing() {
             )
             .unwrap();
         }
-        let error =
-            stage_payload_files(dir.path(), &staging, &[], 0, volume, &observed.vault_id, 0)
-                .unwrap_err();
+        let error = stage_payload_files(dir.path(), &staging, &[], volume, &observed.vault_id, 0)
+            .unwrap_err();
         assert_eq!(error.code, "volume_unavailable");
         assert!(!staging.parent().unwrap().exists());
     }
