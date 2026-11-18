@@ -43,7 +43,7 @@ The site describes community magnets, source checksums, and recovery after upstr
 
 A magnet is a locator, not a permanence guarantee. An infohash or torrent piece hash does not establish the original publisher's identity or replace whole-file checks against independently recorded source evidence. A creator-account badge also does not verify every tensor file. These are preservation design conclusions, not results from auditing PirateFace's implementation.
 
-The first useful recovery path can be manual media/client download followed by verified import, once import is implemented. Native torrent support is a later, isolated Rust transport experiment. Do not make aria2, a torrent daemon, or a Python SDK a mandatory runtime dependency of the archive utility.
+Completed files from manual media or an external client can go through a saved publisher review, offline verification and copy adoption. Without independent upstream evidence, an explicit baseline import records local provenance. See the [headless Linux intake procedure](headless-linux.md#hand-off-completed-files). Native torrent support is a later, isolated Rust transport experiment. Do not make aria2, a torrent daemon, or a Python SDK a mandatory runtime dependency of the archive utility.
 
 Seeding is an explicit opt-in operation with independent upload limits, time windows, peer-network settings, and rights review. Downloading an artifact must not silently authorize indefinite upload. Tracker, DHT, and peer discovery require their own network/privacy design and fault tests.
 

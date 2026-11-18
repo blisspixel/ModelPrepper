@@ -92,6 +92,23 @@ pub(crate) fn adopt_stopping(
         ));
     }
     crate::filesystem::admit(&volume.path, crate::filesystem::Purpose::Payload)?;
+    let check_destination = || {
+        let marker = super::read_identity(&volume.path.join(super::MARKER));
+        match marker {
+            Ok(identity)
+                if identity.schema_version == 1
+                    && identity.vault_id == status.vault_id
+                    && identity.volume_id == volume.volume_id
+                    && identity.label == volume.label =>
+            {
+                Ok(())
+            }
+            _ => Err(Error::new(
+                "volume_unavailable",
+                "reconnect the original adoption volume",
+            )),
+        }
+    };
     let volume_path = fs::canonicalize(&volume.path).map_err(io)?;
     let volume_label = volume.label.clone();
     let repo = inventory.source.repo_id.clone();
@@ -142,6 +159,7 @@ pub(crate) fn adopt_stopping(
         let _ = fs::remove_dir_all(&staging);
         let _ = fs::remove_file(&journal);
         if move_source {
+            check_destination()?;
             remove_sources(&source, &published, &chosen)?;
         }
         return Ok(recorded(
@@ -181,6 +199,7 @@ pub(crate) fn adopt_stopping(
         let mut verifying = |path: &str, done, total| progress("verifying", path, done, total);
         verify::verify_tree(&inventory, &source, &mut verifying)?
     };
+    check_destination()?;
     if !verification.ok {
         rollback(&staging, &journal);
         return Ok(Outcome::Mismatch(verification));
@@ -191,16 +210,24 @@ pub(crate) fn adopt_stopping(
     if let Err(error) = {
         let mut copying = |path: &str, done, total| progress("copying", path, done, total);
         stage_files(
-            &source,
             &staging,
             &journal,
             plan_id,
             &chosen,
-            &mut copying,
             stop_after_files,
+            |file| {
+                check_destination()?;
+                copy_one(
+                    &source,
+                    &staging,
+                    file,
+                    config.storage.min_free_bytes,
+                    &mut copying,
+                )
+            },
         )
     } {
-        if error.code != "adopt_interrupted" {
+        if error.code != "adopt_interrupted" && check_destination().is_ok() {
             rollback(&staging, &journal);
         }
         return Err(error);
@@ -209,6 +236,7 @@ pub(crate) fn adopt_stopping(
         let mut reverifying = |path: &str, done, total| progress("re-verifying", path, done, total);
         verify::verify_tree(&inventory, &staging, &mut reverifying)?
     };
+    check_destination()?;
     if !staged.ok {
         rollback(&staging, &journal);
         return Ok(Outcome::Mismatch(staged));
@@ -251,6 +279,7 @@ pub(crate) fn adopt_stopping(
     )?;
     let _ = fs::remove_file(&journal);
     if move_source {
+        check_destination()?;
         remove_sources(&source, &published, &chosen)?;
     }
     Ok(recorded(
@@ -291,13 +320,12 @@ fn recorded(
 }
 
 fn stage_files(
-    source: &Path,
     staging: &Path,
     journal: &Path,
     plan_id: &str,
     files: &[SourceFile],
-    progress: &mut dyn FnMut(&str, u64, u64),
     stop_after_files: Option<usize>,
+    mut copy: impl FnMut(&SourceFile) -> Result<()>,
 ) -> Result<()> {
     fs::create_dir_all(staging).map_err(io)?;
     let mut done = Vec::new();
@@ -309,7 +337,7 @@ fn stage_files(
                 "stopped before publication",
             ));
         }
-        copy_one(source, staging, file, progress)?;
+        copy(file)?;
         done.push(file.path.clone());
         write_journal(journal, plan_id, &done)?;
     }
@@ -320,6 +348,7 @@ fn copy_one(
     source: &Path,
     staging: &Path,
     file: &SourceFile,
+    min_free_bytes: u64,
     progress: &mut dyn FnMut(&str, u64, u64),
 ) -> Result<()> {
     verify::metadata_nofollow(source, &file.path)?;
@@ -340,6 +369,11 @@ fn copy_one(
     if partial.exists() {
         fs::remove_file(&partial).map_err(io)?;
     }
+    super::seal::reservation_fits(
+        fs4::available_space(staging).map_err(io)?,
+        file.size_bytes,
+        min_free_bytes,
+    )?;
     let mut input = File::open(&from)
         .map_err(|error| Error::new("input_read_failed", format!("{}: {error}", file.path)))?;
     let mut output = OpenOptions::new()

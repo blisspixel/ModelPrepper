@@ -1,14 +1,14 @@
 pragma ComponentBehavior: Bound
 
 import QtQuick
-import Quickshell
 import Quickshell.Io
-import qs.Ui
+import qs.Ui as Ui
+import "." as Presence
 import "Model.js" as Model
 
 // Optional presence chip. Disk state comes from Model.js. This file only
 // forwards the panel lifecycle and starts the argv that library returns.
-BarWidget {
+Ui.BarWidget {
   id: root
   moduleName: "io.github.blisspixel.modelprepper-presence"
 
@@ -24,37 +24,13 @@ BarWidget {
   property var queuedLaunch: null
   property var exitHandler: null
 
-  readonly property bool opened: panelLoader.item
-    ? panelLoader.item.opened === true
-    : false
-  readonly property bool popoutSwitchClosing: panelLoader.item
-    ? panelLoader.item.popoutSwitchClosing === true
-    : false
+  readonly property bool opened: details.opened
+  readonly property bool popoutSwitchClosing: details.popoutSwitchClosing
 
-  function open() {
-    if (panelLoader.item) panelLoader.item.open()
-  }
-
-  function close() {
-    if (panelLoader.item) panelLoader.item.close()
-  }
-
-  function toggle() {
-    if (panelLoader.item) panelLoader.item.toggle()
-  }
-
-  function closeForPopoutSwitch() {
-    if (panelLoader.item) panelLoader.item.closeForPopoutSwitch()
-  }
-
-  function injectPanel() {
-    var target = panelLoader.item
-    if (!target) return
-    if ("bar" in target) target.bar = root.bar
-    if ("settings" in target) target.settings = root.settings
-    if ("anchorItem" in target) target.anchorItem = button
-    if ("hostWidget" in target) target.hostWidget = root
-  }
+  function open() { details.open() }
+  function close() { details.close() }
+  function toggle() { details.toggle() }
+  function closeForPopoutSwitch() { details.closeForPopoutSwitch() }
 
   function follow(step) {
     if (!step) return
@@ -183,11 +159,7 @@ BarWidget {
   implicitWidth: button.implicitWidth
   implicitHeight: button.implicitHeight
 
-  onBarChanged: injectPanel()
-  onSettingsChanged: {
-    root.injectPanel()
-    root.syncSettings()
-  }
+  onSettingsChanged: root.syncSettings()
 
   Component.onCompleted: root.syncSettings()
   Component.onDestruction: {
@@ -199,15 +171,13 @@ BarWidget {
     if (generation !== 0) Model.sharedAbandon(generation, Date.now())
   }
 
-  Loader {
-    id: panelLoader
-    active: true
-    source: Qt.resolvedUrl("Panel.qml")
+  Presence.Panel {
+    id: details
     visible: false
-    onLoaded: {
-      root.injectPanel()
-      Qt.callLater(root.injectPanel)
-    }
+    bar: root.bar
+    settings: root.settings
+    anchorItem: button
+    hostWidget: root
   }
 
   Timer {
@@ -247,7 +217,7 @@ BarWidget {
     onRunningChanged: {
       if (statusProcess.running) return
       if (root.queuedLaunch) {
-        var launch = root.queuedLaunch
+        const launch = root.queuedLaunch
         root.queuedLaunch = null
         // A newer launch may already own the generation. Starting the stale
         // one would let its exit stand in for the read the model is waiting on.
@@ -258,7 +228,7 @@ BarWidget {
     }
   }
 
-  WidgetButton {
+  Ui.WidgetButton {
     id: button
     anchors.fill: parent
     bar: root.bar

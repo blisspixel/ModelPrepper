@@ -11,7 +11,8 @@ use std::fs;
 fn setup() -> (tempfile::TempDir, crate::Config) {
     let dir = tempfile::tempdir().unwrap();
     let root = fs::canonicalize(dir.path()).unwrap();
-    let config = crate::Config::default_for(root.join("catalog"), root.join("models"));
+    let mut config = crate::Config::default_for(root.join("catalog"), root.join("models"));
+    config.storage.min_free_bytes = 1024 * 1024;
     initialize(&config).unwrap();
     (dir, config)
 }

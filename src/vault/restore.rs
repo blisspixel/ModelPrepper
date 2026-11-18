@@ -1,6 +1,8 @@
 //! Offline replica, catalog rebuild, local-baseline import, and one-plan verification.
 //! These paths do not open a socket, do not require a grant, and do not copy one.
-use super::{adoption, check_path, open_catalog, open_recovered_catalog, report, seal, status};
+use super::{
+    Catalog, adoption, check_path, open_catalog, open_recovered_catalog, report, seal, status,
+};
 use crate::{Config, Error, Result, inventory::Source, plan::digest, validation::normalize_repo};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -111,22 +113,20 @@ pub(crate) fn replica_with(
     volume_label: &str,
     stop: Option<ReplicaStop>,
 ) -> Result<Replica> {
-    let row = {
-        let catalog = open_catalog(config, false)?;
-        load_custody(&catalog, plan_id)?.ok_or_else(|| {
-            Error::new(
-                "revision_not_sealed",
-                "replica requires a sealed revision in the catalog",
-            )
-        })?
-    };
+    let catalog = open_catalog(config, false)?;
+    let row = load_custody(&catalog, plan_id)?.ok_or_else(|| {
+        Error::new(
+            "revision_not_sealed",
+            "replica requires a sealed revision in the catalog",
+        )
+    })?;
     if row.volume_label == volume_label {
         return Err(Error::new(
             "replica_same_volume",
             "a second folder on the sealing volume is not a replica",
         ));
     }
-    let current = status(config)?;
+    let current = report(&catalog, config)?;
     let source_volume = mounted(&current, &row.volume_label)?;
     let destination = mounted(&current, volume_label)?;
     let source_root = fs::canonicalize(&source_volume.path).map_err(super::io)?;
@@ -134,7 +134,13 @@ pub(crate) fn replica_with(
     check_path(&source_root)?;
     check_path(&dest_root)?;
     crate::filesystem::admit(&destination.path, crate::filesystem::Purpose::Payload)?;
+    if row.relative != adoption::relative_dir(&row.repo, &row.revision)
+        || !safe_relative(&row.relative)
+    {
+        return Err(conflict());
+    }
     let source = source_root.join(&row.relative);
+    check_path(&source)?;
     let files = parse_manifest(&row.manifest)?;
     let bundle = seal::read_published_bundle(&source.join(BUNDLE_NAME))?;
     if bundle.bundle_id != row.plan_id
@@ -145,16 +151,6 @@ pub(crate) fn replica_with(
         return Err(conflict());
     }
     let size = sweep(&source, &files)?;
-    seal::reservation_fits(
-        destination.available_bytes.ok_or_else(|| {
-            Error::new(
-                "volume_unavailable",
-                "connect the configured destination disk with its original identity",
-            )
-        })?,
-        size,
-        config.storage.min_free_bytes,
-    )?;
     let published = adoption::publish_dir(&dest_root, &row.repo, &row.revision);
     let staging = dest_root.join(".modelprepper-adopt").join(&row.plan_id);
     check_path(&published)?;
@@ -165,7 +161,7 @@ pub(crate) fn replica_with(
         if copy.bundle_id != bundle.bundle_id || !same_files(&copy.files, &files) {
             return Err(conflict());
         }
-        record_replica(config, &row, volume_label)?;
+        record_replica(&catalog, &row, volume_label)?;
         return Ok(replica_view(
             &row,
             volume_label,
@@ -174,6 +170,16 @@ pub(crate) fn replica_with(
             size,
         ));
     }
+    seal::reservation_fits(
+        destination.available_bytes.ok_or_else(|| {
+            Error::new(
+                "volume_unavailable",
+                "connect the configured destination disk with its original identity",
+            )
+        })?,
+        size,
+        config.storage.min_free_bytes,
+    )?;
     if let Some(parent) = staging.parent() {
         fs::create_dir_all(parent).map_err(super::io)?;
         adoption::sync_dir(parent)?;
@@ -181,6 +187,7 @@ pub(crate) fn replica_with(
     for file in &files {
         copy_hashed(&source, &staging, file)?;
     }
+    discard_unselected(&staging, &files)?;
     copy_bytes(&source.join(BUNDLE_NAME), &staging.join(BUNDLE_NAME))?;
     adoption::sync_dir(&staging)?;
     if stop == Some(ReplicaStop::BeforeRename) {
@@ -204,7 +211,7 @@ pub(crate) fn replica_with(
             "stopped before the replica was recorded",
         ));
     }
-    record_replica(config, &row, volume_label)?;
+    record_replica(&catalog, &row, volume_label)?;
     Ok(replica_view(
         &row,
         volume_label,
@@ -224,7 +231,6 @@ pub fn rebuild(config: &Config) -> Result<Rebuild> {
         open_recovered_catalog(config)?
     };
     let current = report(&catalog, config)?;
-    drop(catalog);
     let mut found = Vec::new();
     let mut damaged = Vec::new();
     let mut offline_volumes = Vec::new();
@@ -264,7 +270,7 @@ pub fn rebuild(config: &Config) -> Result<Rebuild> {
         let group = &found[index..end];
         if group.iter().any(|item| item.manifest != group[0].manifest) {
             conflicts.push(group[0].bundle_id.clone());
-        } else if let Err(error) = record_found(config, group) {
+        } else if let Err(error) = record_found(&catalog, &config.storage.default_volume, group) {
             if error.code == "destination_conflict" {
                 conflicts.push(group[0].bundle_id.clone());
             } else {
@@ -277,7 +283,6 @@ pub fn rebuild(config: &Config) -> Result<Rebuild> {
     conflicts.dedup();
     damaged.sort();
     damaged.dedup();
-    let catalog = open_catalog(config, false)?;
     let custody_count = u64::try_from(count_rows(&catalog, "custody")?).unwrap_or(0);
     let replica_count = u64::try_from(count_rows(&catalog, "replicas")?).unwrap_or(0);
     let fresh = report(&catalog, config)?;
@@ -315,6 +320,10 @@ pub fn import_baseline(
             "a local-baseline revision is a 40-hex label, not an upstream pin",
         ));
     }
+    let catalog = open_catalog(config, false)?;
+    let current = report(&catalog, config)?;
+    let volume = mounted(&current, volume_label)?;
+    crate::filesystem::admit(&volume.path, crate::filesystem::Purpose::Payload)?;
     let source = adoption::checked_source(config, source)?;
     let names = collect_files(&source)?;
     if names.is_empty() {
@@ -364,23 +373,13 @@ pub fn import_baseline(
         .iter()
         .try_fold(0_u64, |total, file| total.checked_add(file.size_bytes))
         .ok_or_else(|| Error::new("size_overflow", "baseline size exceeds u64 capacity"))?;
-    let current = status(config)?;
-    let volume = mounted(&current, volume_label)?;
-    crate::filesystem::admit(&volume.path, crate::filesystem::Purpose::Payload)?;
-    let available = volume.available_bytes.ok_or_else(|| {
-        Error::new(
-            "volume_unavailable",
-            "connect the configured destination disk with its original identity",
-        )
-    })?;
-    seal::reservation_fits(available, size, config.storage.min_free_bytes)?;
     let root = fs::canonicalize(&volume.path).map_err(super::io)?;
     check_path(&root)?;
     let published = adoption::publish_dir(&root, &repo, revision);
     let staging = root.join(".modelprepper-adopt").join(&plan_id);
     check_path(&published)?;
     check_path(&staging)?;
-    let consistent_with = consistent_plan(config, &plan_id, &files)?;
+    let consistent_with = consistent_plan(&catalog, &plan_id, &files)?;
     if directory_exists(&published)? {
         sweep(&published, &files)?;
         let bundle = seal::read_published_bundle(&published.join(BUNDLE_NAME))?;
@@ -390,7 +389,7 @@ pub fn import_baseline(
         {
             return Err(conflict());
         }
-        record_baseline(config, &plan_id, &repo, revision, volume_label, &files)?;
+        record_baseline(&catalog, &plan_id, &repo, revision, volume_label, &files)?;
         return Ok(baseline_view(
             plan_id,
             repo,
@@ -401,6 +400,13 @@ pub fn import_baseline(
             consistent_with,
         ));
     }
+    let available = volume.available_bytes.ok_or_else(|| {
+        Error::new(
+            "volume_unavailable",
+            "connect the configured destination disk with its original identity",
+        )
+    })?;
+    seal::reservation_fits(available, size, config.storage.min_free_bytes)?;
     if let Some(parent) = staging.parent() {
         fs::create_dir_all(parent).map_err(super::io)?;
         adoption::sync_dir(parent)?;
@@ -408,6 +414,7 @@ pub fn import_baseline(
     for file in &files {
         copy_hashed(&source, &staging, file)?;
     }
+    discard_unselected(&staging, &files)?;
     write_baseline_bundle(&staging, &plan_id, &repo, revision, &files)?;
     if let Some(parent) = published.parent() {
         fs::create_dir_all(parent).map_err(super::io)?;
@@ -418,7 +425,7 @@ pub fn import_baseline(
         adoption::sync_dir(parent)?;
     }
     sweep(&published, &files)?;
-    record_baseline(config, &plan_id, &repo, revision, volume_label, &files)?;
+    record_baseline(&catalog, &plan_id, &repo, revision, volume_label, &files)?;
     Ok(baseline_view(
         plan_id,
         repo,
@@ -430,9 +437,8 @@ pub fn import_baseline(
     ))
 }
 
-fn record_found(config: &Config, group: &[Found]) -> Result<()> {
-    let catalog = open_catalog(config, false)?;
-    let existing = load_custody(&catalog, &group[0].bundle_id)?;
+fn record_found(catalog: &Catalog, default_volume: &str, group: &[Found]) -> Result<()> {
+    let existing = load_custody(catalog, &group[0].bundle_id)?;
     let primary = if let Some(row) = existing {
         if parse_manifest(&row.manifest)? != group[0].files {
             return Err(conflict());
@@ -443,10 +449,10 @@ fn record_found(config: &Config, group: &[Found]) -> Result<()> {
         // holds a matching bundle. Otherwise the first label wins. Both copies stay sealed.
         let chosen = group
             .iter()
-            .find(|item| item.volume_label == config.storage.default_volume)
+            .find(|item| item.volume_label == default_volume)
             .unwrap_or(&group[0]);
         adoption::record_custody(
-            &catalog,
+            catalog,
             &adoption::CustodyRecord {
                 plan_id: &chosen.bundle_id,
                 repo: &chosen.repo,
@@ -464,7 +470,7 @@ fn record_found(config: &Config, group: &[Found]) -> Result<()> {
             continue;
         }
         insert_replica(
-            &catalog,
+            catalog,
             &item.bundle_id,
             &item.volume_label,
             &item.relative,
@@ -474,19 +480,9 @@ fn record_found(config: &Config, group: &[Found]) -> Result<()> {
     Ok(())
 }
 
-fn record_replica(config: &Config, row: &CustodyRow, volume_label: &str) -> Result<()> {
-    let catalog = open_catalog(config, false)?;
-    let current = load_custody(&catalog, &row.plan_id)?.ok_or_else(|| {
-        Error::new(
-            "revision_not_sealed",
-            "the sealed revision was removed before the replica was recorded",
-        )
-    })?;
-    if current.manifest != row.manifest || current.provenance != row.provenance {
-        return Err(conflict());
-    }
+fn record_replica(catalog: &Catalog, row: &CustodyRow, volume_label: &str) -> Result<()> {
     insert_replica(
-        &catalog,
+        catalog,
         &row.plan_id,
         volume_label,
         &adoption::relative_dir(&row.repo, &row.revision),
@@ -495,7 +491,7 @@ fn record_replica(config: &Config, row: &CustodyRow, volume_label: &str) -> Resu
 }
 
 fn record_baseline(
-    config: &Config,
+    catalog: &Catalog,
     plan_id: &str,
     repo: &str,
     revision: &str,
@@ -503,14 +499,13 @@ fn record_baseline(
     files: &[ManifestFile],
 ) -> Result<()> {
     let manifest = manifest_json(files)?;
-    let catalog = open_catalog(config, false)?;
-    match load_custody(&catalog, plan_id)? {
+    match load_custody(catalog, plan_id)? {
         Some(row) if row.provenance != PROVENANCE_LOCAL_BASELINE || row.manifest != manifest => {
             Err(conflict())
         }
         Some(_) => Ok(()),
         None => adoption::record_custody(
-            &catalog,
+            catalog,
             &adoption::CustodyRecord {
                 plan_id,
                 repo,
@@ -799,6 +794,17 @@ fn hash_file(root: &Path, file: &ManifestFile) -> Result<()> {
     Ok(())
 }
 
+// Only called on the unpublished staging tree. Old versions used `.partial`
+// siblings there, which can also be legitimate selected filenames.
+fn discard_unselected(staging: &Path, files: &[ManifestFile]) -> Result<()> {
+    for path in collect_files(staging)? {
+        if files.binary_search_by(|file| file.path.cmp(&path)).is_err() {
+            fs::remove_file(crate::verify::local_path(staging, &path)).map_err(super::io)?;
+        }
+    }
+    Ok(())
+}
+
 fn copy_hashed(from_root: &Path, to_root: &Path, file: &ManifestFile) -> Result<()> {
     if hash_file(to_root, file).is_ok() {
         return Ok(());
@@ -820,15 +826,11 @@ fn copy_hashed(from_root: &Path, to_root: &Path, file: &ManifestFile) -> Result<
         fs::create_dir_all(parent).map_err(super::io)?;
         adoption::sync_dir(parent)?;
     }
-    let partial = to.with_extension("partial");
-    if partial.exists() {
-        fs::remove_file(&partial).map_err(super::io)?;
-    }
     let mut input = File::open(&from).map_err(super::io)?;
     let mut output = OpenOptions::new()
         .write(true)
         .create_new(true)
-        .open(&partial)
+        .open(&to)
         .map_err(super::io)?;
     let mut buffer = [0_u8; 64 * 1024];
     let mut count = 0_u64;
@@ -840,7 +842,7 @@ fn copy_hashed(from_root: &Path, to_root: &Path, file: &ManifestFile) -> Result<
         count = count.saturating_add(length as u64);
         if count > file.size_bytes {
             drop(output);
-            let _ = fs::remove_file(&partial);
+            let _ = fs::remove_file(&to);
             return Err(Error::new(
                 "size_mismatch",
                 format!("{} size_mismatch", file.path),
@@ -850,7 +852,7 @@ fn copy_hashed(from_root: &Path, to_root: &Path, file: &ManifestFile) -> Result<
     }
     if count != file.size_bytes {
         drop(output);
-        let _ = fs::remove_file(&partial);
+        let _ = fs::remove_file(&to);
         return Err(Error::new(
             "size_mismatch",
             format!("{} size_mismatch", file.path),
@@ -858,7 +860,6 @@ fn copy_hashed(from_root: &Path, to_root: &Path, file: &ManifestFile) -> Result<
     }
     output.sync_all().map_err(super::io)?;
     drop(output);
-    fs::rename(&partial, &to).map_err(super::io)?;
     if let Some(parent) = to.parent() {
         adoption::sync_dir(parent)?;
     }
@@ -866,27 +867,8 @@ fn copy_hashed(from_root: &Path, to_root: &Path, file: &ManifestFile) -> Result<
 }
 
 fn copy_bytes(from: &Path, to: &Path) -> Result<()> {
-    let meta = fs::symlink_metadata(from).map_err(super::io)?;
-    if linked(&meta) || !meta.is_file() || meta.len() > 1024 * 1024 {
-        return Err(Error::new(
-            "not_sealed",
-            "the bundle manifest is missing or unreadable",
-        ));
-    }
-    let bytes = fs::read(from).map_err(super::io)?;
-    if let Some(parent) = to.parent() {
-        fs::create_dir_all(parent).map_err(super::io)?;
-    }
-    let mut file = OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .open(to)
-        .map_err(super::io)?;
-    file.write_all(&bytes)
-        .and_then(|()| file.sync_all())
-        .map_err(super::io)?;
-    Ok(())
+    let bytes = seal::read_capped(from, seal::BUNDLE_CAP)?;
+    seal::write_staged_manifest(to, &bytes)
 }
 
 fn write_baseline_bundle(
@@ -919,15 +901,7 @@ fn write_baseline_bundle(
         .map_err(|error| Error::new("output_failed", error.to_string()))?;
     bytes.push(b'\n');
     let path = directory.join(BUNDLE_NAME);
-    let mut file = OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .open(&path)
-        .map_err(super::io)?;
-    file.write_all(&bytes)
-        .and_then(|()| file.sync_all())
-        .map_err(super::io)?;
+    seal::write_staged_manifest(&path, &bytes)?;
     adoption::sync_dir(directory)
 }
 
@@ -950,11 +924,10 @@ fn baseline_id(repo: &str, revision: &str, files: &[ManifestFile]) -> Result<Str
 }
 
 fn consistent_plan(
-    config: &Config,
+    catalog: &Catalog,
     plan_id: &str,
     files: &[ManifestFile],
 ) -> Result<Option<String>> {
-    let catalog = open_catalog(config, false)?;
     let mut query = catalog
         .db
         .prepare("SELECT plan_id, manifest FROM custody ORDER BY plan_id")

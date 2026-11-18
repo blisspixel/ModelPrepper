@@ -53,6 +53,8 @@ See [implementation status](docs/implementation-status.md) for observed evidence
 
 An optional Omarchy bar chip lives in [plugins/omarchy-presence](plugins/omarchy-presence/README.md). It is not installed with the CLI and it is not a marketplace plugin. The chip reads `status` and reports disk presence only.
 
+For an always-on guest with a separate data drive, follow the [headless Linux runbook](docs/headless-linux.md). It covers external intake, measured storage and recovery from independent media.
+
 ## Get started
 
 Build from source with the pinned Rust toolchain:

@@ -18,7 +18,8 @@ const COMMIT: &str = "0123456789abcdef0123456789abcdef01234567";
 fn setup() -> (TempDir, Config) {
     let dir = TempDir::new().unwrap();
     let root = fs::canonicalize(dir.path()).unwrap();
-    let config = Config::default_for(root.join("catalog"), root.join("models"));
+    let mut config = Config::default_for(root.join("catalog"), root.join("models"));
+    config.storage.min_free_bytes = 1024 * 1024;
     initialize(&config).unwrap();
     (dir, config)
 }
@@ -900,4 +901,42 @@ fn unplugged_disk_keeps_historical_coverage_without_claiming_the_bytes() {
     assert_eq!(inventory.models[0].preserved, Some(true));
     assert!(inventory.note.contains("not a fresh hash"));
     assert!(!volume.join("preserved").exists());
+}
+
+#[test]
+fn intake_respects_free_reserve_and_keeps_the_source() {
+    let (_dir, mut config) = setup();
+    config.storage.min_free_bytes =
+        fs4::available_space(&config.volumes[0].path).unwrap() + 1024 * 1024 * 1024;
+    let sample = sample(true);
+    let plan = stored(&config, &sample);
+    let error = adopt(&config, &plan, &sample.download, true, &mut |_, _, _, _| {}).unwrap_err();
+    assert_eq!(error.code, "insufficient_space");
+    assert!(sample.download.join("LICENSE").is_file());
+    assert!(status(&config).unwrap().preserved.is_empty());
+}
+
+#[test]
+fn intake_rechecks_the_disk_after_hashing_the_source() {
+    let (_dir, config) = setup();
+    let volume = &config.volumes[0].path;
+    let sample = sample(true);
+    let plan = stored(&config, &sample);
+    let mut detached = false;
+    let result = adopt(
+        &config,
+        &plan,
+        &sample.download,
+        false,
+        &mut |phase, _, _, _| {
+            if phase == "verifying" && !detached {
+                fs::rename(volume, volume.with_extension("detached")).unwrap();
+                fs::create_dir(volume).unwrap();
+                detached = true;
+            }
+        },
+    );
+    assert_eq!(result.unwrap_err().code, "volume_unavailable");
+    assert_eq!(fs::read_dir(volume).unwrap().count(), 0);
+    assert!(status(&config).unwrap().preserved.is_empty());
 }

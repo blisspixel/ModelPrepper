@@ -39,6 +39,7 @@ fn setup() -> (tempfile::TempDir, crate::Config, PathBuf) {
     let dir = tempfile::tempdir().unwrap();
     let root = fs::canonicalize(dir.path()).unwrap();
     let mut config = crate::Config::default_for(root.join("catalog"), root.join("primary"));
+    config.storage.min_free_bytes = 1024 * 1024;
     config.volumes.push(crate::config::Volume {
         label: "backup".into(),
         path: root.join("backup"),
@@ -1268,4 +1269,24 @@ fn a_linked_ancestor_is_not_hashed() {
     assert!(!report.matched);
     assert_eq!(report.files[0].status, "mismatch");
     assert_eq!(fs::read(outside_dir.join("weights.bin")).unwrap(), bytes);
+}
+
+#[test]
+fn partial_is_a_valid_payload_extension_and_recorded_retries_need_no_second_copy() {
+    let (dir, mut config, _stage) = setup();
+    let incoming = dir.path().join("incoming");
+    fs::create_dir(&incoming).unwrap();
+    for (name, bytes) in [("model.partial", "first"), ("model.txt", "second")] {
+        fs::write(incoming.join(name), bytes).unwrap();
+    }
+    let import =
+        import_baseline(&config, &incoming, "example/intake", REVISION, "primary").unwrap();
+    let replica = replica(&config, &import.plan_id, "backup").unwrap();
+    assert_eq!(
+        fs::read(replica.path.join("model.partial")).unwrap(),
+        b"first"
+    );
+    config.storage.min_free_bytes = u64::MAX - 1024;
+    import_baseline(&config, &incoming, "example/intake", REVISION, "primary").unwrap();
+    super::replica(&config, &import.plan_id, "backup").unwrap();
 }

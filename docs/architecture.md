@@ -1,6 +1,6 @@
 # Architecture
 
-Target architecture for the Rust implementation. Strict config/inventory validation, preview planning, bounded public-source resolution, local catalog initialization, disk identities, and offline status are implemented. Persisted transfer plans, jobs, payload storage, and sealing remain planned. Current behavior is specified in [contracts.md](contracts.md) and [implementation-status.md](implementation-status.md).
+Target architecture for the Rust implementation. Strict config/inventory validation, preview planning, bounded public-source resolution, local catalog initialization, disk identities, and offline status are implemented. The CLI persists source reviews, stages and seals a granted revision, and supports offline replica and catalog rebuild. An always-running reconciliation worker and optional recommendation providers remain planned. Current behavior is specified in [contracts.md](contracts.md) and [implementation-status.md](implementation-status.md).
 
 ## Boundaries
 

@@ -39,7 +39,8 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SO
 fn setup() -> (tempfile::TempDir, crate::Config, PathBuf) {
     let dir = tempfile::tempdir().unwrap();
     let root = fs::canonicalize(dir.path()).unwrap();
-    let config = crate::Config::default_for(root.join("catalog"), root.join("models"));
+    let mut config = crate::Config::default_for(root.join("catalog"), root.join("models"));
+    config.storage.min_free_bytes = 1024 * 1024;
     initialize(&config).unwrap();
     let stage = root.join("stage");
     (dir, config, stage)
