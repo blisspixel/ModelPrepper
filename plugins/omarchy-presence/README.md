@@ -53,4 +53,6 @@ The refresh interval is 60 seconds. The snapshot is stale at 120 seconds. The ag
 
 Node evaluates `Model.js` directly, including the mounted, offline, missing-marker, replaced-disk, writer-busy, invalid, malformed, missing-executable, hostile-path, timeout, stale, and config-change fixtures. Those tests assert the launched arguments. They do not assert that `status` itself skips SQLite journal bookkeeping. That limit is in [contracts](../../docs/contracts.md).
 
-This machine cannot run an Omarchy session. These checks were not run: `omarchy plugin validate`, `qmllint`, click, Escape, disable, re-enable, shell restart, and removal. Do not treat the widget as accepted on the bar until those happen in a separately authorized session.
+The source passes Omarchy manifest validation and Qt 6.12 `qmllint -W 0` with the Omarchy shell exposed as the `qs` import root. Both checks run without installing the plugin. In an Omarchy development checkout, point the QML import directory at a parent containing `qs/Ui` and `qs/Commons`.
+
+Click, Escape, disable, re-enable, shell restart and removal were not run in a live session. Those checks remain in [issue 19](https://github.com/blisspixel/ModelPrepper/issues/19).

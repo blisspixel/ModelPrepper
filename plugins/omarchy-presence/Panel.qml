@@ -3,13 +3,13 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import Quickshell
 import qs.Commons as Commons
-import qs.Ui
+import qs.Ui as Ui
 import "Model.js" as Model
 
 // Nested details for the presence chip. Escape closes through PanelKeyCatcher.
 // Qt 6.12 adds QtQuick.Color, which shadows an unqualified Commons color name,
 // so theme colors and spacing stay on the Commons qualifier.
-Panel {
+Ui.Panel {
   id: root
   moduleName: "io.github.blisspixel.modelprepper-presence"
   manageIpc: false
@@ -37,8 +37,12 @@ Panel {
     copyText: ""
   })
 
+  // The shell exposes these host objects as QtObject, with theme and bar
+  // members supplied at runtime.
+  readonly property var hostBar: bar
+  readonly property var typography: Commons.Style.font
   readonly property color ink: root.bar ? root.barForeground : Commons.Color.foreground
-  readonly property string face: root.bar ? root.bar.fontFamily : Commons.Style.font.family
+  readonly property string face: root.bar ? root.hostBar.fontFamily : root.typography.family
 
   function open() {
     root.refreshView()
@@ -55,8 +59,8 @@ Panel {
   }
 
   function switchPanel(direction) {
-    if (root.bar && typeof root.bar.switchPanelFrom === "function")
-      return root.bar.switchPanelFrom(root.hostWidget || root, direction)
+    if (root.bar && typeof root.hostBar.switchPanelFrom === "function")
+      return root.hostBar.switchPanelFrom(root.hostWidget || root, direction)
     return false
   }
 
@@ -94,7 +98,7 @@ Panel {
     onTriggered: root.refreshView()
   }
 
-  KeyboardPanel {
+  Ui.KeyboardPanel {
     id: panel
     anchorItem: root.anchorItem
     owner: root.hostWidget || root
@@ -102,16 +106,16 @@ Panel {
     open: root.opened
     focusTarget: keyCatcher
     contentWidth: panel.fittedContentWidth(Commons.Style.space(420))
-    contentHeight: panel.fittedContentHeight(content.implicitHeight)
+    contentHeight: panel.fittedContentHeight(detailsColumn.implicitHeight)
 
-    PanelKeyCatcher {
+    Ui.PanelKeyCatcher {
       id: keyCatcher
       anchors.fill: parent
       onCloseRequested: root.close()
       onTabRequested: function(direction) { root.switchPanel(direction) }
 
       Column {
-        id: content
+        id: detailsColumn
         width: parent.width
         spacing: Commons.Style.space(8)
 
@@ -121,7 +125,7 @@ Panel {
           textFormat: Text.PlainText
           color: root.ink
           font.family: root.face
-          font.pixelSize: Commons.Style.font.subtitle
+          font.pixelSize: root.typography.subtitle
           font.bold: true
           opacity: root.view.dimmed ? 0.45 : 1
           wrapMode: Text.WordWrap
@@ -133,7 +137,7 @@ Panel {
           textFormat: Text.PlainText
           color: root.ink
           font.family: root.face
-          font.pixelSize: Commons.Style.font.body
+          font.pixelSize: root.typography.body
           wrapMode: Text.WordWrap
         }
 
@@ -144,7 +148,7 @@ Panel {
           textFormat: Text.PlainText
           color: root.ink
           font.family: root.face
-          font.pixelSize: Commons.Style.font.bodySmall
+          font.pixelSize: root.typography.bodySmall
           wrapMode: Text.WordWrap
         }
 
@@ -157,7 +161,7 @@ Panel {
           textFormat: Text.PlainText
           color: root.ink
           font.family: root.face
-          font.pixelSize: Commons.Style.font.body
+          font.pixelSize: root.typography.body
           wrapMode: Text.WordWrap
         }
 
@@ -168,7 +172,7 @@ Panel {
           color: root.ink
           opacity: root.view.dimmed ? 0.55 : 1
           font.family: root.face
-          font.pixelSize: Commons.Style.font.bodySmall
+          font.pixelSize: root.typography.bodySmall
           wrapMode: Text.WordWrap
         }
 
@@ -179,7 +183,7 @@ Panel {
           color: root.ink
           opacity: root.view.dimmed ? 0.55 : 1
           font.family: root.face
-          font.pixelSize: Commons.Style.font.bodySmall
+          font.pixelSize: root.typography.bodySmall
           wrapMode: Text.WordWrap
         }
 
@@ -191,7 +195,7 @@ Panel {
           color: root.ink
           opacity: root.view.dimmed ? 0.55 : 1
           font.family: root.face
-          font.pixelSize: Commons.Style.font.bodySmall
+          font.pixelSize: root.typography.bodySmall
           wrapMode: Text.WordWrap
         }
 
@@ -199,40 +203,41 @@ Panel {
           model: root.view.volumes
 
           Column {
+            id: volumeRow
             required property var modelData
-            width: content.width
+            width: detailsColumn.width
             spacing: Commons.Style.space(2)
 
             Text {
               width: parent.width
-              text: modelData.label + "  " + modelData.state
+              text: volumeRow.modelData.label + "  " + volumeRow.modelData.state
               textFormat: Text.PlainText
               color: root.ink
               opacity: root.view.dimmed ? 0.55 : 1
               font.family: root.face
-              font.pixelSize: Commons.Style.font.body
+              font.pixelSize: root.typography.body
               wrapMode: Text.WordWrap
             }
 
             Text {
               width: parent.width
-              text: modelData.space
+              text: volumeRow.modelData.space
               textFormat: Text.PlainText
               color: root.ink
               opacity: root.view.dimmed ? 0.55 : 1
               font.family: root.face
-              font.pixelSize: Commons.Style.font.bodySmall
+              font.pixelSize: root.typography.bodySmall
               wrapMode: Text.WordWrap
             }
 
             Text {
               width: parent.width
-              text: "path  " + modelData.path
+              text: "path  " + volumeRow.modelData.path
               textFormat: Text.PlainText
               color: root.ink
               opacity: root.view.dimmed ? 0.55 : 1
               font.family: root.face
-              font.pixelSize: Commons.Style.font.bodySmall
+              font.pixelSize: root.typography.bodySmall
               wrapMode: Text.WordWrap
             }
           }
@@ -244,7 +249,7 @@ Panel {
           textFormat: Text.PlainText
           color: root.ink
           font.family: root.face
-          font.pixelSize: Commons.Style.font.bodySmall
+          font.pixelSize: root.typography.bodySmall
           wrapMode: Text.WordWrap
         }
 
@@ -252,29 +257,30 @@ Panel {
           model: root.view.preserved
 
           Column {
+            id: copyRow
             required property var modelData
-            width: content.width
+            width: detailsColumn.width
             spacing: Commons.Style.space(2)
 
             Text {
               width: parent.width
-              text: modelData.repo + "  " + modelData.revision + "  " + modelData.volume
+              text: copyRow.modelData.repo + "  " + copyRow.modelData.revision + "  " + copyRow.modelData.volume
               textFormat: Text.PlainText
               color: root.ink
               opacity: root.view.dimmed ? 0.55 : 1
               font.family: root.face
-              font.pixelSize: Commons.Style.font.bodySmall
+              font.pixelSize: root.typography.bodySmall
               wrapMode: Text.WordWrap
             }
 
             Text {
               width: parent.width
-              text: modelData.provenance
+              text: copyRow.modelData.provenance
               textFormat: Text.PlainText
               color: root.ink
               opacity: root.view.dimmed ? 0.55 : 1
               font.family: root.face
-              font.pixelSize: Commons.Style.font.caption
+              font.pixelSize: root.typography.caption
               wrapMode: Text.WordWrap
             }
           }
@@ -288,7 +294,7 @@ Panel {
           color: root.ink
           opacity: 0.7
           font.family: root.face
-          font.pixelSize: Commons.Style.font.caption
+          font.pixelSize: root.typography.caption
           wrapMode: Text.WordWrap
           maximumLineCount: 8
           elide: Text.ElideRight
@@ -305,12 +311,13 @@ Panel {
             ]
 
             Text {
+              id: actionLink
               required property var modelData
-              text: modelData.label
+              text: actionLink.modelData.label
               textFormat: Text.PlainText
               color: root.ink
               font.family: root.face
-              font.pixelSize: Commons.Style.font.body
+              font.pixelSize: root.typography.body
               font.underline: actionMouse.containsMouse
 
               MouseArea {
@@ -318,7 +325,7 @@ Panel {
                 anchors.fill: parent
                 hoverEnabled: true
                 cursorShape: Qt.PointingHandCursor
-                onClicked: root.run(modelData.action)
+                onClicked: root.run(actionLink.modelData.action)
               }
             }
           }
@@ -331,7 +338,7 @@ Panel {
           textFormat: Text.PlainText
           color: root.ink
           font.family: root.face
-          font.pixelSize: Commons.Style.font.bodySmall
+          font.pixelSize: root.typography.bodySmall
           wrapMode: Text.WordWrap
         }
       }
