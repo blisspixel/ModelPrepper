@@ -102,5 +102,6 @@ The order is the work-wave table in the [roadmap](roadmap.md), then the still-in
 40. A version 2 drill observation can be checked against an explicitly supplied evidence log. The offline fixture exercises an original log, changed bytes and a missing file.
 41. A partial rebuild now identifies historical copies it could not confirm and revision directories lacking a recovery document. A fixture recovers the intact primary before the backup document is returned, then confirms both copies on retry.
 42. A 4 MiB Linux filesystem drill resumes an interrupted import with one matching file and one short file. A replica fixture keeps a matching payload and removes stale scratch across a capacity refusal and retry.
+43. Offline preflight can verify a retained runtime in a separate root. It reports integrity for each capability and keeps a prior task scoped to the capability and runtime actually checked.
 
 Initialized disks and successful inspection are useful foundations. They do not establish that a model has been preserved or can run offline.

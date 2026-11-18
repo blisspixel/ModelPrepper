@@ -2,7 +2,7 @@
 
 Implementation follows evidence and dependencies, not calendar promises. Native Rust on Linux, macOS, and Windows is a requirement.
 
-Current progress is the wave table below. Waves 1 through 42 are on main. The job that works is a verified copy of one granted revision, a second copy, and a catalog rebuild with the hub unreachable. `decide` still cannot approve a transfer. `workspace_bytes` stays null. Opening a catalog at schema 1 through 6 moves it to schema 7 and keeps the rows that schema stored. A seal hash does not follow a directory symlink. Nothing is retired or ranked, and a collection is not resolved. Clean-machine setup, the ten-minute planning drill, published checksums and provenance, and a recovery drill on each OS remain open. No release tag until those gates and transfer approval hold. No milestone is fully qualified. Milestone numbers match the wave order: restoring one sealed revision is M4, `watch` is M5, disk qualification is M6, scheduling is M7, and collections are M8 and are not accepted yet. See [implementation-status.md](implementation-status.md), [contracts.md](contracts.md), and [transfer-spike.md](transfer-spike.md).
+Current progress is the wave table below. Waves 1 through 43 are on main. The job that works is a verified copy of one granted revision, a second copy, and a catalog rebuild with the hub unreachable. `decide` still cannot approve a transfer. `workspace_bytes` stays null. Opening a catalog at schema 1 through 6 moves it to schema 7 and keeps the rows that schema stored. A seal hash does not follow a directory symlink. Nothing is retired or ranked, and a collection is not resolved. Clean-machine setup, the ten-minute planning drill, published checksums and provenance, and a recovery drill on each OS remain open. No release tag until those gates and transfer approval hold. No milestone is fully qualified. Milestone numbers match the wave order: restoring one sealed revision is M4, `watch` is M5, disk qualification is M6, scheduling is M7, and collections are M8 and are not accepted yet. See [implementation-status.md](implementation-status.md), [contracts.md](contracts.md), and [transfer-spike.md](transfer-spike.md).
 
 ## Work waves
 
@@ -52,10 +52,11 @@ Do these in order. A later wave does not start because an earlier one is inconve
 | 40 | M4, retained task evidence | `readiness --evidence-log` verifies the recorded version 2 log digest after recovery. Missing or changed evidence makes the prior result stale. | The real task and restored-task observations in #29 remain open. |
 | 41 | M4, partial recovery | A fresh rebuild can be retried after a disk returns. A partial scan preserves the confirmed groups, names the missing evidence and exits nonzero. | An operator recovering from one disk can distinguish historical catalog counts from copies the scan confirmed. |
 | 42 | M6, interrupted storage writes | Import and replica keep verified staged files, reclaim incomplete scratch and admit the remaining set against current free space. | A stopped writer can otherwise count a partially written shard twice and strand a retry on a nearly full disk. |
+| 43 | M4, separate runtime recovery | Readiness checks a retained runtime under an operator-supplied root and reports integrity for each capability. | A restored runtime can live on separate media. The actual offline and restored tasks still need observations in #29. |
 
 ## Still in this order
 
-Do these after wave 42. Do not skip an item because a later one looks more useful. An item without a wave number is not a wave yet.
+Do these after wave 43. Do not skip an item because a later one looks more useful. An item without a wave number is not a wave yet.
 
 1. Resolving every entry in a collection is a network batch. One `resolve` already exists. Leave the batch alone.
 2. Dropping or merging copies, capacity deferral, and stable portfolio selection still wait for an approval that does not exist yet. The custody report names the blocks and does not retire a copy. That does not complete the M8 acceptance list by itself.
