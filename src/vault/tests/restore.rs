@@ -1403,17 +1403,43 @@ fn partial_rebuild_keeps_good_bundles_and_accounts_for_an_unconfirmed_copy() {
 }
 
 #[test]
-fn nested_baseline_payload_named_like_a_bundle_rebuilds_cleanly() {
+fn bundle_name_in_a_repo_id_or_nested_payload_rebuilds_cleanly() {
     let (dir, config, _) = setup();
     let source = dir.path().join("source");
     fs::create_dir_all(source.join("assets")).unwrap();
     fs::write(source.join("assets").join(BUNDLE_NAME), b"ordinary payload").unwrap();
-    let original = import_baseline(&config, &source, "local/model", REVISION, "primary").unwrap();
+    let original = import_baseline(
+        &config,
+        &source,
+        "local/modelprepper-bundle.json",
+        REVISION,
+        "primary",
+    )
+    .unwrap();
     delete_catalog(&config);
     let report = rebuild(&config).unwrap();
     assert_eq!(report.status, "rebuilt");
     assert_eq!(report.custody_count, 1);
     assert!(verify_sealed(&config, &original.plan_id).unwrap().matched);
+}
+
+#[test]
+fn baseline_refuses_root_manifest_aliases_before_copying_payload() {
+    let (dir, config, _) = setup();
+    let source = dir.path().join("incoming");
+    fs::create_dir(&source).unwrap();
+    let alias = source.join("ModelPrepper-Bundle.JSON");
+    fs::write(&alias, b"keep").unwrap();
+    let import = || import_baseline(&config, &source, "local/example", REVISION, "primary");
+    failure(import(), "destination_conflict");
+    assert_eq!(fs::read(&alias).unwrap(), b"keep");
+    fs::remove_file(&alias).unwrap();
+    fs::create_dir(&alias).unwrap();
+    fs::write(alias.join("shard"), b"payload").unwrap();
+    failure(import(), "destination_conflict");
+    assert_eq!(fs::read(alias.join("shard")).unwrap(), b"payload");
+    assert!(!config.volumes[0].path.join(".modelprepper-adopt").exists());
+    assert!(status(&config).unwrap().preserved.is_empty());
 }
 
 #[test]

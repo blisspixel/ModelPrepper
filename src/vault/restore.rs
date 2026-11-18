@@ -11,7 +11,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-const BUNDLE_NAME: &str = "modelprepper-bundle.json";
+use super::seal::BUNDLE_NAME;
 
 pub const PROVENANCE_LOCAL_BASELINE: &str = "local-baseline";
 pub const PROVENANCE_UNRECORDED: &str = "sealed bundle (provenance unrecorded)";
@@ -199,6 +199,7 @@ pub(crate) fn replica_with(
             size,
         ));
     }
+    seal::check_bundle_paths(files.iter().map(|file| file.path.as_str()))?;
     stage_payload_files(
         &source,
         &staging,
@@ -544,6 +545,7 @@ pub fn import_baseline(
             consistent_with,
         ));
     }
+    seal::check_bundle_paths(files.iter().map(|file| file.path.as_str()))?;
     stage_payload_files(
         &source,
         &staging,
@@ -985,16 +987,17 @@ fn find_bundles(
                 damaged.push(format!("{label}:{}", path.display()));
                 continue;
             }
-            if !inside_payload
-                && path.file_name().and_then(|name| name.to_str()) == Some(BUNDLE_NAME)
-            {
+            let bundle_name = path.file_name().and_then(|name| name.to_str()) == Some(BUNDLE_NAME);
+            // Only the revision root reserves this filename. An owner or repo
+            // directory can legally use it, as can files nested in a payload.
+            if meta.is_dir() && !(revision_root && bundle_name) {
+                stack.push((path, inside_payload || revision_root));
+            } else if !inside_payload && bundle_name {
                 if meta.is_file() {
                     found.push(path);
                 } else {
                     damaged.push(format!("{label}:{}", path.display()));
                 }
-            } else if meta.is_dir() {
-                stack.push((path, inside_payload || revision_root));
             }
         }
     }
