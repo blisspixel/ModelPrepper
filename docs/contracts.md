@@ -197,3 +197,9 @@ Transfer states: queued, reserved, downloading, paused, retry_wait, verifying, p
 Only approved plans may enter queued. Verification and durable publication precede sealed. Loss of a mounted drive affects availability, not integrity. Repair creates an operation pinned to the archived identity. Resume does not change that identity.
 
 Detailed recovery behavior is in [architecture.md](architecture.md). Persistent jobs and transitions are not implemented in the offline preview.
+
+## Local intake on a dedicated disk
+
+Copy adoption checks the destination marker again after source verification and before copying each selected file. Each new file must fit with the configured free-space reserve. A completed staged match is reused. A full disk can still cause an I/O failure between space checks. Keep the bare mountpoint unwritable by the service accounts. The [deployment runbook](headless-linux.md) describes the first-mount check and filesystem permissions.
+
+Baseline import, replica and rebuild hold the catalog writer lock across disk inspection, any publication, and recording. Import and replica retries that verify an existing destination do not require free space for a second payload. Staging keeps a file named `.partial` when it belongs to the selected set. External clients and consumers must have no write access to staging or custody.

@@ -51,6 +51,8 @@ The single [CI workflow](https://github.com/blisspixel/ModelPrepper/actions/work
 
 The [durable staging journal](staging-journal.md) adds exclusive single-file checkpoint sessions and crash-boundary tests. The single CI workflow exercises these tests on Windows, macOS, and Linux. Verify the main-branch run against the exact commit being used; a previous successful run does not validate newer changes.
 
+The [headless Linux runbook](headless-linux.md) covers supervised intake. Offline fixtures cover disk replacement during source verification, insufficient reserve, and import/replica retry on a low-space destination. The physical HDD, host backing pool and independent-media recovery still require deployment evidence.
+
 ## Next delivery gates
 
 The order is the work-wave table in the [roadmap](roadmap.md), then the still-in-this-order list that follows it. This list is the evidence for the waves that are already implemented.

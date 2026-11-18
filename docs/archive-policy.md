@@ -87,6 +87,8 @@ Future retention rules need protected pins, minimum verified-copy counts, explic
 
 ## Optional agents
 
+These are design requirements. The current headless workflow uses explicit reviews and one-pass watches. A provider cannot run or spend from a configuration example. See the [headless Linux runbook](headless-linux.md).
+
 An agent may translate a request into a draft policy or suggest candidates from bounded saved metadata. Show the filters and ranking sources it selected before saving the policy. Its output is untrusted data subject to the same strict parser and deterministic planner.
 
 The agent has no credentials, arbitrary URL fetcher, shell, filesystem writer, approval authority, or ability to prune. Repository descriptions cannot expand its tools or override owner settings. Preserve the draft, explanation, model/version when used, and final owner-reviewed policy so decisions remain reproducible without the agent.

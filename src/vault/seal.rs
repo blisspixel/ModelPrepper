@@ -14,7 +14,7 @@ use std::{
 };
 
 const BUNDLE_NAME: &str = "modelprepper-bundle.json";
-const BUNDLE_CAP: u64 = 1024 * 1024;
+pub(super) const BUNDLE_CAP: u64 = 1024 * 1024;
 const RESERVATION_CAP: u64 = 64 * 1024;
 
 pub const PROVENANCE_RANGED_HTTPS: &str = "upstream-verified (ranged https)";
@@ -510,17 +510,26 @@ fn write_bundle(
         .map_err(|error| Error::new("output_failed", error.to_string()))?;
     bytes.push(b'\n');
     let path = directory.join(BUNDLE_NAME);
-    let mut file = OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .open(&path)
-        .map_err(super::io)?;
-    file.write_all(&bytes)
-        .and_then(|()| file.sync_all())
-        .map_err(super::io)?;
+    write_staged_manifest(&path, &bytes)?;
     adoption::sync_dir(directory)?;
     Ok(())
+}
+
+pub(super) fn write_staged_manifest(path: &Path, bytes: &[u8]) -> Result<()> {
+    check_path(path)?;
+    match fs::remove_file(path) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(super::io(error)),
+    }
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)
+        .map_err(super::io)?;
+    file.write_all(bytes)
+        .and_then(|()| file.sync_all())
+        .map_err(super::io)
 }
 
 fn copy_verified(from: &Path, to: &Path, file: &SourceFile) -> Result<String> {
@@ -706,7 +715,8 @@ fn read_bundle(path: &Path) -> Result<Option<BundleDocument>> {
     Ok(serde_json::from_slice(&bytes).ok())
 }
 
-fn read_capped(path: &Path, cap: u64) -> Result<Vec<u8>> {
+pub(super) fn read_capped(path: &Path, cap: u64) -> Result<Vec<u8>> {
+    check_path(path)?;
     let meta = fs::symlink_metadata(path).map_err(super::io)?;
     if meta.file_type().is_symlink() || !meta.is_file() || meta.len() > cap {
         return Err(Error::new(
@@ -714,7 +724,19 @@ fn read_capped(path: &Path, cap: u64) -> Result<Vec<u8>> {
             "a renamed directory is not a seal",
         ));
     }
-    fs::read(path).map_err(super::io)
+    let mut bytes = Vec::with_capacity(meta.len() as usize);
+    File::open(path)
+        .map_err(super::io)?
+        .take(cap + 1)
+        .read_to_end(&mut bytes)
+        .map_err(super::io)?;
+    if bytes.len() as u64 > cap {
+        return Err(Error::new(
+            "not_sealed",
+            "the bundle manifest exceeds its size limit",
+        ));
+    }
+    Ok(bytes)
 }
 
 fn same_set(stage: &[SourceFile], selected: &[SourceFile]) -> bool {

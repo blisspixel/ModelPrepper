@@ -54,6 +54,10 @@ Do these after wave 36. Do not skip an item because a later one looks more usefu
 1. Resolving every entry in a collection is a network batch. One `resolve` already exists. Leave the batch alone.
 2. Dropping or merging copies, capacity deferral, and stable portfolio selection still wait for an approval that does not exist yet. The custody report names the blocks and does not retire a copy. That does not complete the M8 acceptance list by itself.
 
+### Headless deployment and qualification
+
+The [Linux runbook](headless-linux.md) maps [issue 80](https://github.com/blisspixel/ModelPrepper/issues/80) onto the existing gates. Start with a supervised intake on an identified disk, then recover a bundle from independent media. Record actual offline task evidence in the [restore drill](validation-drills.md#offline-task-and-restore). Measure guest and host space, restart behavior and HDD elapsed time on the deployment. Durable reconciliation and optional curation follow transfer authorization and release qualification. Native peer transport stays at M10.
+
 These stay open and are not collection waves:
 
 - Version 1 acceptance is still open: clean-machine setup, the ten-minute planning drill, published checksums and provenance, and a recovery drill on each OS. Wave 35 proves that opening schemas 1 through 6 reaches schema 7 and keeps their rows. Wave 36 proves a directory symlink is not hashed. Those proofs do not close those live gates. No release tag until those gates and transfer approval hold. `decide` still cannot approve. `workspace_bytes` stays null.
