@@ -1339,7 +1339,7 @@ fn recovering_from_only_the_backup_needs_no_original_catalog_or_primary() {
     .unwrap();
 
     let mut recovery = config.clone();
-    recovery.catalog_path = dir.path().join("recovery-catalog");
+    recovery.catalog_path = fs::canonicalize(dir.path()).unwrap().join("recovery-catalog");
     recovery.volumes.retain(|volume| volume.label == "backup");
     recovery.storage.default_volume = "backup".into();
     let result = rebuild(&recovery).unwrap();
