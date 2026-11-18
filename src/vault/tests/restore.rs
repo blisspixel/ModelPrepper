@@ -1290,3 +1290,69 @@ fn partial_is_a_valid_payload_extension_and_recorded_retries_need_no_second_copy
     import_baseline(&config, &incoming, "example/intake", REVISION, "primary").unwrap();
     super::replica(&config, &import.plan_id, "backup").unwrap();
 }
+
+#[test]
+fn identical_bytes_do_not_merge_conflicting_custody_evidence() {
+    let (_dir, config, _stage) = setup();
+    let plan = digest(b"fixture");
+    for volume in &config.volumes {
+        plant(
+            &volume.path,
+            REVISION,
+            &plan,
+            b"same",
+            Some(PROVENANCE_LOCAL_BASELINE),
+        );
+    }
+    let secondary = bundle_file(&config.volumes[1].path, REVISION);
+    rewrite_bundle(&secondary, |doc| {
+        doc["provenance"] = PROVENANCE_RANGED_HTTPS.into()
+    });
+    let rebuilt = rebuild(&config).unwrap();
+    assert_eq!(rebuilt.conflicts, vec![plan.clone()]);
+    assert_eq!((rebuilt.custody_count, rebuilt.replica_count), (0, 0));
+    rewrite_bundle(&secondary, |doc| {
+        doc["provenance"] = PROVENANCE_LOCAL_BASELINE.into()
+    });
+    let rebuilt = rebuild(&config).unwrap();
+    assert_eq!((rebuilt.custody_count, rebuilt.replica_count), (1, 1));
+    rewrite_bundle(&secondary, |doc| {
+        doc["provenance"] = PROVENANCE_RANGED_HTTPS.into()
+    });
+    failure(replica(&config, &plan, "backup"), "destination_conflict");
+}
+
+#[test]
+fn recovering_from_only_the_backup_needs_no_original_catalog_or_primary() {
+    let (dir, config, _stage) = setup();
+    let incoming = dir.path().join("incoming");
+    fs::create_dir(&incoming).unwrap();
+    fs::write(incoming.join("weights.bin"), b"tiny local baseline").unwrap();
+    let original =
+        import_baseline(&config, &incoming, "local/example", REVISION, "primary").unwrap();
+    replica(&config, &original.plan_id, "backup").unwrap();
+    fs::rename(&config.catalog_path, dir.path().join("unavailable-catalog")).unwrap();
+    fs::rename(
+        &config.volumes[0].path,
+        dir.path().join("unavailable-primary"),
+    )
+    .unwrap();
+
+    let mut recovery = config.clone();
+    recovery.catalog_path = fs::canonicalize(dir.path())
+        .unwrap()
+        .join("recovery-catalog");
+    recovery.volumes.retain(|volume| volume.label == "backup");
+    recovery.storage.default_volume = "backup".into();
+    let result = rebuild(&recovery).unwrap();
+    assert_eq!((result.custody_count, result.replica_count), (1, 0));
+    assert!(result.damaged.is_empty() && result.conflicts.is_empty());
+    let checked = verify_sealed(&recovery, &original.plan_id).unwrap();
+    assert!(checked.matched);
+    assert_eq!(
+        cell(&recovery, "SELECT provenance FROM custody"),
+        PROVENANCE_LOCAL_BASELINE
+    );
+    assert_eq!(count(&recovery, "SELECT COUNT(*) FROM grants"), 0);
+    assert!(!config.catalog_path.exists() && !config.volumes[0].path.exists());
+}

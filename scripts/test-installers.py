@@ -3,6 +3,7 @@
 import argparse
 import hashlib
 import io
+import json
 import platform
 import subprocess
 import tarfile
@@ -102,6 +103,52 @@ class InstallerTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(config.read_text(), "retain me")
         self.assertEqual(list(self.destination.glob(".modelprepper*")), [])
+
+    def test_installed_cli_runs_a_first_offline_vault_plan(self):
+        result = self.install()
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+        def cli(*args):
+            result = subprocess.run(
+                [str(self.executable), "--json", *args],
+                cwd=self.root,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            return json.loads(result.stdout)
+
+        config = "first-vault.toml"
+        cli(
+            "config",
+            "init",
+            "--output",
+            config,
+            "--catalog",
+            "catalog",
+            "--volume",
+            "models",
+        )
+        cli("config", "check", "--config", config)
+        initialized = cli("init", "--config", config)
+        status = cli("status", "--config", config)
+        self.assertEqual(status["vault_id"], initialized["vault_id"])
+        self.assertEqual(status["volumes"][0]["state"], "mounted")
+        plan = cli(
+            "plan",
+            "--config",
+            config,
+            "--inventory",
+            str(ROOT / "tests/fixtures/inventory.json"),
+            "--available-bytes",
+            "500000000000",
+        )
+        self.assertEqual(plan["payload_bytes"], 5504)
+        self.assertFalse(plan["transfer_authorized"])
+        self.assertIsNone(plan["workspace_bytes"])
+        self.assertIn("local_inventory_untrusted", plan["blockers"])
+        self.assertEqual(cli("status", "--config", config)["preserved"], [])
 
     def test_checksum_mismatch_retains_previous_binary(self):
         self.assertEqual(self.install().returncode, 0)

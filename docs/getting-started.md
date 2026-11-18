@@ -39,8 +39,11 @@ A terminal shows a short text verdict. Redirects, pipes, and `--json` stay on on
 
 ## Verify a copy you already have
 
+Use the exact commit from inspection and the full `plan_id` returned by `propose`. The two subsequent commands use that saved review offline.
+
 ```text
-cargo run --locked --release -- verify-local --repo Qwen/Qwen2.5-0.5B-Instruct --revision main --path ~/Downloads/qwen
+cargo run --locked --release -- propose --config config.local.toml --repo Qwen/Qwen2.5-0.5B-Instruct --revision <commit> --json
+cargo run --locked --release -- verify-local --config config.local.toml --plan <plan_id> --path ~/Downloads/qwen
 cargo run --locked --release -- adopt --config config.local.toml --plan <plan_id> --path ~/Downloads/qwen --copy
 ```
 
@@ -67,7 +70,7 @@ cargo run --locked --release -- kit --config examples/config.toml --kit examples
 cargo run --locked --release -- readiness --recipe examples/recipe.json --path examples/readiness
 ```
 
-The recipe is local JSON. The directory is the retained files. A missing directory is reported and is not created. The report keeps integrity, capability closure, rights, and readiness separate. Matching small files still leave readiness `untested` until a real network-disabled drill is recorded. A package name or URL is not a retained runtime. A retained runtime larger than 2 MiB is `unverified`, and a present runtime that does not match its declared bytes is `damaged`. Neither is called missing. See [preservation](preservation.md).
+The recipe is local JSON. The directory is the retained files. A missing directory is reported and is not created. The report keeps integrity, capability closure, rights, and readiness separate. Matching small files still leave readiness `untested` until a real network-disabled drill is recorded. A package name or URL is not a retained runtime. Ordinary preflight leaves a retained runtime larger than 2 MiB `unverified`. Use `--full-hash` to hash it. A present runtime that does not match its declared bytes is `damaged`. Neither is called missing. See [preservation](preservation.md).
 
 ## Shared collection
 
@@ -95,7 +98,7 @@ To retain pinned source evidence and record rejection, use the [source review wo
 | access_restricted | Choose an authorized public source supported by this prototype. |
 | unreviewed or conflicting license | Inspect the original evidence. A tag alone cannot clear it. |
 | notice_present | The license text matched and a NOTICE file was captured. Read that file. It is not a match and not a conflict. |
-| invalid_range or invalid_checkpoint | The library experiment rejected inconsistent bytes/identity. No CLI download workflow uses it yet. |
+| invalid_range or invalid_checkpoint | The ranged transfer or its saved checkpoint failed validation. Inspect the pinned identity and stage before retrying the granted plan. |
 | transfer_backend_unqualified | A saved source review cannot be approved yet; durable transfer/accounting gates remain open. |
 | stale_policy | Propose a new review using the current configuration. |
 | decision_conflict | Inspect the saved final decision; it cannot be changed or reset silently. |

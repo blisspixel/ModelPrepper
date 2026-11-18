@@ -142,10 +142,12 @@ pub(crate) fn replica_with(
     let source = source_root.join(&row.relative);
     check_path(&source)?;
     let files = parse_manifest(&row.manifest)?;
-    let bundle = seal::read_published_bundle(&source.join(BUNDLE_NAME))?;
+    let bundle_bytes = seal::read_capped(&source.join(BUNDLE_NAME), seal::BUNDLE_CAP)?;
+    let bundle = seal::parse_published_bundle(&bundle_bytes)?;
     if bundle.bundle_id != row.plan_id
         || bundle.repo_id != row.repo
         || bundle.resolved_revision != row.revision
+        || (!bundle.provenance.is_empty() && bundle.provenance != row.provenance)
         || !same_files(&bundle.files, &files)
     {
         return Err(conflict());
@@ -158,7 +160,7 @@ pub(crate) fn replica_with(
     if directory_exists(&published)? {
         sweep(&published, &files)?;
         let copy = seal::read_published_bundle(&published.join(BUNDLE_NAME))?;
-        if copy.bundle_id != bundle.bundle_id || !same_files(&copy.files, &files) {
+        if copy != bundle {
             return Err(conflict());
         }
         record_replica(&catalog, &row, volume_label)?;
@@ -188,7 +190,7 @@ pub(crate) fn replica_with(
         copy_hashed(&source, &staging, file)?;
     }
     discard_unselected(&staging, &files)?;
-    copy_bytes(&source.join(BUNDLE_NAME), &staging.join(BUNDLE_NAME))?;
+    seal::write_staged_manifest(&staging.join(BUNDLE_NAME), &bundle_bytes)?;
     adoption::sync_dir(&staging)?;
     if stop == Some(ReplicaStop::BeforeRename) {
         return Err(Error::new(
@@ -268,7 +270,12 @@ pub fn rebuild(config: &Config) -> Result<Rebuild> {
             .map(|offset| index + offset)
             .unwrap_or(found.len());
         let group = &found[index..end];
-        if group.iter().any(|item| item.manifest != group[0].manifest) {
+        if group.iter().any(|item| {
+            item.repo != group[0].repo
+                || item.revision != group[0].revision
+                || item.provenance != group[0].provenance
+                || item.manifest != group[0].manifest
+        }) {
             conflicts.push(group[0].bundle_id.clone());
         } else if let Err(error) = record_found(&catalog, &config.storage.default_volume, group) {
             if error.code == "destination_conflict" {
@@ -438,9 +445,16 @@ pub fn import_baseline(
 }
 
 fn record_found(catalog: &Catalog, default_volume: &str, group: &[Found]) -> Result<()> {
+    // All rows for one bundle commit together, including when a later replica conflicts.
+    let tx = catalog.db.unchecked_transaction().map_err(super::db)?;
     let existing = load_custody(catalog, &group[0].bundle_id)?;
     let primary = if let Some(row) = existing {
-        if parse_manifest(&row.manifest)? != group[0].files {
+        if row.repo != group[0].repo
+            || row.revision != group[0].revision
+            || (group[0].provenance != PROVENANCE_UNRECORDED
+                && row.provenance != group[0].provenance)
+            || parse_manifest(&row.manifest)? != group[0].files
+        {
             return Err(conflict());
         }
         row.volume_label
@@ -477,7 +491,7 @@ fn record_found(catalog: &Catalog, default_volume: &str, group: &[Found]) -> Res
             &item.manifest,
         )?;
     }
-    Ok(())
+    tx.commit().map_err(super::db)
 }
 
 fn record_replica(catalog: &Catalog, row: &CustodyRow, volume_label: &str) -> Result<()> {
@@ -864,11 +878,6 @@ fn copy_hashed(from_root: &Path, to_root: &Path, file: &ManifestFile) -> Result<
         adoption::sync_dir(parent)?;
     }
     hash_file(to_root, file)
-}
-
-fn copy_bytes(from: &Path, to: &Path) -> Result<()> {
-    let bytes = seal::read_capped(from, seal::BUNDLE_CAP)?;
-    seal::write_staged_manifest(to, &bytes)
 }
 
 fn write_baseline_bundle(

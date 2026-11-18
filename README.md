@@ -86,7 +86,10 @@ On a terminal, a failure is one `error:` line and one `next:` line. Piped failur
 
 If you already have the files, verify them against that commit and adopt the folder. This is not a download, and it is not a local-baseline import. Every required file must match the resolved sizes and upstream hashes, and the commit must already have matched license evidence. An optional file that is simply absent is an exclusion: it is not copied and it is not sealed in the manifest. An optional file that is present and matches is kept. A damaged optional file still fails the check. Verification, copy, manifest, retry, and move cleanup use that same frozen set. The catalog then records provenance `upstream-verified (local source)`. A successful adopt prints a preservation receipt. A failed or partial adopt does not.
 
-    cargo run --locked --release -- verify-local --repo Qwen/Qwen2.5-0.5B-Instruct --revision main --path ~/Downloads/qwen
+Use the exact commit from inspection and the full `plan_id` returned by `propose`. The two subsequent commands use that saved review offline.
+
+    cargo run --locked --release -- propose --config config.local.toml --repo Qwen/Qwen2.5-0.5B-Instruct --revision <commit> --json
+    cargo run --locked --release -- verify-local --config config.local.toml --plan <plan_id> --path ~/Downloads/qwen
     cargo run --locked --release -- adopt --config config.local.toml --plan <plan_id> --path ~/Downloads/qwen --copy
 
 `verify-local --repo` resolves that commit from the publisher. `verify-local --config config.local.toml --plan <plan_id> --path ...` uses the saved review and does not contact the network. On a terminal, hashing progress is one line rewritten in place. A pipe prints at most one line per ten percent of each file, and `--quiet` prints none. `local list` reads Ollama tags only. Without `--config` the coverage is `not_checked`. With `--config` it reports `none_recorded`, `partially_recorded`, or `all_components_recorded`, plus matched and total distinct digests and the missing roles. That match is historical byte identity from the catalog. It is not a fresh hash, not proof the disk is mounted, and not proof the model runs offline. Disconnecting a disk does not erase a recorded match. The command never calls the Ollama API and never modifies blobs.
