@@ -92,23 +92,7 @@ pub(crate) fn adopt_stopping(
         ));
     }
     crate::filesystem::admit(&volume.path, crate::filesystem::Purpose::Payload)?;
-    let check_destination = || {
-        let marker = super::read_identity(&volume.path.join(super::MARKER));
-        match marker {
-            Ok(identity)
-                if identity.schema_version == 1
-                    && identity.vault_id == status.vault_id
-                    && identity.volume_id == volume.volume_id
-                    && identity.label == volume.label =>
-            {
-                Ok(())
-            }
-            _ => Err(Error::new(
-                "volume_unavailable",
-                "reconnect the original adoption volume",
-            )),
-        }
-    };
+    let check_destination = || volume.require_identity(&status.vault_id);
     let volume_path = fs::canonicalize(&volume.path).map_err(io)?;
     let volume_label = volume.label.clone();
     let repo = inventory.source.repo_id.clone();
@@ -138,6 +122,7 @@ pub(crate) fn adopt_stopping(
         }
         let chosen = verify::selected_sources(&inventory, &check)?;
         let manifest = manifest_from_tree(&published, &chosen)?;
+        check_destination()?;
         match recorded_manifest(&catalog, plan_id)? {
             Some(stored) if stored != manifest => {
                 return Err(Error::new(
@@ -268,6 +253,7 @@ pub(crate) fn adopt_stopping(
     // The published tree is already durable. A later read failure must not delete it.
     progress("recording", "catalog", 1, 1);
     let manifest = manifest_from_tree(&published, &chosen)?;
+    check_destination()?;
     record(
         &catalog,
         plan_id,

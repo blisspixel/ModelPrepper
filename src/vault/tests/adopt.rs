@@ -942,6 +942,29 @@ fn intake_rechecks_the_disk_after_hashing_the_source() {
 }
 
 #[test]
+fn a_volume_marker_change_before_recording_keeps_the_move_source() {
+    let (_dir, config) = setup();
+    let sample = sample(true);
+    let plan = stored(&config, &sample);
+    let marker = config.volumes[0].path.join(crate::vault::MARKER);
+    let error = adopt(
+        &config,
+        &plan,
+        &sample.download,
+        true,
+        &mut |phase, _, _, _| {
+            if phase == "recording" {
+                fs::rename(&marker, marker.with_extension("offline")).unwrap();
+            }
+        },
+    )
+    .unwrap_err();
+    assert_eq!(error.code, "volume_unavailable");
+    assert!(sample.download.join("model.safetensors").is_file());
+    assert!(status(&config).unwrap().preserved.is_empty());
+}
+
+#[test]
 fn a_local_adoption_recovers_from_its_replica_with_its_original_provenance() {
     use crate::vault::{rebuild, replica, verify_sealed};
     let dir = tempfile::tempdir().unwrap();

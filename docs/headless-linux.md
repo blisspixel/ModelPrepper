@@ -45,6 +45,23 @@ modelprepper status --config "$cfg" --json
 
 Record the vault and volume IDs separately from the filesystem UUID. On reboot, compare both layers of identity before intake. An offline, missing-marker or mismatched volume needs investigation. Keep the client stopped until the expected mount returns. Keep management private. Give the intake process access only to incoming files, and give consumers a read-only mount of the published files. Keep catalog, checkpoints, credentials, writable vault paths, host mounts and management sockets out of both. The CLI may need its writer lock even for inspection. A consumer can read the files directly.
 
+### Bind an external client to the data disk
+
+If a packaged torrent client runs as a systemd system service, the administrator can add these settings to its existing service drop-in. Set both the client's incomplete and completed download locations under `/srv/model-data/incoming`. Keep its private settings in its own service state directory. The example assumes a UUID-backed mount configured at `/srv/model-data`. Substitute the actual UUID before use and use `systemd-escape --path --suffix=mount` to obtain the unit name if the mountpoint changes.
+
+```ini
+[Unit]
+BindsTo=srv-model\x2ddata.mount
+After=srv-model\x2ddata.mount
+ConditionPathIsMountPoint=/srv/model-data
+
+[Service]
+ExecCondition=/usr/bin/findmnt --noheadings --output TARGET --mountpoint /srv/model-data --source UUID=REPLACE_WITH_DATA_UUID
+InaccessiblePaths=-/var/lib/modelprepper -/srv/model-data/vault -/srv/model-backup
+```
+
+The binding stops the service when the mount unit becomes inactive. The condition checks the source again before the client starts. Inspect the resulting unit with `systemctl cat` and verify it with `systemd-analyze verify` on the guest. Keep the client stopped while choosing its private management and peer settings. [systemd unit dependencies](https://www.freedesktop.org/software/systemd/man/latest/systemd.unit.html) · [Service start conditions](https://www.freedesktop.org/software/systemd/man/latest/systemd.service.html) · [findmnt source and mountpoint selection](https://man7.org/linux/man-pages/man8/findmnt.8.html)
+
 ## Budget the copy on both sides of the VM
 
 Record free bytes on the system, data and backup filesystems before intake, at peak staging, after publication, and after any separately authorized cleanup. Use the host storage administrator's measurement of backing-pool free capacity, thin provisioning and snapshot growth alongside the guest's `df`. Two guest disks sharing a physical HDD share its failure domain.
@@ -74,9 +91,9 @@ For an existing seal or an imported baseline, run `replica --config ... --plan .
 | --- | --- | --- |
 | Removed or replaced data disk | Tiny volume-identity and watch fixtures | Boot with data disk unavailable. Check the bare OS mountpoint for new files and the intake client for peer traffic. |
 | Interrupted intake or adoption | Interrupted copy, changed source and corrupt-byte fixtures | Restart with a partial external download. Only hand off a completed directory. Retry a stopped adoption and compare custody and source. |
-| Guest or host capacity exhausted | Reservation failures use bounded fixtures | Use a disposable guest allocation and isolated host test pool. Record actual I/O errors and verify source and previously published data survive. |
+| Guest or host capacity exhausted | A process fills a 4 MiB tmpfs to zero available bytes. Import refuses the payload, succeeds after space is released, and reuses a matching staged file on a tight retry. | Use a disposable guest allocation and isolated host test pool. Record actual I/O errors and verify source and previously published data survive. |
 | Lost catalog or disk | Replica-only recovery with a fresh catalog, renamed primary, retained backup marker and a full hash in the fixture | Restore with the original unavailable on genuinely separate media. Record volume IDs, checksums, elapsed time and every missing item. |
 
-On Linux, run `scripts/test-headless-linux.sh target/release/modelprepper` to rehearse the handoff with 17 synthetic bytes in a fresh temporary directory. This developer drill uses Bubblewrap with unprivileged namespaces, jq and the SQLite CLI. The intake process sees only the writable incoming tree, the consumer sees a read-only published revision, and the recovery process sees only the backup volume and a fresh catalog. Each process has its own network namespace. The fixture checks the catalog backup, hashes the recovered bytes, and verifies the new catalog contains zero grants. It needs no VM, torrent client, weights or inference runtime. Its two temporary directories share one underlying filesystem.
+On Linux, run `scripts/test-headless-linux.sh target/release/modelprepper` to rehearse the handoff with 17 synthetic bytes in a fresh temporary directory. This developer drill uses Bubblewrap with unprivileged namespaces, jq and the SQLite CLI. The intake process sees only the writable incoming tree, the consumer sees a read-only published revision, and the recovery process sees only the backup volume and a fresh catalog. An additional 4 MiB tmpfs isolates the full-disk and two-file retry cases from host storage. Each process has its own network namespace. The fixture checks the catalog backup, hashes the recovered bytes, and verifies the new catalog contains zero grants. It needs no VM, torrent client, weights or inference runtime. Its two temporary directories share one underlying filesystem.
 
 An always-available VM can run explicit commands now. Current scheduling is one weekly watch pass. Transfer approval, autonomous admission, provider-assisted curation, unattended recovery and release qualification still have open gates. See [issue 80](https://github.com/blisspixel/ModelPrepper/issues/80) for the operational evidence.

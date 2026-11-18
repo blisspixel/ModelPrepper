@@ -7,7 +7,7 @@ Images under assets render actual command output from the native release executa
 | [Help](assets/cli-help.png) | modelprepper --help |
 | [Offline status](assets/cli-status.png) | modelprepper status for a newly initialized demonstration vault |
 
-Captures show the terminal text view: a verdict, the facts, and one next step. `MODELPREPPER_TEXT=1` selects that view when the capture pipe is not a terminal, and `NO_COLOR=1` keeps the image plain. `--json` remains the pipe default for scripts. The demonstration vault lives under target and contains no weights. Source fingerprint and output/image hashes are recorded in [the manifest](assets/captures.json). No capture claims model preservation or offline loading.
+Captures show the terminal text view: a verdict, the facts, and one next step. `MODELPREPPER_TEXT=1` selects that view when the capture pipe is not a terminal, and `NO_COLOR=1` keeps the image plain. `--json` remains the pipe default for scripts. The renderer initializes a fresh temporary vault and removes it after capture. Set the platform temporary directory to a neutral path before producing public screenshots. Source fingerprint and output/image hashes are recorded in [the manifest](assets/captures.json). No capture claims model preservation or offline loading.
 
 ## Regenerate
 

@@ -4,6 +4,7 @@ import json
 import os
 import platform
 import subprocess
+import tempfile
 import textwrap
 from datetime import datetime, timezone
 from pathlib import Path
@@ -25,14 +26,14 @@ def source_digest():
     return hashlib.sha256(record.encode()).hexdigest()
 
 
-def execute(binary, *args):
+def execute(binary, *args, cwd=ROOT):
     env = os.environ.copy()
     # A pipe is not a terminal. This asks the binary for the same text a terminal shows.
     env["MODELPREPPER_TEXT"] = "1"
     env["NO_COLOR"] = "1"
     completed = subprocess.run(
         [str(binary), *args],
-        cwd=ROOT,
+        cwd=cwd,
         check=True,
         capture_output=True,
         text=True,
@@ -70,23 +71,21 @@ def main():
     subprocess.run(["cargo", "build", "--locked", "--release"], cwd=ROOT, check=True)
     target = Path(os.environ.get("CARGO_TARGET_DIR", ROOT / "target"))
     name = "modelprepper.exe" if platform.system() == "Windows" else "modelprepper"
-    binary = target / "release" / name
-    demo = ROOT / "target" / "docs-capture"
-    demo.mkdir(parents=True, exist_ok=True)
-    config = demo / "config.toml"
-    if not config.exists():
-        execute(binary, "config", "init", "--output", str(config), "--catalog", "catalog", "--volume", "models")
-    execute(binary, "init", "--config", str(config))
+    binary = (ROOT / target / "release" / name).resolve()
     ASSETS.mkdir(parents=True, exist_ok=True)
     captures = []
-    for name, command, args in [
-        ("cli-help", "modelprepper --help", ["--help"]),
-        ("cli-status", "modelprepper status --config target/docs-capture/config.toml", ["status", "--config", "target/docs-capture/config.toml"]),
-    ]:
-        raw = execute(binary, *args)
-        (ASSETS / (name + ".txt")).write_bytes(raw.encode())
-        render(name, command, raw)
-        captures.append({"command": command, "output": name + ".txt", "image": name + ".png", "output_sha256": hashlib.sha256(raw.encode()).hexdigest(), "image_sha256": hashlib.sha256((ASSETS / (name + ".png")).read_bytes()).hexdigest()})
+    with tempfile.TemporaryDirectory(prefix="modelprepper-demo-") as demo:
+        execute(binary, "config", "init", "--output", "config.toml", "--catalog", "catalog", "--volume", "models", cwd=demo)
+        execute(binary, "init", "--config", "config.toml", cwd=demo)
+        for name, args in [
+            ("cli-help", ["--help"]),
+            ("cli-status", ["status", "--config", "config.toml"]),
+        ]:
+            command = " ".join(["modelprepper", *args])
+            raw = execute(binary, *args, cwd=demo)
+            (ASSETS / (name + ".txt")).write_bytes(raw.encode())
+            render(name, command, raw)
+            captures.append({"command": command, "output": name + ".txt", "image": name + ".png", "output_sha256": hashlib.sha256(raw.encode()).hexdigest(), "image_sha256": hashlib.sha256((ASSETS / (name + ".png")).read_bytes()).hexdigest()})
     manifest = {"schema_version": 1, "captured_at": datetime.now(timezone.utc).isoformat(), "platform": platform.system(), "version": execute(binary, "--version").strip(), "source_digest": source_digest(), "captures": captures}
     (ASSETS / "captures.json").write_bytes((json.dumps(manifest, indent=2) + "\n").encode())
     print("Captured current native CLI help and offline status.")

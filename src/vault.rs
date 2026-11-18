@@ -84,6 +84,26 @@ pub struct VolumeStatus {
     pub read_only: bool,
 }
 
+impl VolumeStatus {
+    /// Re-read the marker after long hashes and before changing files or catalog custody.
+    fn require_identity(&self, vault_id: &str) -> Result<()> {
+        match read_identity(&self.path.join(MARKER)) {
+            Ok(identity)
+                if identity.schema_version == 1
+                    && identity.vault_id == vault_id
+                    && identity.volume_id == self.volume_id
+                    && identity.label == self.label =>
+            {
+                Ok(())
+            }
+            _ => Err(Error::new(
+                "volume_unavailable",
+                "reconnect the configured volume with its original identity",
+            )),
+        }
+    }
+}
+
 struct Catalog {
     db: Connection,
     _writer: WriterLock,
