@@ -23,8 +23,8 @@ Local copies:
   verify-sealed  Hash one sealed plan. Nothing is downloaded
   adopt          Copy or move a verified local folder into the vault
   fetch          Stage and seal one granted revision. Approval stays blocked
-  replica        Copy one sealed revision onto another volume. No network and no
-                 approval
+  replica        Copy a sealed revision or verified local adoption to another
+                 volume offline
   rebuild        Rebuild custody from on-volume bundles. No network and no
                  approvals
   import         Record a local folder that has no upstream proof
@@ -65,6 +65,7 @@ First run:
   modelprepper config init --output c.toml --catalog catalog --volume models
   modelprepper init --config c.toml
   modelprepper resolve --repo <org/model>
-  modelprepper propose --config c.toml --repo <org/model>
-  modelprepper verify-local --repo <org/model> --path <dir>
+  modelprepper propose --config c.toml --repo <org/model> --revision <commit>
+  --json
+  modelprepper verify-local --config c.toml --plan <id> --path <dir>
   modelprepper adopt --config c.toml --plan <id> --path <dir> --copy

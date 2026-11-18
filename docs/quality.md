@@ -15,6 +15,8 @@ npm run check
 
 The single CI workflow runs documentation and native checks on Linux, macOS, and Windows, with separate coverage and dependency jobs. Its aggregate Main checks job passes only when every required job succeeds. Node tests cover local-link validation and Rust coverage-gate behavior. Capture fingerprints and image/output hashes are checked without regenerating screenshots. External URLs and Markdown anchors are excluded from automatic link checking; reference-style links are not currently parsed. Online research links are reviewed during research rather than fetched on every CI run.
 
+CI caches pinned tool binaries for coverage and dependency checks, plus registry archives for native builds. Only trusted main pushes populate these caches. A cold run and its warm rerun took 1,121 and 793 aggregate job seconds at the same revision, with all three native installer jobs and both coverage gates exercised on each run. [Timing and cache-size measurements](https://github.com/blisspixel/ModelPrepper/issues/82#issuecomment-6965006105)
+
 Rust checks:
 
 ```text

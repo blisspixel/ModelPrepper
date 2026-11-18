@@ -17,7 +17,7 @@ What you can do now:
 - `config`, `init`, and `status` create a vault and show disk identity, the filesystem, and free space.
 - `resolve`, `propose`, `proposals`, and `decide` pin a public commit and record a review. Approval is blocked.
 - `verify-local` and `adopt` check a folder you already have and store the matched files. `import` records a folder with no upstream proof and does not relabel it.
-- `fetch` seals one granted revision. `replica` copies that revision onto another volume. `rebuild` reconstructs the catalog from those bundles with the hub unreachable.
+- `fetch` seals one granted revision. `replica` copies that revision or a verified local adoption onto another volume. `rebuild` reconstructs the catalog from those bundles with the hub unreachable.
 - `plan`, `budget`, and `kit` preview a selection. They do not reserve space. `workspace_bytes` stays null.
 - `watch` runs each configured watch once and fetches only inside a current grant and the weekly byte ceiling. `schedule` installs that weekly timer only when the preview digest matches. CI does not enable a live timer.
 - `collection` stores a list you wrote. `select` keeps entries by exact text. It does not rank, resolve, or download. `discover` searches only the embedded source catalog.
@@ -42,7 +42,7 @@ Still open: clean-machine setup, the ten-minute planning drill, published checks
 | kit | Report a person-written slot list from saved evidence. Empty slots stay empty. One model counts once in the physical total. |
 | readiness | Read a local runtime recipe and report capability closure, rights, disk presence, and recorded readiness. It does not download, execute, or change a vault. |
 | fetch | Seal one granted revision. Approval stays blocked. |
-| replica | Copy one sealed revision onto another volume after a full hash. No network. The failure domain stays unlabeled. A directory symlink is not followed. |
+| replica | Copy a sealed revision or verified local adoption onto another volume after a full hash. The backup retains the original provenance. No network. The failure domain stays unlabeled. A directory symlink is not followed. |
 | rebuild | Reconstruct custody and replica rows from on-volume bundles. A missing catalog is rebuilt from volume markers. Approvals are not copied. |
 | import | Record a local folder as `local-baseline`. Matching bytes do not relabel it as upstream-verified. A directory symlink is not followed. |
 | watch | Run each configured watch once. A new commit is a new plan. Older revisions stay. A fetch happens only inside a current grant and the UTC-week transfer ceiling. |

@@ -79,12 +79,12 @@ struct BundleRights {
 
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct BundleFile {
-    path: String,
-    size_bytes: u64,
-    sha256: String,
+pub(super) struct BundleFile {
+    pub(super) path: String,
+    pub(super) size_bytes: u64,
+    pub(super) sha256: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    upstream_hash: Option<UpstreamHash>,
+    pub(super) upstream_hash: Option<UpstreamHash>,
 }
 
 #[derive(PartialEq, Eq)]
@@ -494,27 +494,54 @@ fn write_bundle(
             upstream_hash: Some(upstream_hash),
         });
     }
-    let document = BundleDocument {
-        schema_version: 1,
-        bundle_id: prepared.plan_id.clone(),
-        source: prepared.source.clone(),
-        profile: prepared.layout.clone(),
-        rights: BundleRights {
-            license_id: prepared.license_id.clone(),
-            status: "matched".into(),
-        },
+    let bytes = encode_verified_bundle(
+        &prepared.plan_id,
+        &prepared.source,
+        &prepared.layout,
+        &prepared.license_id,
         files,
-        excluded: prepared.excluded.clone(),
-        dependencies: Vec::new(),
-        provenance: PROVENANCE_RANGED_HTTPS.into(),
-    };
-    let mut bytes = serde_json::to_vec_pretty(&document)
-        .map_err(|error| Error::new("output_failed", error.to_string()))?;
-    bytes.push(b'\n');
+        &prepared.excluded,
+        PROVENANCE_RANGED_HTTPS,
+    )?;
     let path = directory.join(BUNDLE_NAME);
     write_staged_manifest(&path, &bytes)?;
     adoption::sync_dir(directory)?;
     Ok(())
+}
+
+pub(super) fn encode_verified_bundle(
+    plan_id: &str,
+    source: &Source,
+    profile: &str,
+    license_id: &str,
+    files: Vec<BundleFile>,
+    excluded: &[String],
+    provenance: &str,
+) -> Result<Vec<u8>> {
+    let document = BundleDocument {
+        schema_version: 1,
+        bundle_id: plan_id.into(),
+        source: source.clone(),
+        profile: profile.into(),
+        rights: BundleRights {
+            license_id: license_id.into(),
+            status: "matched".into(),
+        },
+        files,
+        excluded: excluded.into(),
+        dependencies: Vec::new(),
+        provenance: provenance.into(),
+    };
+    let mut bytes = serde_json::to_vec_pretty(&document)
+        .map_err(|error| Error::new("output_failed", error.to_string()))?;
+    bytes.push(b'\n');
+    if bytes.len() as u64 > BUNDLE_CAP {
+        return Err(Error::new(
+            "manifest_too_large",
+            "the recovery manifest exceeds its size limit",
+        ));
+    }
+    Ok(bytes)
 }
 
 pub(super) fn write_staged_manifest(path: &Path, bytes: &[u8]) -> Result<()> {

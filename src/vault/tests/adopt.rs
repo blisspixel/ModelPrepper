@@ -940,3 +940,99 @@ fn intake_rechecks_the_disk_after_hashing_the_source() {
     assert_eq!(fs::read_dir(volume).unwrap().count(), 0);
     assert!(status(&config).unwrap().preserved.is_empty());
 }
+
+#[test]
+fn a_local_adoption_recovers_from_its_replica_with_its_original_provenance() {
+    use crate::vault::{rebuild, replica, verify_sealed};
+    let dir = tempfile::tempdir().unwrap();
+    let root = fs::canonicalize(dir.path()).unwrap();
+    let mut config = Config::default_for(root.join("catalog"), root.join("primary"));
+    config.storage.min_free_bytes = 1024 * 1024;
+    config.volumes.push(crate::config::Volume {
+        label: "secondary".into(),
+        path: root.join("secondary"),
+    });
+    initialize(&config).unwrap();
+    let mut sample = sample(true);
+    with_optional(&mut sample, "README.md", b"not adopted", false);
+    let plan = stored(&config, &sample);
+    let Outcome::Recorded(adopted) = adopt(
+        &config,
+        &plan,
+        &sample.download,
+        false,
+        &mut |_, _, _, _| {},
+    )
+    .unwrap() else {
+        panic!("expected a recorded adoption")
+    };
+    // An optional file supplied later is outside the frozen custody manifest.
+    fs::write(adopted.path.join("README.md"), b"not adopted").unwrap();
+    fs::write(adopted.path.join("model.safetensors"), b"changed").unwrap();
+    assert_eq!(
+        replica(&config, &plan, "secondary").unwrap_err().code,
+        "hash_mismatch"
+    );
+    assert!(status(&config).unwrap().replicas.is_empty());
+    fs::write(adopted.path.join("model.safetensors"), b"weights").unwrap();
+    let backup = replica(&config, &plan, "secondary").unwrap();
+    assert!(!adopted.path.join("modelprepper-bundle.json").exists());
+    assert!(!backup.path.join("README.md").exists());
+    let manifest: serde_json::Value =
+        serde_json::from_slice(&fs::read(backup.path.join("modelprepper-bundle.json")).unwrap())
+            .unwrap();
+    assert_eq!(manifest["bundle_id"], plan);
+    assert_eq!(manifest["provenance"], PROVENANCE_LOCAL_UPSTREAM);
+    assert_eq!(manifest["excluded"], serde_json::json!(["README.md"]));
+    assert!(
+        manifest["files"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|file| file["upstream_hash"].is_object())
+    );
+    assert_eq!(
+        replica(&config, &plan, "secondary").unwrap().path,
+        backup.path
+    );
+    assert_eq!(status(&config).unwrap().replicas.len(), 1);
+
+    let mut changed_metadata = manifest.clone();
+    changed_metadata["rights"]["license_id"] = serde_json::json!("changed");
+    let backup_manifest = backup.path.join("modelprepper-bundle.json");
+    let original = fs::read(&backup_manifest).unwrap();
+    fs::write(
+        &backup_manifest,
+        serde_json::to_vec(&changed_metadata).unwrap(),
+    )
+    .unwrap();
+    assert!(replica(&config, &plan, "secondary").is_err());
+    fs::write(&backup_manifest, original).unwrap();
+
+    // A provenance-free manifest beside the adopted payload cannot rewrite its identity.
+    let mut incomplete_bundle = manifest;
+    incomplete_bundle
+        .as_object_mut()
+        .unwrap()
+        .remove("provenance");
+    fs::write(
+        adopted.path.join("modelprepper-bundle.json"),
+        serde_json::to_vec(&incomplete_bundle).unwrap(),
+    )
+    .unwrap();
+    assert!(replica(&config, &plan, "secondary").is_err());
+
+    fs::rename(&config.catalog_path, root.join("unavailable-catalog")).unwrap();
+    fs::rename(&config.volumes[0].path, root.join("unavailable-primary")).unwrap();
+    config.catalog_path = root.join("recovery");
+    config.volumes.remove(0);
+    config.storage.default_volume = "secondary".into();
+    let recovered = rebuild(&config).unwrap();
+    assert!(!recovered.approvals_transferred && !recovered.transfer_authorized);
+    assert_eq!((recovered.custody_count, recovered.replica_count), (1, 0));
+    assert_eq!(
+        status(&config).unwrap().preserved[0].provenance,
+        PROVENANCE_LOCAL_UPSTREAM
+    );
+    assert!(verify_sealed(&config, &plan).unwrap().matched);
+}
