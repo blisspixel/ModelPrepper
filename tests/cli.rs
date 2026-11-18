@@ -653,6 +653,7 @@ fn readiness_text_and_json_agree_and_do_not_create_or_execute() {
         .env("MODELPREPPER_TEXT", "1")
         .args([
             "readiness",
+            "--full-hash",
             "--recipe",
             recipe.to_str().unwrap(),
             "--path",

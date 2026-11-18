@@ -106,9 +106,26 @@ A load test establishes that the specific environment worked at that time, not g
 
 `readiness --recipe <file> --path <dir>` reads one versioned JSON recipe and the local directory. Schema version 1 is the only accepted recipe. Unknown fields and unknown schema versions are rejected. The only profile is `publisher-safetensors-text-v1`. For the `text-generation` capability it declares required config, tokenizer, weight, and chat-template files. Another selected capability, such as a transcription model, is closed on its own files. A missing file blocks that capability. An unknown need or an adapter whose base commit is absent stays unknown. It is not reported as complete.
 
-Each file and the runtime artifact says whether it is `retained`, `named`, or `remote`. A retained file has a size and SHA-256. Ordinary preflight hashes a retained file only when its declared size is at most 2 MiB. A larger file can match in length and still be unverified. The report says `retained` for a runtime only when its bytes match, `unverified` when that retained file is larger than 2 MiB, `damaged` when the present file does not match, and `missing` when it is absent. A package name or an HTTPS URL is not a retained artifact and cannot make the closure complete. Rights are echoed from the recipe as a declaration. This command does not re-check the publisher, so provenance stays `declared_only`.
+Each file and the runtime artifact says whether it is `retained`, `named`, or `remote`. A retained file has a size and SHA-256. Ordinary preflight hashes a retained file only when its declared size is at most 2 MiB. A larger file can match in length and still be unverified. Pass `--full-hash` to stream and compare every declared retained file, including a large runtime. This can require a full HDD read. The report says `retained` for a runtime only when its bytes match, `unverified` when that retained file is larger than 2 MiB, `damaged` when the present file does not match, and `missing` when it is absent. A package name or an HTTPS URL is not a retained artifact and cannot make the closure complete. Rights are echoed from the recipe as a declaration. This command does not re-check the publisher, so provenance stays `declared_only`.
 
 The report keeps integrity, capability closure, rights, disk availability, environment, runtime retention, and offline readiness separate. There is no single ready badge. A missing directory is `unavailable` and is not created. A symlink or Windows reparse point used as the directory is `unsafe_path` and is not followed. The command does not contact a network, execute a model or runtime, or write a vault.
+
+### Recording a prior task
+
+A schema 1 recipe can carry a `recorded_drill` at version 1 or 2. Both bind the result to the recipe digest, capability, platform and runtime version. The digest covers the runtime artifact declaration and the selected model file identities. Changing an observation leaves that identity stable. The JSON report echoes the record, including stale evidence. Always read `offline_readiness` to see whether it applies.
+
+Version 2 adds a required `observation` object. Record the following fields from the [manual task and restore drill](validation-drills.md#offline-task-and-restore).
+
+| Field | Value to record |
+| --- | --- |
+| `observed_at_unix` | UTC seconds since the epoch |
+| `runtime_source`, `runtime_license` | Public origin or retained package identity, and separately reviewed runtime license (or `unresolved`) |
+| `task` | The capability-specific task that was attempted |
+| `isolation` | `no_interface`, `firewall_block`, `airplane_mode`, or `unverified`. Unverified isolation cannot support an applicable pass. |
+| `outbound_attempts` | `"not_measured"`, `"none_observed"`, or an object such as `{"observed":["blocked package check"]}`. Keep sensitive destinations out of shared records. |
+| `evidence_sha256` | Lowercase SHA-256 of the separately retained procedure and results log |
+
+Each text observation is limited to 256 bytes. The list accepts 1–16 summaries. Keep host and driver details, task inputs and outputs, isolation checks, and separate restoration results in the log. Preflight reads the recipe's declarations. It does not open the log, grant redistribution rights or demonstrate the task again.
 
 The manual drill remains:
 
