@@ -1,6 +1,6 @@
 # Implementation status
 
-This records executable behavior and evidence through wave 39. It does not mark the preservation roadmap complete.
+This records executable behavior and evidence through wave 40. It does not mark the preservation roadmap complete.
 
 ## Executable features
 
@@ -99,5 +99,6 @@ The order is the work-wave table in the [roadmap](roadmap.md), then the still-in
 37. A verified local adoption now supports a fully hashed replica. The recovery fixture rebuilds a fresh catalog from the backup alone and preserves the local-source provenance.
 38. `verify-sealed --volume` hashes a recorded replica by plan ID and volume label. It checks the backup bundle identity and payload even when the custody volume is offline. Both kinds of saved location include plan IDs in `status --json`.
 39. The native catalog snapshot reopens with the original vault ID after catalog loss. A fixture recovers committed WAL rows and checks that later changes stay in the original.
+40. A version 2 drill observation can be checked against an explicitly supplied evidence log. The offline fixture exercises an original log, changed bytes and a missing file.
 
 Initialized disks and successful inspection are useful foundations. They do not establish that a model has been preserved or can run offline.

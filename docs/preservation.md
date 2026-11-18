@@ -125,7 +125,13 @@ Version 2 adds a required `observation` object. Record the following fields from
 | `outbound_attempts` | `"not_measured"`, `"none_observed"`, or an object such as `{"observed":["blocked package check"]}`. Keep sensitive destinations out of shared records. |
 | `evidence_sha256` | Lowercase SHA-256 of the separately retained procedure and results log |
 
-Each text observation is limited to 256 bytes. The list accepts 1–16 summaries. Keep host and driver details, task inputs and outputs, isolation checks, and separate restoration results in the log. Preflight reads the recipe's declarations. It does not open the log, grant redistribution rights or demonstrate the task again.
+Each text observation is limited to 256 bytes. The list accepts 1–16 summaries. Keep host and driver details, task inputs and outputs, isolation checks, and separate restoration results in the log. The ordinary preflight reads the recipe's declarations. To compare a retained log with its recorded digest, explicitly supply the file:
+
+```sh
+modelprepper readiness --recipe "$recipe" --path "$model" --evidence-log "$log" --json
+```
+
+The report includes `evidence_log.status` and the observed SHA-256. An absent log is `missing`; changed bytes are `mismatch`. Both mark the prior result stale and return a failing exit status. A match confirms the identity of the supplied log. The prior task result still depends on the recipe, platform and model/runtime checks. Keep the log separate from published metadata. Only its digest and check status appear in the output. Use `--full-hash` in the same command when a fresh check of large model and runtime files is needed.
 
 The manual drill remains:
 

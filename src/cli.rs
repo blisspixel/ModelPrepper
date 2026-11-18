@@ -403,6 +403,9 @@ pub enum PreviewCommand {
         /// Hash all retained model and runtime files, including those larger than 2 MiB.
         #[arg(long)]
         full_hash: bool,
+        /// Verify this retained log against the digest in a version 2 prior drill.
+        #[arg(long)]
+        evidence_log: Option<PathBuf>,
         /// Directory of retained model files. A missing directory is reported and not created.
         #[arg(long)]
         path: PathBuf,
@@ -900,10 +903,13 @@ pub(crate) fn execute_with(
             recipe,
             path,
             full_hash,
+            evidence_log,
         }) => {
             let recipe = crate::readiness::Recipe::parse(&read_text(&recipe)?)?;
-            let report = crate::readiness::preflight(&recipe, &path, full_hash)?;
-            show(&view, &report, true, |report| {
+            let report =
+                crate::readiness::preflight(&recipe, &path, full_hash, evidence_log.as_deref())?;
+            let log_ok = report.evidence_log.as_ref().is_none_or(|log| log.matched());
+            show(&view, &report, log_ok, |report| {
                 crate::present::render_readiness(report, view.color, view.columns)
             })
         }
@@ -1011,9 +1017,12 @@ fn show<T: Serialize>(
             ok,
         })
     } else {
-        serde_json::to_value(value)
-            .map(CommandOutput::Json)
-            .map_err(|error| Error::new("output_failed", error.to_string()))
+        let mut body = serde_json::to_value(value)
+            .map_err(|error| Error::new("output_failed", error.to_string()))?;
+        if !ok {
+            body["ok"] = Value::Bool(false);
+        }
+        Ok(CommandOutput::Json(body))
     }
 }
 

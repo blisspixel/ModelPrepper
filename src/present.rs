@@ -1591,6 +1591,9 @@ pub fn render_readiness(report: &crate::readiness::Report, color: bool, columns:
         field(columns, "rights", report.rights),
         field(columns, "disk", report.availability),
     ];
+    if let Some(log) = &report.evidence_log {
+        lines.push(field(columns, "evidence log", log.status));
+    }
     if let Some(drill) = &report.recorded_drill {
         lines.push(field(columns, "prior drill", &drill.capability));
     }
