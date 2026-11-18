@@ -4,6 +4,7 @@ import argparse
 import hashlib
 import io
 import json
+import os
 import platform
 import subprocess
 import tarfile
@@ -86,7 +87,14 @@ class InstallerTests(unittest.TestCase):
                 digest,
             ]
         return subprocess.run(
-            command + list(extras), capture_output=True, text=True, timeout=30
+            command + list(extras),
+            env={
+                **os.environ,
+                **dict.fromkeys(("TMPDIR", "TMP", "TEMP"), str(self.root)),
+            },
+            capture_output=True,
+            text=True,
+            timeout=30,
         )
 
     def test_installs_and_upgrades_without_touching_configuration(self):
