@@ -1,5 +1,5 @@
-ready  vault 2b5d02e6
-  primary  mounted  tmpfs  11.8 GB (11.0 GiB) free
-  path  /tmp/modelprepper-demo-295va_9_/models
+ready  vault f6cc32ec
+  primary  mounted  tmpfs  11.4 GB (10.6 GiB) free
+  path  /tmp/modelprepper-demo-6x1g0dp9/models
   preserved  none yet
 next: modelprepper resolve --repo <org/model>

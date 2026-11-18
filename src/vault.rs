@@ -19,6 +19,8 @@ const PENDING: &str = ".modelprepper-volume.pending";
 
 #[path = "vault/adopt.rs"]
 mod adoption;
+mod backup;
+pub use backup::{CatalogBackup, backup_catalog};
 mod grant;
 #[cfg(all(test, unix))]
 #[path = "vault/tests/ownership.rs"]

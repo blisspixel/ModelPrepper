@@ -121,6 +121,15 @@ pub enum SetupCommand {
         #[arg(long)]
         config: PathBuf,
     },
+    /// Save a consistent, standalone SQLite copy of the private catalog.
+    CatalogBackup {
+        /// Path to the vault configuration file.
+        #[arg(long)]
+        config: PathBuf,
+        /// New snapshot file outside the catalog and managed volumes.
+        #[arg(long)]
+        output: PathBuf,
+    },
     /// Inspect catalog, preserved copies, and disk identities offline.
     Status {
         /// Path to the vault configuration file.
@@ -627,6 +636,12 @@ pub(crate) fn execute_with(
             let status = crate::vault::initialize(&located)?;
             show(&view, &status, true, |status| {
                 crate::present::render_status(status, view.color, view.columns)
+            })
+        }
+        Command::Setup(SetupCommand::CatalogBackup { config, output }) => {
+            let snapshot = crate::vault::backup_catalog(&located_config(&config)?, &output)?;
+            show(&view, &snapshot, true, |snapshot| {
+                crate::present::render_catalog_backup(snapshot, view.color, view.columns)
             })
         }
         Command::Setup(SetupCommand::Status { config }) => {

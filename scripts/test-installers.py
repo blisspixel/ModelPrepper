@@ -199,6 +199,14 @@ class InstallerTests(unittest.TestCase):
         )
         self.assertTrue(verified["matched"])
         self.assertEqual(verified["copy_kind"], "replica")
+        receipt = self.cli(
+            "catalog-backup", "--config", config, "--output", "snapshot.sqlite3"
+        )
+        snapshot = self.root / "snapshot.sqlite3"
+        self.assertEqual(
+            receipt["sha256"], hashlib.sha256(snapshot.read_bytes()).hexdigest()
+        )
+        self.assertEqual(receipt["size_bytes"], snapshot.stat().st_size)
         (self.root / "catalog").rename(self.root / "unavailable-catalog")
 
         recovery = "recovery.toml"
