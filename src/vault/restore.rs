@@ -347,19 +347,20 @@ pub fn rebuild(config: &Config) -> Result<Rebuild> {
         let root = fs::canonicalize(&volume.path).map_err(super::io)?;
         check_path(&root)?;
         let preserved = root.join("preserved");
-        if linked_path(&preserved)? {
-            damaged.push(format!("{}:preserved", volume.label));
-            continue;
-        }
-        if !preserved.try_exists().map_err(super::io)? {
-            continue;
+        match fs::symlink_metadata(&preserved) {
+            Ok(meta) if meta.is_dir() && !linked(&meta) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            _ => {
+                damaged.push(format!("{}:preserved", volume.label));
+                continue;
+            }
         }
         for bundle_path in find_bundles(
             &preserved,
             &volume.label,
             &mut damaged,
             &mut unbundled_directories,
-        )? {
+        ) {
             match inspect(&root, &volume.label, &bundle_path) {
                 Ok(item) => found.push(item),
                 Err(_) => damaged.push(format!("{}:{}", volume.label, bundle_path.display())),
@@ -937,6 +938,11 @@ fn inspect(root: &Path, label: &str, bundle_path: &Path) -> Result<Found> {
             size_bytes: file.size_bytes,
         })
         .collect::<Vec<_>>();
+    if bundle.provenance == PROVENANCE_LOCAL_BASELINE
+        && baseline_id(&bundle.repo_id, &bundle.resolved_revision, &files)? != bundle.bundle_id
+    {
+        return Err(conflict());
+    }
     sweep(directory, &files)?;
     let provenance = if bundle.provenance.is_empty() {
         PROVENANCE_UNRECORDED.into()
@@ -961,13 +967,24 @@ fn find_bundles(
     label: &str,
     damaged: &mut Vec<String>,
     unbundled: &mut Vec<String>,
-) -> Result<Vec<PathBuf>> {
+) -> Vec<PathBuf> {
     let mut found = Vec::new();
     let mut stack = vec![(preserved.to_path_buf(), false)];
     while let Some((dir, inside_payload)) = stack.pop() {
         let mut entries = Vec::new();
-        for entry in fs::read_dir(&dir).map_err(super::io)? {
-            entries.push(entry.map_err(super::io)?.path());
+        let Ok(children) = fs::read_dir(&dir) else {
+            damaged.push(format!("{label}:{}", dir.display()));
+            continue;
+        };
+        let mut fully_listed = true;
+        for entry in children {
+            match entry {
+                Ok(entry) => entries.push(entry.path()),
+                Err(_) => fully_listed = false,
+            }
+        }
+        if !fully_listed {
+            damaged.push(format!("{label}:{}", dir.display()));
         }
         entries.sort();
         // Keep revision directories visible when their rebuild document is
@@ -978,11 +995,14 @@ fn find_bundles(
                 .file_name()
                 .and_then(|v| v.to_str())
                 .is_some_and(|v| crate::validation::validate_hex(v, 40).is_ok());
-        if revision_root && entries.binary_search(&dir.join(BUNDLE_NAME)).is_err() {
+        if revision_root && fully_listed && entries.binary_search(&dir.join(BUNDLE_NAME)).is_err() {
             unbundled.push(format!("{label}:{}", dir.display()));
         }
         for path in entries {
-            let meta = fs::symlink_metadata(&path).map_err(super::io)?;
+            let Ok(meta) = fs::symlink_metadata(&path) else {
+                damaged.push(format!("{label}:{}", path.display()));
+                continue;
+            };
             if linked(&meta) {
                 damaged.push(format!("{label}:{}", path.display()));
                 continue;
@@ -1001,7 +1021,7 @@ fn find_bundles(
             }
         }
     }
-    Ok(found)
+    found
 }
 
 fn sweep(root: &Path, files: &[ManifestFile]) -> Result<u64> {
@@ -1435,14 +1455,6 @@ fn directory_exists(path: &Path) -> Result<bool> {
             "unsafe_path",
             "the destination is not a directory",
         )),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
-        Err(error) => Err(super::io(error)),
-    }
-}
-
-fn linked_path(path: &Path) -> Result<bool> {
-    match fs::symlink_metadata(path) {
-        Ok(meta) => Ok(linked(&meta)),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
         Err(error) => Err(super::io(error)),
     }
