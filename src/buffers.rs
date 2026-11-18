@@ -17,10 +17,8 @@
 use crate::{Error, Result};
 use socket2::SockRef;
 use std::{
-    io::ErrorKind,
     net::{Ipv4Addr, TcpListener, TcpStream},
-    thread,
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 /// Bytes copied from the segment body into the staging file.
@@ -72,54 +70,19 @@ pub fn recorded_transfer_buffers() -> RecordedTransferBuffers {
 /// Read kernel socket buffers from a connected loopback TCP socket.
 /// The hub is not contacted. Sizes are left unset, matching a ureq socket.
 pub fn measure_kernel_socket_buffers() -> Result<KernelSocketBuffers> {
-    read_socket_buffers(None)
+    let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).map_err(measure_error)?;
+    let address = listener.local_addr().map_err(measure_error)?;
+    // The handshake completes in the empty listen queue. Keep the listener
+    // alive while sampling the client. No peer thread or data transfer is needed.
+    let client =
+        TcpStream::connect_timeout(&address, Duration::from_secs(2)).map_err(measure_error)?;
+    read_socket_buffers(&SockRef::from(&client))
 }
 
-fn read_socket_buffers(receive_request: Option<usize>) -> Result<KernelSocketBuffers> {
-    let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).map_err(measure_error)?;
-    listener.set_nonblocking(true).map_err(measure_error)?;
-    let address = listener.local_addr().map_err(measure_error)?;
-    let accepted = thread::spawn(move || {
-        let deadline = Instant::now() + Duration::from_secs(2);
-        loop {
-            match listener.accept() {
-                Ok((stream, _)) => return Ok(stream),
-                Err(error) if error.kind() == ErrorKind::WouldBlock => {
-                    if Instant::now() >= deadline {
-                        return Err(error);
-                    }
-                    thread::sleep(Duration::from_millis(5));
-                }
-                Err(error) => return Err(error),
-            }
-        }
-    });
-    let client = match TcpStream::connect(address) {
-        Ok(client) => client,
-        Err(error) => {
-            let _ = accepted.join();
-            return Err(measure_error(error));
-        }
-    };
-    let socket = SockRef::from(&client);
-    if let Some(size) = receive_request {
-        socket.set_recv_buffer_size(size).map_err(measure_error)?;
-    }
-    let receive = socket.recv_buffer_size().map_err(measure_error)?;
-    let send = socket.send_buffer_size().map_err(measure_error)?;
-    match accepted.join() {
-        Ok(Ok(server)) => drop(server),
-        Ok(Err(error)) => return Err(measure_error(error)),
-        Err(_) => {
-            return Err(Error::new(
-                "buffer_measurement_failed",
-                "kernel socket buffers could not be read",
-            ));
-        }
-    }
+fn read_socket_buffers(socket: &SockRef<'_>) -> Result<KernelSocketBuffers> {
     Ok(KernelSocketBuffers {
-        receive_bytes: receive as u64,
-        send_bytes: send as u64,
+        receive_bytes: socket.recv_buffer_size().map_err(measure_error)? as u64,
+        send_bytes: socket.send_buffer_size().map_err(measure_error)? as u64,
     })
 }
 
@@ -150,11 +113,22 @@ mod tests {
         let unset = measure_kernel_socket_buffers().unwrap();
         assert!(unset.receive_bytes > 0, "{unset:?}");
         assert!(unset.send_bytes > 0, "{unset:?}");
-        let low = read_socket_buffers(Some(8 * 1024)).unwrap();
-        let high = read_socket_buffers(Some(64 * 1024)).unwrap();
-        assert!(
-            high.receive_bytes > low.receive_bytes,
-            "low {low:?} high {high:?} unset {unset:?}"
-        );
+        // Use an idle, unconnected socket for exact comparisons. Independent
+        // TCP connections can be tuned differently by the OS before sampling.
+        let socket =
+            socket2::Socket::new(socket2::Domain::IPV4, socket2::Type::STREAM, None).unwrap();
+        for (receive, send) in [(8 * 1024, 64 * 1024), (64 * 1024, 8 * 1024)] {
+            socket.set_recv_buffer_size(receive).unwrap();
+            socket.set_send_buffer_size(send).unwrap();
+            let measured = read_socket_buffers(&SockRef::from(&socket)).unwrap();
+            assert_eq!(
+                measured.receive_bytes,
+                socket.recv_buffer_size().unwrap() as u64
+            );
+            assert_eq!(
+                measured.send_bytes,
+                socket.send_buffer_size().unwrap() as u64
+            );
+        }
     }
 }
