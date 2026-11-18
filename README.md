@@ -40,7 +40,7 @@ Still open: clean-machine setup, the ten-minute planning drill, published checks
 | plan | Preview untrusted local inventory with selected files, costs, exclusions, and blockers. `selected-gguf-v1` names GGUF files with `--select`. |
 | budget | Compare pinned candidate sizes with the storage ceiling. Nothing is reserved or transferred. |
 | kit | Report a person-written slot list from saved evidence. Empty slots stay empty. One model counts once in the physical total. |
-| readiness | Read a local runtime recipe and report capability closure, rights, disk presence, and recorded readiness. It does not download, execute, or change a vault. |
+| readiness | Read a local runtime recipe and report capability closure, rights, disk presence, and recorded readiness. Use `--evidence-log` to check a retained drill log after recovery. |
 | fetch | Seal one granted revision. Approval stays blocked. |
 | catalog-backup | Save a private, consistent SQLite snapshot and its SHA-256. Retain config and payload separately. |
 | replica | Copy a sealed revision or verified local adoption onto another volume after a full hash. The backup retains the original provenance. No network. The failure domain stays unlabeled. A directory symlink is not followed. |

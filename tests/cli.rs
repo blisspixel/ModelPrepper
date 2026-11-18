@@ -631,6 +631,18 @@ fn readiness_text_and_json_agree_and_do_not_create_or_execute() {
 }"#,
     )
     .unwrap();
+    let no_observation = binary(&[
+        "readiness",
+        "--recipe",
+        recipe.to_str().unwrap(),
+        "--path",
+        model.to_str().unwrap(),
+        "--evidence-log",
+        "unused.log",
+    ]);
+    assert!(!no_observation.status.success());
+    let error: serde_json::Value = serde_json::from_slice(&no_observation.stderr).unwrap();
+    assert_eq!(error["error"]["code"], "missing_evidence_digest");
     let before = fs::read_dir(&model).unwrap().count();
     let json = binary(&[
         "readiness",

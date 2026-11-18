@@ -238,6 +238,33 @@ class InstallerTests(unittest.TestCase):
         self.assertEqual(
             (report["copy_kind"], report["volume_label"]), ("custody", "backup")
         )
+        payload = (
+            self.root
+            / "backup"
+            / "preserved"
+            / "local"
+            / "fixture"
+            / ("a" * 40)
+            / "weights.txt"
+        )
+        payload.write_bytes(b"damaged")
+        damaged = subprocess.run(
+            [
+                str(self.executable),
+                "--json",
+                "verify-sealed",
+                "--config",
+                recovery,
+                "--plan",
+                plan,
+            ],
+            cwd=self.root,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        self.assertNotEqual(damaged.returncode, 0)
+        self.assertFalse(json.loads(damaged.stdout)["matched"])
         for name in ("catalog", "primary", "incoming"):
             self.assertFalse((self.root / name).exists())
 

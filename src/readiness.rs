@@ -117,7 +117,7 @@ pub struct DrillRecord {
     pub observation: Option<DrillObservation>,
 }
 
-/// Operator evidence from a previous run. Preflight never opens the log or invokes the runtime.
+/// Operator evidence from a previous run. The optional log path comes from the operator.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct DrillObservation {
@@ -229,9 +229,23 @@ pub struct Report {
     pub hashed_files: u32,
     pub unverified_files: u32,
     pub recorded_drill: Option<DrillRecord>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub evidence_log: Option<EvidenceLog>,
     pub offline_readiness: &'static str,
     pub capabilities: Vec<CapabilityReport>,
     pub next: String,
+}
+
+#[derive(Debug, Serialize, PartialEq, Eq)]
+pub struct EvidenceLog {
+    pub status: &'static str,
+    pub sha256: Option<String>,
+}
+
+impl EvidenceLog {
+    pub fn matched(&self) -> bool {
+        self.status == "matched"
+    }
 }
 
 #[derive(Debug, Serialize, PartialEq, Eq)]
@@ -439,7 +453,15 @@ impl Recipe {
     }
 }
 
-pub fn preflight(recipe: &Recipe, path: &Path, full_hash: bool) -> Result<Report> {
+pub fn preflight(
+    recipe: &Recipe,
+    path: &Path,
+    full_hash: bool,
+    evidence_path: Option<&Path>,
+) -> Result<Report> {
+    let evidence_log = evidence_path
+        .map(|path| check_evidence_log(recipe, path))
+        .transpose()?;
     let recipe_digest = recipe.digest();
     let available = directory_available(path)?;
     let mut hashed_files = 0_u32;
@@ -527,7 +549,7 @@ pub fn preflight(recipe: &Recipe, path: &Path, full_hash: bool) -> Result<Report
         RightsStatus::Unreviewed => "unreviewed",
         RightsStatus::Unresolved => "unresolved",
     };
-    let offline_readiness = readiness_state(
+    let mut offline_readiness = readiness_state(
         recipe,
         &recipe_digest,
         integrity,
@@ -536,15 +558,20 @@ pub fn preflight(recipe: &Recipe, path: &Path, full_hash: bool) -> Result<Report
         rights,
         &capabilities,
     );
-    let next = next_action(
-        available,
-        environment,
-        rights,
-        integrity,
-        runtime_retention,
-        offline_readiness,
-        &capabilities,
-    );
+    let next = if evidence_log.as_ref().is_some_and(|log| !log.matched()) {
+        offline_readiness = "stale";
+        "locate the original log matching the recorded drill SHA-256".into()
+    } else {
+        next_action(
+            available,
+            environment,
+            rights,
+            integrity,
+            runtime_retention,
+            offline_readiness,
+            &capabilities,
+        )
+    };
     Ok(Report {
         schema_version: 1,
         mode: "offline-preflight",
@@ -565,6 +592,7 @@ pub fn preflight(recipe: &Recipe, path: &Path, full_hash: bool) -> Result<Report
         hashed_files,
         unverified_files,
         recorded_drill: recipe.recorded_drill.clone(),
+        evidence_log,
         offline_readiness,
         capabilities,
         next,
@@ -746,6 +774,40 @@ fn next_action(
         }
         _ => "files match and the runtime was not run; a network-disabled empty-cache drill is still required".into(),
     }
+}
+
+fn check_evidence_log(recipe: &Recipe, path: &Path) -> Result<EvidenceLog> {
+    let observation = recipe.recorded_drill.as_ref().and_then(|record| record.observation.as_ref())
+        .ok_or_else(|| Error::new("missing_evidence_digest", "choose a recipe with a version 2 drill observation before checking its evidence log"))?;
+    crate::vault::check_path(path)?;
+    let metadata = match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.is_file() => metadata,
+        Ok(_) => {
+            return Err(Error::new(
+                "unsafe_path",
+                "the drill log must be a regular file",
+            ));
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(EvidenceLog {
+                status: "missing",
+                sha256: None,
+            });
+        }
+        Err(error) => return Err(Error::new("input_read_failed", error.to_string())),
+    };
+    let input =
+        File::open(path).map_err(|error| Error::new("input_read_failed", error.to_string()))?;
+    let sha256 = hash_exact(input, metadata.len(), |_| {})?.sha256;
+    let status = if sha256 == observation.evidence_sha256 {
+        "matched"
+    } else {
+        "mismatch"
+    };
+    Ok(EvidenceLog {
+        status,
+        sha256: Some(sha256),
+    })
 }
 
 fn directory_available(path: &Path) -> Result<bool> {
@@ -955,7 +1017,7 @@ mod tests {
     use std::fs;
 
     fn preflight(recipe: &Recipe, path: &Path) -> Result<Report> {
-        super::preflight(recipe, path, false)
+        super::preflight(recipe, path, false, None)
     }
 
     const COMMIT: &str = "0123456789abcdef0123456789abcdef01234567";
@@ -1355,11 +1417,27 @@ mod tests {
         recipe.recorded_drill = Some(drill.clone());
         let recipe = Recipe::parse(&serde_json::to_string(&recipe).unwrap()).unwrap();
         assert_eq!(preflight(&recipe, &dir).unwrap().unverified_files, 2);
-        let report = super::preflight(&recipe, &dir, true).unwrap();
+        let report = super::preflight(&recipe, &dir, true, None).unwrap();
         assert_eq!(report.offline_readiness, "task_passed");
         assert!(!report.executed && !report.network_contact);
         assert_eq!(report.recorded_drill.as_ref(), Some(&drill));
         assert!(crate::present::render_readiness(&report, false, 80).contains("prior drill"));
+        assert!(report.evidence_log.is_none());
+        let log = fs::canonicalize(&dir).unwrap().join("observed.log");
+        let check = || super::preflight(&recipe, &dir, true, Some(&log)).unwrap();
+        let missing = check();
+        assert_eq!(missing.offline_readiness, "stale");
+        assert_eq!(missing.evidence_log.unwrap().status, "missing");
+        fs::write(&log, b"fixture log").unwrap();
+        let matched = check();
+        assert_eq!(matched.offline_readiness, "task_passed");
+        assert!(matched.evidence_log.as_ref().unwrap().matched());
+        assert!(!matched.executed && !matched.network_contact);
+        fs::write(&log, b"changed").unwrap();
+        let changed_log = check();
+        assert_eq!(changed_log.offline_readiness, "stale");
+        assert_eq!(changed_log.integrity, "matched");
+        assert_eq!(changed_log.evidence_log.unwrap().status, "mismatch");
         let mut unverified = recipe.clone();
         unverified
             .recorded_drill
@@ -1370,7 +1448,7 @@ mod tests {
             .unwrap()
             .isolation = Isolation::Unverified;
         assert_eq!(
-            super::preflight(&unverified, &dir, true)
+            super::preflight(&unverified, &dir, true, None)
                 .unwrap()
                 .offline_readiness,
             "stale"
@@ -1378,7 +1456,7 @@ mod tests {
         let mut changed = body;
         changed[0] ^= 1;
         fs::write(dir.join("model.safetensors"), &changed).unwrap();
-        let report = super::preflight(&recipe, &dir, true).unwrap();
+        let report = super::preflight(&recipe, &dir, true, None).unwrap();
         assert_eq!(report.integrity, "damaged");
         assert_eq!(report.offline_readiness, "stale");
     }
