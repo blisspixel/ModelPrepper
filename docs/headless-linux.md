@@ -22,11 +22,22 @@ findmnt --mountpoint /srv/model-data -o TARGET,SOURCE,FSTYPE,OPTIONS
 df -B1 /var/lib/modelprepper /srv/model-data
 ```
 
-Run these commands as the unprivileged vault operator after the mount check and directory setup. `config init` creates a new file. Set the storage ceiling and free reserve in bytes before initializing the vault. For a second managed disk, add its label and empty path under another `[[volumes]]` before first initialization.
+Run these commands as the unprivileged vault operator after the mount check and directory setup. `config init` creates a new file.
 
 ```sh
 cfg=/var/lib/modelprepper/config.toml
 modelprepper config init --output "$cfg" --catalog /var/lib/modelprepper/catalog --volume /srv/model-data/vault
+```
+
+Before running `init`, set the measured storage limits in the config. To manage a second disk, verify its mount UUID as above and add its empty vault directory to the same config. For example:
+
+```toml
+[[volumes]]
+label = "backup"
+path = "/srv/model-backup/vault"
+```
+
+```sh
 modelprepper config check --config "$cfg"
 modelprepper init --config "$cfg"
 modelprepper status --config "$cfg" --json
@@ -42,7 +53,7 @@ For example, a completed 100 GB intake and a new 100 GB copy need room for both 
 
 ## Hand off completed files
 
-1. For public Hugging Face artifacts supported by the current profile, save the source evidence using `modelprepper propose --config "$cfg" --repo "$repo" --revision "$commit"`. Record the returned plan ID. A changed commit needs its own review.
+1. For public Hugging Face artifacts supported by the current profile, save the source evidence using `modelprepper propose --config "$cfg" --repo "$repo" --revision "$commit" --json`. Use the full `plan_id` from the result. A changed commit needs its own review.
 2. Manual media or an optional external client may supply bytes. PirateFace is the torrent locator discussed in the [source catalog](model-sources.md#pirateface-findings). Review redistribution rights and the client's upload, stop and peer-discovery settings **before joining a swarm**. Peers can see the client IP and pieces may upload during download. Leave peer networking off where rights or upload scope are unresolved. Keep private artifacts, credentials and signed access URLs out of peer intake.
 3. Quiesce the completed directory. Keep the exact paths, required shards, selected representation, license and notices together. Run the following against the saved review. A mismatched path, hash, required shard or incomplete source is a reason to stop. Only the matched set is adopted.
 
@@ -51,13 +62,13 @@ modelprepper verify-local --config "$cfg" --plan "$plan" --path "$completed" &&
   modelprepper adopt --config "$cfg" --plan "$plan" --path "$completed" --copy
 ```
 
-Keep the source and the receipt. This records `upstream-verified (local source)`. Local adoption keeps its custody manifest in the catalog. Protect that catalog and its payload together. For intake with no supported upstream proof, explicitly review the folder and use `import --config ... --repo ... --revision ... --volume ... --path ...`. Its 40-hex revision is an operator label. It records `local-baseline`, including when the same bytes have been seen elsewhere. A peer infohash cannot establish the publisher identity.
+Keep the source and the receipt. This records `upstream-verified (local source)`. Local adoption keeps its custody manifest and saved review in the catalog. While the catalog and adopted files are available, run `modelprepper replica --config "$cfg" --plan "$plan" --volume "$backup_label"` to create a portable backup. Choose a second volume that was configured and initialized with the vault. The backup retains the publisher hashes and local-source provenance. For intake with no supported upstream proof, explicitly review the folder and use `import --config ... --repo ... --revision ... --volume ... --path ...`. Its 40-hex revision is an operator label. It records `local-baseline`, including when the same bytes have been seen elsewhere. A peer infohash cannot establish the publisher identity.
 
 ## Recover before depending on the archive
 
 Back up config, catalog and payload from the same quiescent state. Stop writers and complete a consistent SQLite backup, including the state in the WAL, before copying the result to independent media. For example, using the optional SQLite CLI from an empty private backup directory, `sqlite3 -readonly /var/lib/modelprepper/catalog/catalog.sqlite3 ".backup catalog-backup.sqlite3"` writes a consistent copy. Check it with `sqlite3 -readonly catalog-backup.sqlite3 "PRAGMA integrity_check;"` and expect `ok`. A catalog backup contains private reviews and historical authority. Keep the recovery guest offline with scheduling disabled during inspection. Store the executable revision and file checksums with the backup. Keep grants and credentials private. A VM snapshot can roll back the guest but shares the backing storage's failure modes.
 
-For a bundle-bearing revision, run `replica --config ... --plan ... --volume ...` against the separately identified medium. Rehearse recovery on a fresh catalog path using retained configuration, original volume markers and bundles. Keep the original catalog unavailable and publisher access disabled. Run `rebuild --config ...`, inspect damaged, conflicting and offline entries, then `verify-sealed --config ... --plan ...` for the recovered custody copy. For a replica-only rehearsal, use a separate config with a fresh catalog path. List only the available backup volume, keep its original label, and make that label the default. Fresh-catalog recovery needs a valid marker for every volume listed in that config. Record which medium supplied the verified bytes. Rebuild does not recreate grants. Retain the consistent catalog backup for local adoptions and non-bundle records. Follow the [offline task drill](validation-drills.md#offline-task-and-restore) for actual runtime evidence.
+For an existing seal or an imported baseline, run `replica --config ... --plan ... --volume ...` against the separately identified medium. Rehearse recovery on a fresh catalog path using retained configuration, original volume markers and bundles. Keep the original catalog unavailable and publisher access disabled. Run `rebuild --config ...`, inspect damaged, conflicting and offline entries, then `verify-sealed --config ... --plan ...` for the recovered custody copy. For a replica-only rehearsal, use a separate config with a fresh catalog path. List only the available backup volume, keep its original label, and make that label the default. Fresh-catalog recovery needs a valid marker for every volume listed in that config. Record which medium supplied the verified bytes. Rebuild does not recreate grants. Retain the consistent catalog backup for reviews, adoptions without replicas, and other catalog records. Follow the [offline task drill](validation-drills.md#offline-task-and-restore) for actual runtime evidence.
 
 | Failure to rehearse | Repository evidence | What the operator must observe on the real deployment |
 | --- | --- | --- |

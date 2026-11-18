@@ -56,8 +56,8 @@ First run:
   modelprepper config init --output c.toml --catalog catalog --volume models
   modelprepper init --config c.toml
   modelprepper resolve --repo <org/model>
-  modelprepper propose --config c.toml --repo <org/model>
-  modelprepper verify-local --repo <org/model> --path <dir>
+  modelprepper propose --config c.toml --repo <org/model> --revision <commit> --json
+  modelprepper verify-local --config c.toml --plan <id> --path <dir>
   modelprepper adopt --config c.toml --plan <id> --path <dir> --copy";
 
 #[derive(Debug, Parser)]
@@ -287,12 +287,12 @@ pub enum LocalCopiesCommand {
         #[arg(long)]
         stage: PathBuf,
     },
-    /// Copy one sealed revision onto another volume. No network and no approval.
+    /// Copy a sealed revision or verified local adoption to another volume offline.
     Replica {
         /// Path to the vault configuration file.
         #[arg(long)]
         config: PathBuf,
-        /// Plan id of the sealed revision.
+        /// Custody plan id of the revision to replicate.
         #[arg(long)]
         plan: String,
         /// Destination volume label. It must differ from the sealing volume.

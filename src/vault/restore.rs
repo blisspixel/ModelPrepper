@@ -117,7 +117,7 @@ pub(crate) fn replica_with(
     let row = load_custody(&catalog, plan_id)?.ok_or_else(|| {
         Error::new(
             "revision_not_sealed",
-            "replica requires a sealed revision in the catalog",
+            "replica requires a preserved revision in the catalog",
         )
     })?;
     if row.volume_label == volume_label {
@@ -142,25 +142,57 @@ pub(crate) fn replica_with(
     let source = source_root.join(&row.relative);
     check_path(&source)?;
     let files = parse_manifest(&row.manifest)?;
-    let bundle_bytes = seal::read_capped(&source.join(BUNDLE_NAME), seal::BUNDLE_CAP)?;
+    let manifest_path = source.join(BUNDLE_NAME);
+    let review = if row.provenance == adoption::PROVENANCE_LOCAL_UPSTREAM {
+        match super::review::load(&catalog, config, &row.plan_id) {
+            Ok(proposal) if proposal.review.volume_label == row.volume_label => Some(proposal),
+            Ok(_) => None, // A rebuilt copy can live on a different volume from the original review.
+            Err(error) if error.code == "proposal_not_found" => None,
+            Err(error) => return Err(error),
+        }
+    } else {
+        None
+    };
+    let (bundle_bytes, verified_size) = if let Some(proposal) = review {
+        let (bytes, size) = adoption_recovery_bundle(&proposal, &row, &source, &files)?;
+        // A plain adoption has no published metadata. If a document exists, it must
+        // match the full original evidence before it can be propagated.
+        match fs::symlink_metadata(&manifest_path) {
+            Ok(_) if seal::read_capped(&manifest_path, seal::BUNDLE_CAP)? != bytes => {
+                return Err(conflict());
+            }
+            Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
+                return Err(super::io(error));
+            }
+            _ => {}
+        }
+        (bytes, Some(size))
+    } else {
+        (seal::read_capped(&manifest_path, seal::BUNDLE_CAP)?, None)
+    };
     let bundle = seal::parse_published_bundle(&bundle_bytes)?;
     if bundle.bundle_id != row.plan_id
         || bundle.repo_id != row.repo
         || bundle.resolved_revision != row.revision
-        || (!bundle.provenance.is_empty() && bundle.provenance != row.provenance)
+        || (bundle.provenance != row.provenance
+            && (!bundle.provenance.is_empty()
+                || row.provenance == adoption::PROVENANCE_LOCAL_UPSTREAM))
         || !same_files(&bundle.files, &files)
     {
         return Err(conflict());
     }
-    let size = sweep(&source, &files)?;
+    let size = match verified_size {
+        Some(size) => size,
+        None => sweep(&source, &files)?,
+    };
     let published = adoption::publish_dir(&dest_root, &row.repo, &row.revision);
     let staging = dest_root.join(".modelprepper-adopt").join(&row.plan_id);
     check_path(&published)?;
     check_path(&staging)?;
     if directory_exists(&published)? {
         sweep(&published, &files)?;
-        let copy = seal::read_published_bundle(&published.join(BUNDLE_NAME))?;
-        if copy != bundle {
+        let copy = seal::read_capped(&published.join(BUNDLE_NAME), seal::BUNDLE_CAP)?;
+        if copy != bundle_bytes {
             return Err(conflict());
         }
         record_replica(&catalog, &row, volume_label)?;
@@ -221,6 +253,88 @@ pub(crate) fn replica_with(
         files.len(),
         size,
     ))
+}
+
+/// Older and current local adoptions have a catalog manifest and a saved source review.
+/// Build portable evidence only on the replica, using exactly the recorded custody files.
+fn adoption_recovery_bundle(
+    proposal: &super::review::Proposal,
+    row: &CustodyRow,
+    root: &Path,
+    recorded: &[ManifestFile],
+) -> Result<(Vec<u8>, u64)> {
+    let inventory = &proposal.review.inventory;
+    inventory.validate()?;
+    if !inventory.complete
+        || inventory.license.status != crate::inventory::EvidenceStatus::Matched
+        || inventory.license.paths.is_empty()
+        || inventory.source.repo_id != row.repo
+        || inventory.source.resolved_revision != row.revision
+    {
+        return Err(conflict());
+    }
+    if inventory.license.paths.iter().any(|license| {
+        !proposal
+            .review
+            .evidence
+            .iter()
+            .any(|item| &item.path == license)
+    }) {
+        return Err(conflict());
+    }
+    let mut files = Vec::with_capacity(recorded.len());
+    let mut excluded = Vec::new();
+    let mut total = 0_u64;
+    for item in &inventory.files {
+        let Ok(index) = recorded.binary_search_by(|file| file.path.cmp(&item.path)) else {
+            if item.required {
+                return Err(conflict());
+            }
+            excluded.push(item.path.clone());
+            continue;
+        };
+        let expected = &recorded[index];
+        if item.size_bytes != expected.size_bytes
+            || item
+                .path
+                .split('/')
+                .any(|part| part.eq_ignore_ascii_case(BUNDLE_NAME))
+        {
+            return Err(conflict());
+        }
+        crate::verify::metadata_nofollow(root, &item.path)?;
+        let sha = adoption::matched_sha256(&crate::verify::local_path(root, &item.path), item)?
+            .filter(|sha| sha == &expected.sha256)
+            .ok_or_else(|| Error::new("hash_mismatch", format!("{} hash_mismatch", item.path)))?;
+        total = total
+            .checked_add(item.size_bytes)
+            .ok_or_else(|| Error::new("size_overflow", "replica size exceeds u64 capacity"))?;
+        files.push(seal::BundleFile {
+            path: item.path.clone(),
+            size_bytes: item.size_bytes,
+            sha256: sha,
+            upstream_hash: item.upstream_hash.clone(),
+        });
+    }
+    if files.len() != recorded.len()
+        || proposal.review.evidence.iter().any(|evidence| {
+            !files
+                .iter()
+                .any(|file| file.path == evidence.path && file.sha256 == evidence.sha256)
+        })
+    {
+        return Err(conflict());
+    }
+    let bytes = seal::encode_verified_bundle(
+        &row.plan_id,
+        &inventory.source,
+        &inventory.layout,
+        &inventory.license.license_id,
+        files,
+        &excluded,
+        adoption::PROVENANCE_LOCAL_UPSTREAM,
+    )?;
+    Ok((bytes, total))
 }
 
 /// Read sealed bundles into a catalog. A missing database is rebuilt from volume markers.
