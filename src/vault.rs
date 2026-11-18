@@ -269,7 +269,7 @@ fn open_catalog_mode(config: &Config, create: bool, recover: bool) -> Result<Cat
     filesystem::admit(&config.catalog_path, Purpose::Catalog)?;
     check_path(&config.catalog_path)?;
     let database = config.catalog_path.join("catalog.sqlite3");
-    let new = !database.exists();
+    let new = !database.try_exists().map_err(io)?;
     if new && !create {
         return Err(Error::new(
             "vault_not_initialized",
@@ -307,6 +307,34 @@ fn open_catalog_mode(config: &Config, create: bool, recover: bool) -> Result<Cat
         .map_err(io)?;
     let writer = WriterLock::acquire(writer)
         .map_err(|_| Error::new("writer_busy", "another process owns the vault writer lock"))?;
+    // Another process may have initialized this directory before we took the lock.
+    let new = !database.try_exists().map_err(io)?;
+    if new && !create {
+        return Err(Error::new(
+            "vault_not_initialized",
+            "initialize the vault before reading its catalog",
+        ));
+    }
+    if recover && !new {
+        return Err(Error::new(
+            "catalog_exists",
+            "catalog recovery is for a missing database",
+        ));
+    }
+    if new {
+        only_entries(&config.catalog_path, &["writer.lock"])?;
+        for volume in &config.volumes {
+            check_path(&volume.path)?;
+            only_entries(&volume.path, volume_names)?;
+        }
+    }
+    // Validate every marker before SQLite creates the destination. A failed
+    // mount check can then be retried at the same catalog path.
+    let recovered = if recover {
+        Some(recovered_identities(config)?)
+    } else {
+        None
+    };
     let flags = OpenFlags::SQLITE_OPEN_READ_WRITE
         | if new {
             OpenFlags::SQLITE_OPEN_CREATE
@@ -327,22 +355,6 @@ fn open_catalog_mode(config: &Config, create: bool, recover: bool) -> Result<Cat
         .execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA foreign_keys=ON;")
         .map_err(db)?;
     if new {
-        for volume in &config.volumes {
-            check_path(&volume.path)?;
-            only_entries(&volume.path, volume_names)?;
-        }
-        let recovered = if recover {
-            let rows = recovered_identities(config)?;
-            if rows.is_empty() {
-                return Err(Error::new(
-                    "invalid_config",
-                    "catalog recovery needs a volume",
-                ));
-            }
-            Some(rows)
-        } else {
-            None
-        };
         connection.execute_batch("BEGIN IMMEDIATE; CREATE TABLE vault (id TEXT PRIMARY KEY, state TEXT NOT NULL); CREATE TABLE volumes (label TEXT PRIMARY KEY, id TEXT NOT NULL UNIQUE, path TEXT NOT NULL UNIQUE); PRAGMA user_version=1;").map_err(db)?;
         let vault_id = recovered
             .as_ref()
@@ -511,6 +523,7 @@ fn open_catalog_mode(config: &Config, create: bool, recover: bool) -> Result<Cat
 
 fn recovered_identities(config: &Config) -> Result<Vec<Identity>> {
     let mut vault_id = None;
+    let mut volume_ids = std::collections::HashSet::new();
     let mut rows = Vec::new();
     for volume in &config.volumes {
         let marker = volume.path.join(MARKER);
@@ -529,8 +542,14 @@ fn recovered_identities(config: &Config) -> Result<Vec<Identity>> {
         }
         Uuid::parse_str(&identity.vault_id)
             .map_err(|_| Error::new("invalid_volume_identity", "volume identity is invalid"))?;
-        Uuid::parse_str(&identity.volume_id)
+        let volume_id = Uuid::parse_str(&identity.volume_id)
             .map_err(|_| Error::new("invalid_volume_identity", "volume identity is invalid"))?;
+        if !volume_ids.insert(volume_id) {
+            return Err(Error::new(
+                "volume_identity_mismatch",
+                "multiple volume markers name the same volume UUID",
+            ));
+        }
         if let Some(seen) = &vault_id {
             if seen != &identity.vault_id {
                 return Err(Error::new(

@@ -222,6 +222,23 @@ class InstallerTests(unittest.TestCase):
         )
         path = self.root / recovery
         path.write_text(path.read_text().replace('"primary"', '"backup"'))
+        backup = self.root / "backup"
+        detached = self.root / "detached-backup"
+        backup.rename(detached)
+        unavailable = subprocess.run(
+            [str(self.executable), "--json", "rebuild", "--config", recovery],
+            cwd=self.root,
+            text=True,
+            capture_output=True,
+            timeout=30,
+        )
+        self.assertNotEqual(unavailable.returncode, 0)
+        self.assertEqual(
+            json.loads(unavailable.stderr)["error"]["code"], "volume_identity_missing"
+        )
+        self.assertFalse((self.root / "fresh-catalog" / "catalog.sqlite3").exists())
+        self.assertFalse(backup.exists())
+        detached.rename(backup)
         rebuilt = self.cli("rebuild", "--config", recovery)
         self.assertEqual((rebuilt["custody_count"], rebuilt["replica_count"]), (1, 0))
         self.assertEqual(rebuilt["damaged"], [])
