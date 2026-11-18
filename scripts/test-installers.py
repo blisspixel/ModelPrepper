@@ -104,23 +104,23 @@ class InstallerTests(unittest.TestCase):
         self.assertEqual(config.read_text(), "retain me")
         self.assertEqual(list(self.destination.glob(".modelprepper*")), [])
 
+    def cli(self, *args):
+        result = subprocess.run(
+            [str(self.executable), "--json", *args],
+            cwd=self.root,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return json.loads(result.stdout)
+
     def test_installed_cli_runs_a_first_offline_vault_plan(self):
         result = self.install()
         self.assertEqual(result.returncode, 0, result.stderr)
 
-        def cli(*args):
-            result = subprocess.run(
-                [str(self.executable), "--json", *args],
-                cwd=self.root,
-                capture_output=True,
-                text=True,
-                timeout=30,
-            )
-            self.assertEqual(result.returncode, 0, result.stderr)
-            return json.loads(result.stdout)
-
         config = "first-vault.toml"
-        cli(
+        self.cli(
             "config",
             "init",
             "--output",
@@ -130,12 +130,12 @@ class InstallerTests(unittest.TestCase):
             "--volume",
             "models",
         )
-        cli("config", "check", "--config", config)
-        initialized = cli("init", "--config", config)
-        status = cli("status", "--config", config)
+        self.cli("config", "check", "--config", config)
+        initialized = self.cli("init", "--config", config)
+        status = self.cli("status", "--config", config)
         self.assertEqual(status["vault_id"], initialized["vault_id"])
         self.assertEqual(status["volumes"][0]["state"], "mounted")
-        plan = cli(
+        plan = self.cli(
             "plan",
             "--config",
             config,
@@ -148,7 +148,90 @@ class InstallerTests(unittest.TestCase):
         self.assertFalse(plan["transfer_authorized"])
         self.assertIsNone(plan["workspace_bytes"])
         self.assertIn("local_inventory_untrusted", plan["blockers"])
-        self.assertEqual(cli("status", "--config", config)["preserved"], [])
+        self.assertEqual(self.cli("status", "--config", config)["preserved"], [])
+
+    def test_installed_cli_recovers_from_the_backup_volume_alone(self):
+        installed = self.install()
+        self.assertEqual(installed.returncode, 0, installed.stderr)
+        config = "vault.toml"
+        self.cli(
+            "config",
+            "init",
+            "--output",
+            config,
+            "--catalog",
+            "catalog",
+            "--volume",
+            "primary",
+        )
+        config_path = self.root / config
+        lines = config_path.read_text().splitlines()
+        lines = [
+            "min_free_bytes = 1048576" if line.startswith("min_free_bytes =") else line
+            for line in lines
+        ]
+        config_path.write_text(
+            "\n".join(lines) + '\n[[volumes]]\nlabel = "backup"\npath = "backup"\n'
+        )
+        self.cli("init", "--config", config)
+        incoming = self.root / "incoming"
+        incoming.mkdir()
+        (incoming / "weights.txt").write_bytes(b"native recovery fixture")
+        custody = self.cli(
+            "import",
+            "--config",
+            config,
+            "--path",
+            "incoming",
+            "--repo",
+            "local/fixture",
+            "--revision",
+            "a" * 40,
+            "--volume",
+            "primary",
+        )
+        plan = custody["plan_id"]
+        self.cli("replica", "--config", config, "--plan", plan, "--volume", "backup")
+        for path in ("primary", "incoming"):
+            (self.root / path).rename(self.root / ("unavailable-" + path))
+        verified = self.cli(
+            "verify-sealed", "--config", config, "--plan", plan, "--volume", "backup"
+        )
+        self.assertTrue(verified["matched"])
+        self.assertEqual(verified["copy_kind"], "replica")
+        (self.root / "catalog").rename(self.root / "unavailable-catalog")
+
+        recovery = "recovery.toml"
+        self.cli(
+            "config",
+            "init",
+            "--output",
+            recovery,
+            "--catalog",
+            "fresh-catalog",
+            "--volume",
+            "backup",
+        )
+        path = self.root / recovery
+        path.write_text(path.read_text().replace('"primary"', '"backup"'))
+        rebuilt = self.cli("rebuild", "--config", recovery)
+        self.assertEqual((rebuilt["custody_count"], rebuilt["replica_count"]), (1, 0))
+        self.assertEqual(rebuilt["damaged"], [])
+        self.assertEqual(rebuilt["conflicts"], [])
+        self.assertFalse(rebuilt["approvals_transferred"])
+        recovered = self.cli("status", "--config", recovery)["preserved"][0]
+        self.assertEqual(
+            (recovered["plan_id"], recovered["provenance"]), (plan, "local-baseline")
+        )
+        report = self.cli(
+            "verify-sealed", "--config", recovery, "--plan", recovered["plan_id"]
+        )
+        self.assertTrue(report["matched"])
+        self.assertEqual(
+            (report["copy_kind"], report["volume_label"]), ("custody", "backup")
+        )
+        for name in ("catalog", "primary", "incoming"):
+            self.assertFalse((self.root / name).exists())
 
     def test_checksum_mismatch_retains_previous_binary(self):
         self.assertEqual(self.install().returncode, 0)

@@ -81,6 +81,16 @@ modelprepper verify-local --config "$cfg" --plan "$plan" --path "$completed" &&
 
 Keep the source and the receipt. This records `upstream-verified (local source)`. Local adoption keeps its custody manifest and saved review in the catalog. While the catalog and adopted files are available, run `modelprepper replica --config "$cfg" --plan "$plan" --volume "$backup_label"` to create a portable backup. Choose a second volume that was configured and initialized with the vault. The backup retains the publisher hashes and local-source provenance. For intake with no supported upstream proof, explicitly review the folder and use `import --config ... --repo ... --revision ... --volume ... --path ...`. Its 40-hex revision is an operator label. It records `local-baseline`, including when the same bytes have been seen elsewhere. A peer infohash cannot establish the publisher identity.
 
+## Check a backup while the primary is offline
+
+Run `modelprepper status --config "$cfg" --json` to find the full `plan_id` and recorded `volume_label` in `replicas`. With the original catalog and the backup mounted, run:
+
+```sh
+modelprepper verify-sealed --config "$cfg" --plan "$plan" --volume "$backup_label" --json
+```
+
+A successful result names the selected volume, reports `copy_kind: "replica"`, and sets `matched` to true after hashing the recorded files. A missing marker, unrecorded replica or conflicting bundle needs investigation. Omitting `--volume` checks the custody copy. After a fresh-catalog rebuild, the backup may itself be the custody volume.
+
 ## Recover before depending on the archive
 
 Back up config, catalog and payload from the same quiescent state. Stop writers and complete a consistent SQLite backup, including the state in the WAL, before copying the result to independent media. For example, using the optional SQLite CLI from an empty private backup directory, `sqlite3 -readonly /var/lib/modelprepper/catalog/catalog.sqlite3 ".backup catalog-backup.sqlite3"` writes a consistent copy. Check it with `sqlite3 -readonly catalog-backup.sqlite3 "PRAGMA integrity_check;"` and expect `ok`. A catalog backup contains private reviews and historical authority. Keep the recovery guest offline with scheduling disabled during inspection. Store the executable revision and file checksums with the backup. Keep grants and credentials private. A VM snapshot can roll back the guest but shares the backing storage's failure modes.

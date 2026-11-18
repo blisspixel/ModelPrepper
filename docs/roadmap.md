@@ -2,7 +2,7 @@
 
 Implementation follows evidence and dependencies, not calendar promises. Native Rust on Linux, macOS, and Windows is a requirement.
 
-Current progress is the wave table below. Waves 1 through 37 are on main. The job that works is a verified copy of one granted revision, a second copy, and a catalog rebuild with the hub unreachable. `decide` still cannot approve a transfer. `workspace_bytes` stays null. Opening a catalog at schema 1 through 6 moves it to schema 7 and keeps the rows that schema stored. A seal hash does not follow a directory symlink. Nothing is retired or ranked, and a collection is not resolved. Clean-machine setup, the ten-minute planning drill, published checksums and provenance, and a recovery drill on each OS remain open. No release tag until those gates and transfer approval hold. No milestone is fully qualified. Milestone numbers match the wave order: restoring one sealed revision is M4, `watch` is M5, disk qualification is M6, scheduling is M7, and collections are M8 and are not accepted yet. See [implementation-status.md](implementation-status.md), [contracts.md](contracts.md), and [transfer-spike.md](transfer-spike.md).
+Current progress is the wave table below. Waves 1 through 38 are on main. The job that works is a verified copy of one granted revision, a second copy, and a catalog rebuild with the hub unreachable. `decide` still cannot approve a transfer. `workspace_bytes` stays null. Opening a catalog at schema 1 through 6 moves it to schema 7 and keeps the rows that schema stored. A seal hash does not follow a directory symlink. Nothing is retired or ranked, and a collection is not resolved. Clean-machine setup, the ten-minute planning drill, published checksums and provenance, and a recovery drill on each OS remain open. No release tag until those gates and transfer approval hold. No milestone is fully qualified. Milestone numbers match the wave order: restoring one sealed revision is M4, `watch` is M5, disk qualification is M6, scheduling is M7, and collections are M8 and are not accepted yet. See [implementation-status.md](implementation-status.md), [contracts.md](contracts.md), and [transfer-spike.md](transfer-spike.md).
 
 ## Work waves
 
@@ -47,10 +47,11 @@ Do these in order. A later wave does not start because an earlier one is inconve
 | 35 | M7, prior catalog schemas | Done. Opening a catalog at schema 1 through 6 moves it to schema 7 and keeps the rows that schema stored. | A file on the volume is not rewritten. Schema 0 and schema 8 stay refused. This is not a clean-machine drill or a release. |
 | 36 | Seal hash stays in the tree | Done. `verify-sealed`, replica, import, and seal confirmation refuse a directory symlink. | The outside file is left unchanged. Nothing is retired. This is not a release. |
 | 37 | M4, recover a verified local adoption | `replica` packages the reviewed file identities and local-source provenance on the backup. A fixture rebuilds a fresh catalog with only that volume available and hashes the recovered bytes. | Physical media qualification and the offline runtime drill remain open. |
+| 38 | M4, inspect a recorded replica | `verify-sealed --volume` verifies the named copy while the primary is offline. Status exposes recovery plan IDs. The installed-binary fixture reconstructs a catalog from only the backup. | The fixture uses temporary directories. Independent media and an actual runtime task remain deployment evidence. |
 
 ## Still in this order
 
-Do these after wave 37. Do not skip an item because a later one looks more useful. An item without a wave number is not a wave yet.
+Do these after wave 38. Do not skip an item because a later one looks more useful. An item without a wave number is not a wave yet.
 
 1. Resolving every entry in a collection is a network batch. One `resolve` already exists. Leave the batch alone.
 2. Dropping or merging copies, capacity deferral, and stable portfolio selection still wait for an approval that does not exist yet. The custody report names the blocks and does not retire a copy. That does not complete the M8 acceptance list by itself.

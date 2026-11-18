@@ -248,7 +248,7 @@ pub enum LocalCopiesCommand {
         #[arg(long)]
         path: PathBuf,
     },
-    /// Hash one sealed plan. Nothing is downloaded.
+    /// Hash one preserved plan on its custody volume or a named replica.
     VerifySealed {
         /// Path to the vault configuration file.
         #[arg(long)]
@@ -256,6 +256,9 @@ pub enum LocalCopiesCommand {
         /// Custody plan id. Other plans are not hashed.
         #[arg(long)]
         plan: String,
+        /// Check the recorded copy on this volume. Defaults to the custody volume.
+        #[arg(long)]
+        volume: Option<String>,
     },
     /// Copy or move a verified local folder into the vault.
     Adopt {
@@ -647,8 +650,16 @@ pub(crate) fn execute_with(
             revision,
             path,
         }) => verify_local(&view, quiet, config, plan, repo, revision, path),
-        Command::LocalCopies(LocalCopiesCommand::VerifySealed { config, plan }) => {
-            let report = crate::vault::verify_sealed(&located_config(&config)?, &plan)?;
+        Command::LocalCopies(LocalCopiesCommand::VerifySealed {
+            config,
+            plan,
+            volume,
+        }) => {
+            let report = crate::vault::verify_sealed_on_volume(
+                &located_config(&config)?,
+                &plan,
+                volume.as_deref(),
+            )?;
             show(&view, &report, report.matched, |report| {
                 crate::present::render_sealed(report, view.color, view.columns)
             })
