@@ -209,6 +209,19 @@ fn delete_catalog(config: &crate::Config) {
     }
 }
 
+fn planted_baseline_id(body: &[u8]) -> String {
+    baseline_id(
+        "example/model",
+        REVISION,
+        &[ManifestFile {
+            path: "weights.bin".into(),
+            sha256: digest(body),
+            size_bytes: body.len() as u64,
+        }],
+    )
+    .unwrap()
+}
+
 fn plant(volume: &Path, revision: &str, plan: &str, body: &[u8], provenance: Option<&str>) {
     let dir = volume
         .join("preserved")
@@ -1330,7 +1343,7 @@ fn partial_is_a_valid_payload_extension_and_recorded_retries_need_no_second_copy
 #[test]
 fn identical_bytes_do_not_merge_conflicting_custody_evidence() {
     let (_dir, config, _stage) = setup();
-    let plan = digest(b"fixture");
+    let plan = planted_baseline_id(b"same");
     for volume in &config.volumes {
         plant(
             &volume.path,
@@ -1361,7 +1374,7 @@ fn identical_bytes_do_not_merge_conflicting_custody_evidence() {
 #[test]
 fn partial_rebuild_keeps_good_bundles_and_accounts_for_an_unconfirmed_copy() {
     let (dir, config, _) = setup();
-    let plan = digest(b"rebuild-coverage");
+    let plan = planted_baseline_id(b"model");
     for volume in &config.volumes {
         plant(
             &volume.path,
@@ -1537,4 +1550,101 @@ fn backup_verification_uses_the_recorded_copy_even_with_a_missing_primary() {
     let absent = check("backup").unwrap();
     assert_eq!(absent.volume_state, "identity_missing");
     assert!(!absent.matched && absent.files.is_empty());
+}
+
+#[test]
+fn rebuild_recovers_the_backup_when_the_primary_preserved_root_is_damaged() {
+    let (dir, config, _) = setup();
+    let incoming = dir.path().join("incoming");
+    fs::create_dir(&incoming).unwrap();
+    fs::write(incoming.join("weights.bin"), b"retained").unwrap();
+    let saved = import_baseline(&config, &incoming, "example/model", REVISION, "primary").unwrap();
+    replica(&config, &saved.plan_id, "backup").unwrap();
+    let preserved = config.volumes[0].path.join("preserved");
+    let held = dir.path().join("held");
+    fs::rename(&preserved, &held).unwrap();
+    fs::write(&preserved, b"unrelated file").unwrap();
+    delete_catalog(&config);
+
+    let report = rebuild(&config).unwrap();
+    assert_eq!(report.status, "partial");
+    assert_eq!(report.damaged.len(), 1);
+    assert!(report.damaged[0].starts_with("primary:"));
+    assert_eq!((report.custody_count, report.replica_count), (1, 0));
+    assert!(verify_sealed(&config, &saved.plan_id).unwrap().matched);
+    assert_eq!(fs::read(&preserved).unwrap(), b"unrelated file");
+
+    fs::remove_file(&preserved).unwrap();
+    fs::rename(&held, &preserved).unwrap();
+    let retry = rebuild(&config).unwrap();
+    assert_eq!(retry.status, "rebuilt");
+    assert_eq!((retry.custody_count, retry.replica_count), (1, 1));
+}
+
+#[test]
+fn rebuild_rejects_a_stale_baseline_id_after_catalog_loss() {
+    let (dir, config, _) = setup();
+    let incoming = dir.path().join("incoming");
+    fs::create_dir(&incoming).unwrap();
+    fs::write(incoming.join("weights.bin"), b"original").unwrap();
+    let saved = import_baseline(&config, &incoming, "example/model", REVISION, "primary").unwrap();
+    let backup = replica(&config, &saved.plan_id, "backup").unwrap();
+    let manifest = saved.path.join(BUNDLE_NAME);
+    fs::write(saved.path.join("weights.bin"), b"modified").unwrap();
+    rewrite_bundle(&manifest, |doc| {
+        doc["files"][0]["sha256"] = digest(b"modified").into()
+    });
+    delete_catalog(&config);
+
+    let report = rebuild(&config).unwrap();
+    assert_eq!(report.status, "partial");
+    assert_eq!(
+        report.damaged,
+        [format!(
+            "primary:{}",
+            manifest.canonicalize().unwrap().display()
+        )]
+    );
+    assert!(report.conflicts.is_empty());
+    assert_eq!((report.custody_count, report.replica_count), (1, 0));
+    let verified = verify_sealed(&config, &saved.plan_id).unwrap();
+    assert!(verified.matched);
+    assert_eq!(verified.volume_label, "backup");
+    assert_eq!(
+        fs::read(backup.path.join("weights.bin")).unwrap(),
+        b"original"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn rebuild_keeps_a_readable_sibling_of_an_unreadable_directory() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let (dir, config, _) = setup();
+    let incoming = dir.path().join("incoming");
+    fs::create_dir(&incoming).unwrap();
+    fs::write(incoming.join("weights.bin"), b"intact").unwrap();
+    let saved = import_baseline(&config, &incoming, "example/model", REVISION, "primary").unwrap();
+    let unreadable = config.volumes[0].path.join("preserved/example/other");
+    fs::create_dir(&unreadable).unwrap();
+    let original = fs::metadata(&unreadable).unwrap().permissions();
+    fs::set_permissions(&unreadable, fs::Permissions::from_mode(0o000)).unwrap();
+    // A privileged runner can still enumerate a mode-000 directory.
+    let denied = fs::read_dir(&unreadable).is_err();
+    delete_catalog(&config);
+    let result = rebuild(&config);
+    fs::set_permissions(&unreadable, original).unwrap();
+    let report = result.unwrap();
+    if denied {
+        assert_eq!(report.status, "partial");
+        assert_eq!(
+            report.damaged,
+            [format!("primary:{}", unreadable.display())]
+        );
+    } else {
+        assert_eq!(report.status, "rebuilt");
+    }
+    assert_eq!((report.custody_count, report.replica_count), (1, 0));
+    assert!(verify_sealed(&config, &saved.plan_id).unwrap().matched);
 }
