@@ -42,6 +42,7 @@ Still open: clean-machine setup, the ten-minute planning drill, published checks
 | kit | Report a person-written slot list from saved evidence. Empty slots stay empty. One model counts once in the physical total. |
 | readiness | Read a local runtime recipe and report capability closure, rights, disk presence, and recorded readiness. It does not download, execute, or change a vault. |
 | fetch | Seal one granted revision. Approval stays blocked. |
+| catalog-backup | Save a private, consistent SQLite snapshot and its SHA-256. Retain config and payload separately. |
 | replica | Copy a sealed revision or verified local adoption onto another volume after a full hash. The backup retains the original provenance. No network. The failure domain stays unlabeled. A directory symlink is not followed. |
 | rebuild | Reconstruct custody and replica rows from on-volume bundles. A missing catalog is rebuilt from volume markers. Approvals are not copied. |
 | import | Record a local folder as `local-baseline`. Matching bytes do not relabel it as upstream-verified. A directory symlink is not followed. |

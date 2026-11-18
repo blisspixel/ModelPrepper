@@ -556,6 +556,26 @@ pub fn render_replica(replica: &crate::vault::Replica, color: bool, columns: usi
     .join("\n")
 }
 
+pub fn render_catalog_backup(
+    backup: &crate::vault::CatalogBackup,
+    color: bool,
+    columns: usize,
+) -> String {
+    [
+        verdict(color, columns, GREEN, "saved", "  private catalog snapshot"),
+        field(columns, "vault", &backup.vault_id),
+        field(columns, "file", &backup.output.display().to_string()),
+        field(columns, "size", &human_pair(backup.size_bytes)),
+        field(columns, "SHA-256", &backup.sha256),
+        next_line(
+            color,
+            columns,
+            "retain the checksum and config with the private backup",
+        ),
+    ]
+    .join("\n")
+}
+
 pub fn render_rebuild(rebuild: &crate::vault::Rebuild, color: bool, columns: usize) -> String {
     let mut lines = vec![
         verdict(

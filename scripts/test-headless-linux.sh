@@ -36,7 +36,8 @@ isolated=(bwrap --unshare-all --die-with-parent --cap-drop ALL --clearenv
     plan=$(jq -er ".plan_id" receipt.json)
     jq -e ".provenance == \"local-baseline\"" receipt.json
     /modelprepper replica --config config.toml --plan "$plan" --volume backup
-    sqlite3 -readonly catalog/catalog.sqlite3 ".backup catalog-backup.sqlite3"
+    /modelprepper catalog-backup --config config.toml --output catalog-backup.sqlite3 --json > snapshot.json
+    test "$(jq -r ".sha256" snapshot.json)" = "$(sha256sum catalog-backup.sqlite3 | cut -d" " -f1)"
     test "$(sqlite3 -readonly catalog-backup.sqlite3 "PRAGMA integrity_check;")" = ok
 '
 
