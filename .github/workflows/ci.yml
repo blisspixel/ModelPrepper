@@ -34,6 +34,13 @@ jobs:
       - run: cargo clippy --locked --all-targets -- -D warnings
       - run: cargo test --locked
       - run: cargo build --locked --release
+      - name: Exercise the isolated headless torrent handoff
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends aria2 bubblewrap jq sqlite3
+          scripts/test-headless-linux.sh target/release/modelprepper "$(command -v aria2c)"
       - name: Exercise native installer and packaging offline
         shell: bash
         run: |
@@ -80,8 +87,8 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           python -m pip install ruff==0.15.16
-          ruff check scripts/package-native-release.py scripts/test-installers.py
-          ruff format --check scripts/package-native-release.py scripts/test-installers.py
+          ruff check scripts/package-native-release.py scripts/test-installers.py tests/fixtures/torrent-webseed.py
+          ruff format --check scripts/package-native-release.py scripts/test-installers.py tests/fixtures/torrent-webseed.py
 
   coverage:
     runs-on: ubuntu-latest

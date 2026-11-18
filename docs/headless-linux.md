@@ -112,4 +112,12 @@ For an existing seal or an imported baseline, run `replica --config ... --plan .
 
 On Linux, run `scripts/test-headless-linux.sh target/release/modelprepper` to rehearse the handoff with 17 synthetic bytes in a fresh temporary directory. This developer drill uses Bubblewrap with unprivileged namespaces, jq and the SQLite CLI. The intake process sees only the writable incoming tree, the consumer sees a read-only published revision, and the recovery process sees only the backup volume and a fresh catalog. An additional 4 MiB tmpfs isolates the full-disk and two-file retry cases from host storage. Each process has its own network namespace. The fixture checks the catalog backup, hashes the recovered bytes, and verifies the new catalog contains zero grants. It needs no VM, torrent client, weights or inference runtime. Its two temporary directories share one underlying filesystem.
 
+To run the same handoff with an external client, pass the path to an installed aria2c as the second argument. This optional Linux drill also requires Python 3.
+
+```sh
+scripts/test-headless-linux.sh target/release/modelprepper "$(command -v aria2c)"
+```
+
+A private, single-piece torrent points at a 17-byte HTTP web seed on the namespace's loopback interface. The client reads an empty incoming directory and can reach only that fixture server. The drill disables peer discovery and trackers, sets seeding time to zero, checks the completed bytes and waits for the client to exit before import. The vault records `local-baseline`. The same script then checks the replica and rebuilds from the backup. This exercises a real client handoff without contacting PirateFace, Hugging Face or a public swarm. [aria2 BitTorrent options](https://aria2.github.io/manual/en/html/aria2c.html#bittorrent-specific-options)
+
 An always-available VM can run explicit commands now. Current scheduling is one weekly watch pass. Transfer approval, autonomous admission, provider-assisted curation, unattended recovery and release qualification still have open gates. See [issue 80](https://github.com/blisspixel/ModelPrepper/issues/80) for the operational evidence.

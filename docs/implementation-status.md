@@ -54,7 +54,7 @@ The [durable staging journal](staging-journal.md) adds exclusive single-file che
 
 The installer fixture now runs the installed binary through config creation, initialization, status and a 5,504-byte offline planning preview. A separate recovery fixture starts from only the backup marker and bundle, a fresh catalog and an unavailable primary. Rebuild checks conflicting provenance as well as file identity.
 
-The [headless Linux runbook](headless-linux.md) covers supervised intake. Offline fixtures cover disk replacement during verification, missing or substituted markers at staging, and import/replica retries on a low-space destination. The Linux namespace drill fills a bounded tmpfs to zero available bytes and retries a partially staged copy. The physical HDD, host backing pool and independent-media recovery still require deployment evidence.
+The [headless Linux runbook](headless-linux.md) covers supervised intake. Offline fixtures cover disk replacement during verification, missing or substituted markers at staging, and import/replica retries on a low-space destination. The Linux namespace drill fills a bounded tmpfs to zero available bytes and retries a partially staged copy. The optional Linux client drill passed locally with aria2 1.37.0 and a loopback torrent web seed. It handed 17 bytes to baseline import and recovered them from the replica. The physical HDD, host backing pool and independent-media recovery still require deployment evidence.
 
 ## Next delivery gates
 

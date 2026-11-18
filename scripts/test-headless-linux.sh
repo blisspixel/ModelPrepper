@@ -2,7 +2,11 @@
 # Exercise the headless handoff with a few synthetic bytes. No host vault is used.
 set -euo pipefail
 
-binary=$(realpath "${1:?pass the release modelprepper executable}")
+if (( $# < 1 || $# > 2 )); then
+    echo "usage: $0 MODEL_PREPPER_BINARY [ARIA2C_BINARY]" >&2
+    exit 2
+fi
+binary=$(realpath "$1")
 [[ -x "$binary" ]]
 for tool in bwrap jq sqlite3; do command -v "$tool" >/dev/null; done
 scratch=$(mktemp -d)
@@ -15,10 +19,21 @@ isolated=(bwrap --unshare-all --die-with-parent --cap-drop ALL --clearenv
     --ro-bind-try /lib64 /lib64 --proc /proc --dev /dev --tmpfs /tmp
     --setenv PATH /usr/bin:/bin --setenv HOME /tmp)
 
-"${isolated[@]}" --bind "$scratch/incoming" /incoming /bin/sh -eu -c '
-    test ! -e /primary && test ! -e /state && test ! -e /backup
-    echo "synthetic intake" > /incoming/weights.txt
-'
+if (( $# == 2 )); then
+    [[ -f "$2" && -x "$2" ]] || { echo "pass the path to an executable aria2c" >&2; exit 2; }
+    client=$(realpath "$2")
+    fixture=$(realpath "$(dirname "$0")/../tests/fixtures/torrent-webseed.py")
+    "${isolated[@]}" --ro-bind "$client" /aria2c --ro-bind "$fixture" /fixture.py \
+        --ro-bind-try /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt \
+        --bind "$scratch/incoming" /incoming /usr/bin/python3 -I /fixture.py
+else
+    "${isolated[@]}" --bind "$scratch/incoming" /incoming /bin/sh -eu -c '
+        test ! -e /primary
+        test ! -e /state
+        test ! -e /backup
+        echo "synthetic intake" > /incoming/weights.txt
+    '
+fi
 
 "${isolated[@]}" --ro-bind "$binary" /modelprepper --ro-bind "$scratch/incoming" /incoming \
     --bind "$scratch/system" /state --bind "$scratch/primary" /primary \
@@ -45,7 +60,9 @@ revision=0000000000000000000000000000000000000001
 "${isolated[@]}" --ro-bind "$scratch/primary/preserved/local/fixture/$revision" /model \
     /bin/sh -eu -c '
     test "$(cat /model/weights.txt)" = "synthetic intake"
-    test ! -e /state && test ! -e /incoming && test ! -e /backup
+    test ! -e /state
+    test ! -e /incoming
+    test ! -e /backup
     if touch /model/consumer-probe 2>/dev/null; then exit 1; fi
 '
 
@@ -95,7 +112,8 @@ revision=0000000000000000000000000000000000000001
 plan=$(jq -er '.plan_id' "$scratch/system/receipt.json")
 "${isolated[@]}" --ro-bind "$binary" /modelprepper --bind "$scratch/recovery" /state \
     --ro-bind "$scratch/backup" /backup /bin/sh -eu -c '
-    test ! -e /primary && test ! -e /incoming
+    test ! -e /primary
+    test ! -e /incoming
     cd /state
     /modelprepper config init --output config.toml --catalog /state/catalog --volume /backup
     sed -i "s/\"primary\"/\"backup\"/g" config.toml
