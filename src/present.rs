@@ -1549,7 +1549,7 @@ pub fn render_readiness(report: &crate::readiness::Report, color: bool, columns:
         .map(|capability| format!("{} {}", capability.id, capability.closure))
         .collect::<Vec<_>>()
         .join(", ");
-    [
+    let mut lines = vec![
         verdict(color, columns, code, report.offline_readiness, ""),
         field(
             columns,
@@ -1565,9 +1565,12 @@ pub fn render_readiness(report: &crate::readiness::Report, color: bool, columns:
         field(columns, "runtime", report.runtime_retention),
         field(columns, "rights", report.rights),
         field(columns, "disk", report.availability),
-        next_line(color, columns, &report.next),
-    ]
-    .join("\n")
+    ];
+    if let Some(drill) = &report.recorded_drill {
+        lines.push(field(columns, "prior drill", &drill.capability));
+    }
+    lines.push(next_line(color, columns, &report.next));
+    lines.join("\n")
 }
 
 pub fn render_runtime(report: &RuntimeInventory, color: bool, columns: usize) -> String {

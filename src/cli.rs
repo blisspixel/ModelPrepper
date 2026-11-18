@@ -388,6 +388,9 @@ pub enum PreviewCommand {
         /// Versioned runtime recipe JSON. See examples/recipe.json.
         #[arg(long)]
         recipe: PathBuf,
+        /// Hash all retained model and runtime files, including those larger than 2 MiB.
+        #[arg(long)]
+        full_hash: bool,
         /// Directory of retained model files. A missing directory is reported and not created.
         #[arg(long)]
         path: PathBuf,
@@ -867,9 +870,13 @@ pub(crate) fn execute_with(
                 crate::present::render_discovery(report, view.color, view.columns)
             })
         }
-        Command::Preview(PreviewCommand::Readiness { recipe, path }) => {
+        Command::Preview(PreviewCommand::Readiness {
+            recipe,
+            path,
+            full_hash,
+        }) => {
             let recipe = crate::readiness::Recipe::parse(&read_text(&recipe)?)?;
-            let report = crate::readiness::preflight(&recipe, &path)?;
+            let report = crate::readiness::preflight(&recipe, &path, full_hash)?;
             show(&view, &report, true, |report| {
                 crate::present::render_readiness(report, view.color, view.columns)
             })

@@ -326,7 +326,7 @@ fn fetch_seals_one_granted_revision_and_does_not_claim_a_load() {
     );
     let recipe =
         crate::readiness::Recipe::parse(include_str!("../../../examples/recipe.json")).unwrap();
-    let report = crate::readiness::preflight(&recipe, &seal.path).unwrap();
+    let report = crate::readiness::preflight(&recipe, &seal.path, false).unwrap();
     assert!(!report.network_contact);
     assert!(!report.executed);
     assert!(!report.vault_mutated);

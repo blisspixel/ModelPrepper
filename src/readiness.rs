@@ -113,6 +113,67 @@ pub struct DrillRecord {
     pub runtime_version: String,
     pub network: String,
     pub cache: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub observation: Option<DrillObservation>,
+}
+
+/// Operator evidence from a previous run. Preflight never opens the log or invokes the runtime.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct DrillObservation {
+    pub observed_at_unix: u64,
+    pub runtime_source: String,
+    pub runtime_license: String,
+    pub task: String,
+    pub isolation: Isolation,
+    pub outbound_attempts: OutboundAttempts,
+    pub evidence_sha256: String,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum Isolation {
+    AirplaneMode,
+    FirewallBlock,
+    NoInterface,
+    Unverified,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum OutboundAttempts {
+    NoneObserved,
+    NotMeasured,
+    Observed(Vec<String>),
+}
+
+impl DrillObservation {
+    fn validate(&self) -> Result<()> {
+        let bounded = |text: &str| {
+            !text.trim().is_empty() && text.len() <= 256 && !text.chars().any(char::is_control)
+        };
+        if self.observed_at_unix == 0
+            || [&self.runtime_source, &self.runtime_license, &self.task]
+                .iter()
+                .any(|s| !bounded(s))
+        {
+            return Err(Error::new(
+                "invalid_recipe",
+                "a drill observation requires a date, runtime source and license, and task",
+            ));
+        }
+        if let OutboundAttempts::Observed(attempts) = &self.outbound_attempts
+            && (attempts.is_empty()
+                || attempts.len() > 16
+                || attempts.iter().any(|item| !bounded(item)))
+        {
+            return Err(Error::new(
+                "invalid_recipe",
+                "record one to sixteen bounded outbound observations",
+            ));
+        }
+        validate_hex(&self.evidence_sha256, 64)
+    }
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -167,6 +228,7 @@ pub struct Report {
     pub runtime_retention: &'static str,
     pub hashed_files: u32,
     pub unverified_files: u32,
+    pub recorded_drill: Option<DrillRecord>,
     pub offline_readiness: &'static str,
     pub capabilities: Vec<CapabilityReport>,
     pub next: String,
@@ -307,11 +369,21 @@ impl Recipe {
             return Err(Error::new("invalid_recipe", "rights need a license id"));
         }
         if let Some(drill) = &self.recorded_drill {
-            if drill.schema_version != 1 {
-                return Err(Error::new(
-                    "unsupported_schema",
-                    "recorded drill schema_version must be 1",
-                ));
+            match (drill.schema_version, &drill.observation) {
+                (1, None) => {}
+                (2, Some(observation)) => observation.validate()?,
+                (1 | 2, _) => {
+                    return Err(Error::new(
+                        "invalid_recipe",
+                        "only a version 2 drill requires observation evidence",
+                    ));
+                }
+                _ => {
+                    return Err(Error::new(
+                        "unsupported_schema",
+                        "recorded drill schema_version must be 1 or 2",
+                    ));
+                }
             }
             validate_hex(&drill.recipe_digest, 64)?;
             validate_platform(&drill.os, &drill.arch)?;
@@ -367,7 +439,7 @@ impl Recipe {
     }
 }
 
-pub fn preflight(recipe: &Recipe, path: &Path) -> Result<Report> {
+pub fn preflight(recipe: &Recipe, path: &Path, full_hash: bool) -> Result<Report> {
     let recipe_digest = recipe.digest();
     let available = directory_available(path)?;
     let mut hashed_files = 0_u32;
@@ -376,7 +448,13 @@ pub fn preflight(recipe: &Recipe, path: &Path) -> Result<Report> {
     let mut findings = Vec::new();
     if available {
         for file in &recipe.model.files {
-            let finding = inspect_retained(path, file, &mut hashed_files, &mut unverified_files)?;
+            let finding = inspect_retained(
+                path,
+                file,
+                full_hash,
+                &mut hashed_files,
+                &mut unverified_files,
+            )?;
             damaged |= finding.damaged;
             findings.push(finding);
         }
@@ -395,6 +473,7 @@ pub fn preflight(recipe: &Recipe, path: &Path) -> Result<Report> {
             let finding = inspect_retained(
                 path,
                 &runtime_file,
+                full_hash,
                 &mut hashed_files,
                 &mut unverified_files,
             )?;
@@ -485,6 +564,7 @@ pub fn preflight(recipe: &Recipe, path: &Path) -> Result<Report> {
         runtime_retention,
         hashed_files,
         unverified_files,
+        recorded_drill: recipe.recorded_drill.clone(),
         offline_readiness,
         capabilities,
         next,
@@ -576,6 +656,10 @@ fn readiness_state(
         return "untested";
     };
     let applies = drill.recipe_digest == digest
+        && drill
+            .observation
+            .as_ref()
+            .is_none_or(|o| o.isolation != Isolation::Unverified)
         && drill.os == host_os()
         && drill.arch == host_arch()
         && drill.network == "disabled"
@@ -644,7 +728,7 @@ fn next_action(
             .into();
     }
     if runtime_retention == "unverified" {
-        return "the retained runtime file is larger than the ordinary hash limit and was not hashed"
+        return "the retained runtime file is larger than the ordinary hash limit and was not hashed; use --full-hash to read it"
             .into();
     }
     if runtime_retention != "retained" {
@@ -652,7 +736,7 @@ fn next_action(
             .into();
     }
     if integrity == "not_checked" {
-        return "a retained file is larger than the ordinary hash limit and was not hashed".into();
+        return "a retained file is larger than the ordinary hash limit and was not hashed; use --full-hash to read it".into();
     }
     match readiness {
         "stale" => "the recorded drill does not apply to this recipe and machine".into(),
@@ -692,6 +776,7 @@ fn directory_available(path: &Path) -> Result<bool> {
 fn inspect_retained(
     root: &Path,
     file: &RecipeFile,
+    full_hash: bool,
     hashed_files: &mut u32,
     unverified_files: &mut u32,
 ) -> Result<Finding> {
@@ -741,7 +826,7 @@ fn inspect_retained(
         finding.reason = "size_mismatch".into();
         return Ok(finding);
     }
-    if declared > HASH_LIMIT {
+    if !full_hash && declared > HASH_LIMIT {
         finding.unverified = true;
         *unverified_files += 1;
         finding.reason = "unverified".into();
@@ -868,6 +953,10 @@ fn link_or_reparse(meta: &fs::Metadata) -> bool {
 mod tests {
     use super::*;
     use std::fs;
+
+    fn preflight(recipe: &Recipe, path: &Path) -> Result<Report> {
+        super::preflight(recipe, path, false)
+    }
 
     const COMMIT: &str = "0123456789abcdef0123456789abcdef01234567";
 
@@ -1110,6 +1199,7 @@ mod tests {
             runtime_version: recipe.runtime.version.clone(),
             network: "disabled".into(),
             cache: "empty".into(),
+            observation: None,
         });
         let report = preflight(&recipe, &dir).unwrap();
         assert_eq!(report.integrity, "damaged");
@@ -1201,6 +1291,7 @@ mod tests {
             runtime_version: recipe.runtime.version.clone(),
             network: "disabled".into(),
             cache: "empty".into(),
+            observation: None,
         });
         let stale = preflight(&recipe, &dir).unwrap();
         assert_eq!(stale.offline_readiness, "stale");
@@ -1231,6 +1322,89 @@ mod tests {
         assert_eq!(report.integrity, "not_checked");
         assert_eq!(report.capabilities[0].closure, "present_unverified");
         assert_eq!(report.offline_readiness, "untested");
+    }
+
+    #[test]
+    fn full_hash_checks_large_model_and_runtime_before_showing_a_prior_observation() {
+        let (_temp, dir, mut recipe) = prepared_runtime();
+        let body = vec![b'x'; HASH_LIMIT as usize + 1];
+        for path in ["model.safetensors", "runtime.bin"] {
+            fs::write(dir.join(path), &body).unwrap();
+        }
+        let weight = recipe
+            .model
+            .files
+            .iter_mut()
+            .find(|f| f.path == "model.safetensors")
+            .unwrap();
+        weight.size_bytes = Some(body.len() as u64);
+        weight.sha256 = Some(sha(&body));
+        recipe.runtime.artifact.size_bytes = weight.size_bytes;
+        recipe.runtime.artifact.sha256 = weight.sha256.clone();
+        let mut drill = matching_drill(&recipe, DrillResult::TaskPassed);
+        drill.schema_version = 2;
+        drill.observation = Some(DrillObservation {
+            observed_at_unix: 1_790_000_000,
+            task: "fixture task".into(),
+            runtime_source: "retained test package".into(),
+            runtime_license: "MIT".into(),
+            isolation: Isolation::NoInterface,
+            outbound_attempts: OutboundAttempts::NotMeasured,
+            evidence_sha256: sha(b"fixture log"),
+        });
+        recipe.recorded_drill = Some(drill.clone());
+        let recipe = Recipe::parse(&serde_json::to_string(&recipe).unwrap()).unwrap();
+        assert_eq!(preflight(&recipe, &dir).unwrap().unverified_files, 2);
+        let report = super::preflight(&recipe, &dir, true).unwrap();
+        assert_eq!(report.offline_readiness, "task_passed");
+        assert!(!report.executed && !report.network_contact);
+        assert_eq!(report.recorded_drill.as_ref(), Some(&drill));
+        assert!(crate::present::render_readiness(&report, false, 80).contains("prior drill"));
+        let mut unverified = recipe.clone();
+        unverified
+            .recorded_drill
+            .as_mut()
+            .unwrap()
+            .observation
+            .as_mut()
+            .unwrap()
+            .isolation = Isolation::Unverified;
+        assert_eq!(
+            super::preflight(&unverified, &dir, true)
+                .unwrap()
+                .offline_readiness,
+            "stale"
+        );
+        let mut changed = body;
+        changed[0] ^= 1;
+        fs::write(dir.join("model.safetensors"), &changed).unwrap();
+        let report = super::preflight(&recipe, &dir, true).unwrap();
+        assert_eq!(report.integrity, "damaged");
+        assert_eq!(report.offline_readiness, "stale");
+    }
+
+    #[test]
+    fn drill_observations_are_bounded_and_versioned() {
+        let (_temp, _dir, mut recipe) = prepared_runtime();
+        let mut drill = matching_drill(&recipe, DrillResult::Failed);
+        drill.schema_version = 2;
+        recipe.recorded_drill = Some(drill);
+        assert_eq!(recipe.validate().unwrap_err().code, "invalid_recipe");
+        let mut observation = DrillObservation {
+            observed_at_unix: 1,
+            runtime_source: "package".into(),
+            runtime_license: "unresolved".into(),
+            task: "fixture".into(),
+            isolation: Isolation::FirewallBlock,
+            outbound_attempts: OutboundAttempts::Observed(vec!["blocked package check".into()]),
+            evidence_sha256: sha(b"log"),
+        };
+        observation.validate().unwrap();
+        observation.outbound_attempts = OutboundAttempts::Observed(Vec::new());
+        assert!(observation.validate().is_err());
+        observation.outbound_attempts = OutboundAttempts::NoneObserved;
+        observation.task.clear();
+        assert!(observation.validate().is_err());
     }
 
     #[test]
@@ -1305,6 +1479,7 @@ mod tests {
             runtime_version: recipe.runtime.version.clone(),
             network: "disabled".into(),
             cache: "empty".into(),
+            observation: None,
         }
     }
 
@@ -1531,7 +1706,7 @@ mod tests {
         reject(
             |recipe| {
                 let mut drill = matching_drill(recipe, DrillResult::Failed);
-                drill.schema_version = 2;
+                drill.schema_version = 3;
                 recipe.recorded_drill = Some(drill);
             },
             "unsupported_schema",
