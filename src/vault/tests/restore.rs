@@ -1356,3 +1356,29 @@ fn recovering_from_only_the_backup_needs_no_original_catalog_or_primary() {
     assert_eq!(count(&recovery, "SELECT COUNT(*) FROM grants"), 0);
     assert!(!config.catalog_path.exists() && !config.volumes[0].path.exists());
 }
+
+#[test]
+fn staging_requires_the_disk_that_was_present_before_hashing() {
+    let (dir, config, _) = setup();
+    let observed = status(&config).unwrap();
+    let volume = mounted(&observed, "backup").unwrap();
+    let detached = dir.path().join("detached");
+    fs::rename(&volume.path, &detached).unwrap();
+    fs::create_dir(&volume.path).unwrap();
+    let staging = volume.path.join(".modelprepper-adopt").join("test");
+    for replacement_marker in [false, true] {
+        if replacement_marker {
+            fs::copy(
+                config.volumes[0].path.join(crate::vault::MARKER),
+                volume.path.join(crate::vault::MARKER),
+            )
+            .unwrap();
+        }
+        let error =
+            stage_payload_files(dir.path(), &staging, &[], 0, volume, &observed.vault_id, 0)
+                .unwrap_err();
+        assert_eq!(error.code, "volume_unavailable");
+        assert!(!staging.parent().unwrap().exists());
+    }
+    assert!(status(&config).unwrap().replicas.is_empty());
+}

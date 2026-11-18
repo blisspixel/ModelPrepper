@@ -48,6 +48,48 @@ revision=0000000000000000000000000000000000000001
     if touch /model/consumer-probe 2>/dev/null; then exit 1; fi
 '
 
+# This 4 MiB tmpfs is isolated from the developer's disk. A failed competing
+# write fills it; the import must refuse the new payload and be safely retryable.
+"${isolated[@]}" --ro-bind "$binary" /modelprepper --ro-bind "$scratch/incoming" /incoming \
+    --size 4194304 --tmpfs /bounded /bin/sh -eu -c '
+    cd /tmp
+    /modelprepper config init --output tight.toml --catalog /tmp/catalog --volume /bounded/vault
+    sed -i "s/^min_free_bytes = .*/min_free_bytes = 1048576/" tight.toml
+    /modelprepper init --config tight.toml >/dev/null
+    if dd if=/dev/zero of=/bounded/fill bs=65536 count=80 2>/dev/null; then exit 1; fi
+    test "$(df -B1 --output=avail /bounded | tail -1 | tr -d " ")" = 0
+    set -- /modelprepper import --config tight.toml --path /incoming --repo local/fixture \
+        --revision 0000000000000000000000000000000000000001 --volume primary --json
+    if "$@" >/dev/null 2>failure.json; then exit 1; fi
+    jq -e ".error.code == \"insufficient_space\"" failure.json
+    test ! -e /bounded/vault/preserved/local/fixture
+    test "$(cat /incoming/weights.txt)" = "synthetic intake"
+    rm /bounded/fill
+    "$@" > retried.json
+    jq -e ".provenance == \"local-baseline\"" retried.json
+    # Recreate an interrupted two-file copy. One matching MiB is already staged.
+    mkdir /tmp/pair
+    dd if=/dev/zero of=/tmp/pair/first.bin bs=1048576 count=1 status=none
+    cp /tmp/pair/first.bin /tmp/pair/second.bin
+    /modelprepper config init --output reference.toml --catalog /tmp/reference-catalog --volume /tmp/reference
+    sed -i "s/^min_free_bytes = .*/min_free_bytes = 262144/" reference.toml tight.toml
+    /modelprepper init --config reference.toml >/dev/null
+    set -- --path /tmp/pair --repo local/pair --revision 0000000000000000000000000000000000000002 --volume primary
+    /modelprepper import --config reference.toml "$@" --json > pair.json
+    id=$(jq -er ".plan_id" pair.json)
+    staging=/bounded/vault/.modelprepper-adopt/$id
+    mkdir -p "$staging"
+    cp /tmp/pair/first.bin "$staging/first.bin"
+    dd if=/dev/zero of=/bounded/fill bs=65536 count=24 status=none
+    available=$(df -B1 --output=avail /bounded | tail -1)
+    test "$available" -ge 1310720
+    test "$available" -lt 2359296
+    /modelprepper import --config tight.toml "$@" --json > resumed.json
+    jq -e ".file_count == 2" resumed.json
+    /modelprepper verify-sealed --config tight.toml --plan "$id" --json > checked.json
+    jq -e ".matched" checked.json
+'
+
 # The original catalog, incoming tree and primary volume are absent here.
 plan=$(jq -er '.plan_id' "$scratch/system/receipt.json")
 "${isolated[@]}" --ro-bind "$binary" /modelprepper --bind "$scratch/recovery" /state \
@@ -62,4 +104,4 @@ plan=$(jq -er '.plan_id' "$scratch/system/receipt.json")
     jq -e ".matched == true and .network_contact == false" verified.json
     test "$(sqlite3 -readonly catalog/catalog.sqlite3 "SELECT count(*) FROM grants;")" = 0
 ' sh "$plan"
-echo "Offline baseline handoff, read-only consumer, catalog backup and backup-only rebuild passed."
+echo "Offline baseline handoff, read-only consumer, catalog backup, full-filesystem retry and backup-only rebuild passed."

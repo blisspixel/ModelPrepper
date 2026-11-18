@@ -189,12 +189,14 @@ pub(crate) fn replica_with(
     let staging = dest_root.join(".modelprepper-adopt").join(&row.plan_id);
     check_path(&published)?;
     check_path(&staging)?;
+    destination.require_identity(&current.vault_id)?;
     if directory_exists(&published)? {
         sweep(&published, &files)?;
         let copy = seal::read_capped(&published.join(BUNDLE_NAME), seal::BUNDLE_CAP)?;
         if copy != bundle_bytes {
             return Err(conflict());
         }
+        destination.require_identity(&current.vault_id)?;
         record_replica(&catalog, &row, volume_label)?;
         return Ok(replica_view(
             &row,
@@ -204,24 +206,15 @@ pub(crate) fn replica_with(
             size,
         ));
     }
-    seal::reservation_fits(
-        destination.available_bytes.ok_or_else(|| {
-            Error::new(
-                "volume_unavailable",
-                "connect the configured destination disk with its original identity",
-            )
-        })?,
+    stage_payload_files(
+        &source,
+        &staging,
+        &files,
         size,
+        destination,
+        &current.vault_id,
         config.storage.min_free_bytes,
     )?;
-    if let Some(parent) = staging.parent() {
-        fs::create_dir_all(parent).map_err(super::io)?;
-        adoption::sync_dir(parent)?;
-    }
-    for file in &files {
-        copy_hashed(&source, &staging, file)?;
-    }
-    discard_unselected(&staging, &files)?;
     seal::write_staged_manifest(&staging.join(BUNDLE_NAME), &bundle_bytes)?;
     adoption::sync_dir(&staging)?;
     if stop == Some(ReplicaStop::BeforeRename) {
@@ -230,6 +223,7 @@ pub(crate) fn replica_with(
             "stopped before the replica was published",
         ));
     }
+    destination.require_identity(&current.vault_id)?;
     if let Some(parent) = published.parent() {
         fs::create_dir_all(parent).map_err(super::io)?;
         adoption::sync_dir(parent)?;
@@ -245,6 +239,7 @@ pub(crate) fn replica_with(
             "stopped before the replica was recorded",
         ));
     }
+    destination.require_identity(&current.vault_id)?;
     record_replica(&catalog, &row, volume_label)?;
     Ok(replica_view(
         &row,
@@ -494,6 +489,7 @@ pub fn import_baseline(
         .iter()
         .try_fold(0_u64, |total, file| total.checked_add(file.size_bytes))
         .ok_or_else(|| Error::new("size_overflow", "baseline size exceeds u64 capacity"))?;
+    volume.require_identity(&current.vault_id)?;
     let root = fs::canonicalize(&volume.path).map_err(super::io)?;
     check_path(&root)?;
     let published = adoption::publish_dir(&root, &repo, revision);
@@ -510,6 +506,7 @@ pub fn import_baseline(
         {
             return Err(conflict());
         }
+        volume.require_identity(&current.vault_id)?;
         record_baseline(&catalog, &plan_id, &repo, revision, volume_label, &files)?;
         return Ok(baseline_view(
             plan_id,
@@ -521,22 +518,17 @@ pub fn import_baseline(
             consistent_with,
         ));
     }
-    let available = volume.available_bytes.ok_or_else(|| {
-        Error::new(
-            "volume_unavailable",
-            "connect the configured destination disk with its original identity",
-        )
-    })?;
-    seal::reservation_fits(available, size, config.storage.min_free_bytes)?;
-    if let Some(parent) = staging.parent() {
-        fs::create_dir_all(parent).map_err(super::io)?;
-        adoption::sync_dir(parent)?;
-    }
-    for file in &files {
-        copy_hashed(&source, &staging, file)?;
-    }
-    discard_unselected(&staging, &files)?;
+    stage_payload_files(
+        &source,
+        &staging,
+        &files,
+        size,
+        volume,
+        &current.vault_id,
+        config.storage.min_free_bytes,
+    )?;
     write_baseline_bundle(&staging, &plan_id, &repo, revision, &files)?;
+    volume.require_identity(&current.vault_id)?;
     if let Some(parent) = published.parent() {
         fs::create_dir_all(parent).map_err(super::io)?;
         adoption::sync_dir(parent)?;
@@ -546,6 +538,7 @@ pub fn import_baseline(
         adoption::sync_dir(parent)?;
     }
     sweep(&published, &files)?;
+    volume.require_identity(&current.vault_id)?;
     record_baseline(&catalog, &plan_id, &repo, revision, volume_label, &files)?;
     Ok(baseline_view(
         plan_id,
@@ -933,7 +926,47 @@ fn discard_unselected(staging: &Path, files: &[ManifestFile]) -> Result<()> {
     Ok(())
 }
 
-fn copy_hashed(from_root: &Path, to_root: &Path, file: &ManifestFile) -> Result<()> {
+fn stage_payload_files(
+    source: &Path,
+    staging: &Path,
+    files: &[ManifestFile],
+    size: u64,
+    volume: &super::VolumeStatus,
+    vault_id: &str,
+    min_free_bytes: u64,
+) -> Result<()> {
+    volume.require_identity(vault_id)?;
+    // For a retry, each missing file is charged below. Matching staged files need no second copy.
+    let new_bytes = if directory_exists(staging)? { 0 } else { size };
+    seal::reservation_fits(
+        fs4::available_space(&volume.path).map_err(super::io)?,
+        new_bytes,
+        min_free_bytes,
+    )?;
+    if let Some(parent) = staging.parent() {
+        fs::create_dir_all(parent).map_err(super::io)?;
+        adoption::sync_dir(parent)?;
+    }
+    for file in files {
+        copy_hashed(source, staging, file, || {
+            volume.require_identity(vault_id)?;
+            seal::reservation_fits(
+                fs4::available_space(&volume.path).map_err(super::io)?,
+                file.size_bytes,
+                min_free_bytes,
+            )
+        })?;
+    }
+    volume.require_identity(vault_id)?;
+    discard_unselected(staging, files)
+}
+
+fn copy_hashed(
+    from_root: &Path,
+    to_root: &Path,
+    file: &ManifestFile,
+    admit_write: impl FnOnce() -> Result<()>,
+) -> Result<()> {
     if hash_file(to_root, file).is_ok() {
         return Ok(());
     }
@@ -945,6 +978,7 @@ fn copy_hashed(from_root: &Path, to_root: &Path, file: &ManifestFile) -> Result<
             format!("{} hash_mismatch", file.path),
         ));
     }
+    admit_write()?;
     let to = crate::verify::local_path(to_root, &file.path);
     let from = crate::verify::local_path(from_root, &file.path);
     if to.exists() {
